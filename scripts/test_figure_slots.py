@@ -200,6 +200,23 @@ def test_contingent_figures(out):
         check('R15b drew, holding a model fixed',
               path is not None and Path(path).exists(), str(path))
 
+        # The two recovered from paper.tex, 2026-09-13.
+        path = FIG.r17_variant_families(accuracy, out, 'ecfp4',
+                                        condition='gaussian')
+        check('R17 drew, or had no pair in the fixture',
+              path is None or Path(path).exists(), str(path))
+
+        reps = sorted(set(summary['rep']))
+        if len(reps) >= 2:
+            path = FIG.r18_representation_against_representation(
+                summary, out, reps[0], reps[1], condition='gaussian')
+            check('R18 drew, one representation against another',
+                  path is None or Path(path).exists(), str(path))
+            check('R18 draws nothing against a representation never run',
+                  FIG.r18_representation_against_representation(
+                      summary, out, reps[0], 'no_such_rep',
+                      condition='gaussian') is None)
+
         check('R6 draws nothing for a condition that was never run',
               FIG.r6_representation_profile(summary, out, 'no_such_condition')
               is None)

@@ -235,6 +235,29 @@ def two_way_eta2(df, response, f1='model', f2='rep'):
 MIN_MODELS_FOR_ANOVA = 5
 
 
+def drop_variant_models(df, where='the ANOVA'):
+    """Take the heteroscedastic variants out of the variance decomposition.
+
+    They are a different model from the plain one beside them -- an extra output
+    column and a different loss -- so including them moves the MODEL term for a
+    reason unrelated to the question the decomposition asks. Settled 2026-09-01
+    in the old script and lost in the move to these modules; every F2 and T3
+    number written before 2026-09-13 included them. Named in
+    figlib_config.ANOVA_MODELS_EXCLUDE, with the reason.
+    """
+    if df is None or not len(df) or 'model' not in df.columns:
+        return df
+    drop = df['model'].isin(C.ANOVA_MODELS_EXCLUDE)
+    if drop.any():
+        names = sorted(set(df.loc[drop, 'model']))
+        print(f'  {where}: {int(drop.sum())} row(s) of {len(df)} set aside -- '
+              f'{", ".join(names)}. They train under a different likelihood '
+              f'from the model they are a variant of, so they would move the '
+              f'model term for a reason that is not the question. They are in '
+              f'every other figure.')
+    return df[~drop]
+
+
 def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
                               where='the ANOVA'):
     """One decomposition per noise condition, with a real sensitivity band.
@@ -257,6 +280,7 @@ def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
     """
     min_cell = C.MIN_CELL_ITERS if min_cell is None else min_cell
     min_models = MIN_MODELS_FOR_ANOVA if min_models is None else min_models
+    df = drop_variant_models(df, where=where)
     rows = []
     for condition, group in df.groupby('condition', dropna=False):
         n_models = int(group['model'].nunique())

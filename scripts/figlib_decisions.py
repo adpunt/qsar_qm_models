@@ -246,7 +246,222 @@ def d1_representation(summary, qm9=None):
 
 
 # ---------------------------------------------------------------------------
-# D2 -- how many noise types does F3 show
+# What is missing, said in terms of the figures and tables that want it
+# ---------------------------------------------------------------------------
+
+def what_is_missing(tables, verdicts, rep):
+    """Every gap, named by the figure or table that cannot be finished without it.
+
+    `d0_coverage` already says which cells are thin. It does NOT say what that
+    costs -- which panel comes out empty, which table loses a column, which
+    decision cannot fire. This walks the slots and asks each one what it wanted
+    and did not get, so the next run answers "what is missing" by itself instead
+    of by someone reading four CSVs (the author, 2026-09-13).
+    """
+    said = {v['id']: v for v in verdicts}
+    rows = []
+
+    def gap(slot, wants, why, fix=''):
+        rows.append({'slot': slot, 'missing': wants, 'consequence': why,
+                     'what_would_fill_it': fix})
+
+    qm9 = tables.get('auc_norm_qm9')
+    assay = tables.get('auc_norm_assay')
+    coverage = tables.get('d0_coverage')
+    excluded = tables.get('excluded_qm9')
+
+    # -- the grid itself -----------------------------------------------------
+    if coverage is not None and len(coverage):
+        thin = coverage[coverage['status'] != 'OK']
+        for dataset, group in thin.groupby('dataset', dropna=False):
+            gap(f'every figure on {dataset}',
+                f'{len(group)} of {len(coverage[coverage["dataset"] == dataset])} '
+                f'model-and-representation-and-condition combinations are not '
+                f'complete',
+                'no headline may be quoted across the whole grid',
+                'the tasks named in d0_coverage.csv with status other than OK')
+
+    # -- cells that ran and were dropped ------------------------------------
+    if excluded is not None and len(excluded) and 'reason' in excluded.columns:
+        for reason, group in excluded.groupby('reason', dropna=False):
+            conditions = sorted(set(group.get('condition', pd.Series(dtype=str))
+                                    .dropna().astype(str)))
+            gap('F4c, F8, T4',
+                f'{len(group)} cell(s) dropped: {reason}',
+                'they print as "excluded" rather than as a number, and they are '
+                'why a condition can look empty in one panel and full in another',
+                f'conditions affected: {", ".join(conditions) or "unrecorded"}')
+
+    # -- conditions too thin for the comparisons ----------------------------
+    not_judged = said.get('D2', {}).get('not_judged') or []
+    if not_judged:
+        gap('F3, D2',
+            f'{len(not_judged)} noise condition(s) share too few cells with the '
+            f'rest of the grid to compare: {", ".join(not_judged)}',
+            'they are neither a main-text panel nor an additional file, because '
+            'nothing can be said about whether their picture repeats another',
+            'the remaining deep-run array elements for those conditions')
+
+    # -- the deep run, condition by condition -------------------------------
+    if qm9 is not None and len(qm9):
+        widest = qm9.groupby('condition')['model'].nunique()
+        full = int(widest.max()) if len(widest) else 0
+        for condition, n_models in widest.items():
+            if full and n_models < full:
+                gap('F4c, R15, T4',
+                    f'{condition}: {n_models} of {full} models have a robustness '
+                    f'number',
+                    'the column is mostly grey and cannot rank the roster',
+                    'the deep-run tasks for that condition')
+
+    # -- the uncertainty side -----------------------------------------------
+    for name, key, why in (
+            ('F6, T6', 'unc_q5', 'the decomposition figure and the uncertainty '
+                                 'table have nothing to draw'),
+            ('T6, D7', 'd7_q4', 'whether uncertainty finds the corrupted labels '
+                                'cannot be answered')):
+        if tables.get(key) is None or not len(tables.get(key, [])):
+            gap(name, f'{key} is empty', why,
+                'the uncertainty runs for these conditions')
+
+    # -- the assay side ------------------------------------------------------
+    if assay is not None and len(assay):
+        for dataset, group in assay.groupby('dataset', dropna=False):
+            here = group[group['rep'] == rep] if rep else group
+            if not len(here):
+                gap('F8, T4, T7', f'{dataset} has nothing at {rep}',
+                    'that dataset drops out of every table held at the primary '
+                    'representation',
+                    f'the {dataset} tasks at {rep}')
+    else:
+        gap('F8, T4, T7, D9', 'no assay robustness at all',
+            'the transfer question cannot be asked',
+            'the KIRBy validation runs')
+
+    table = pd.DataFrame(rows, columns=['slot', 'missing', 'consequence',
+                                        'what_would_fill_it'])
+    return table
+
+
+# ---------------------------------------------------------------------------
+# Base model against its own variant -- evidence, not a decision
+# ---------------------------------------------------------------------------
+
+#: Each base model and the variant of it that predicts a per-molecule noise
+#: term. The variant trains under a heteroscedastic likelihood (`--loss
+#: heteroscedastic`, `--loss het_gp`), which weights each molecule's residual by
+#: that molecule's predicted variance, so it is a DIFFERENT FIT and not the same
+#: fit with a variance report attached.
+VARIANT_PAIRS = [
+    ('dnn_bnn_full', 'dnn_bnn_full_mve'),
+    ('mlp_bnn_full', 'mlp_bnn_full_mve'),
+    ('dnn_vbll', 'dnn_vbll_hetero'),
+    ('mlp_vbll', 'mlp_vbll_hetero'),
+    ('gauche_rbf', 'het_gp_rbf'),
+    ('rf', 'qrf'),
+]
+
+
+def base_against_variant(summary, dataset='qm9'):
+    """Is the variant worth carrying through every cross-model comparison?
+
+    PAIRED ON THE REPRESENTATION AND THE NOISE CONDITION, never averaged over
+    them. The mean is reported beside the win count, and the win count is the
+    thing to read: "the variant wins 0 of 18" is a statement about the variant,
+    "the variant is 0.06 lower on average" is a statement about whichever
+    representations happened to run.
+
+    Which member of each pair enters the cross-model figures is the author's
+    call; this lays out the evidence for it.
+    """
+    if summary is None or not len(summary):
+        return {}, _verdict('V', 'Base model or its variant?', False,
+                            'no robustness numbers yet')
+    frame = summary[summary['dataset'] == dataset]
+    rows = []
+    for base, variant in VARIANT_PAIRS:
+        a = frame[frame['model'] == base].set_index(['rep', 'condition'])
+        b = frame[frame['model'] == variant].set_index(['rep', 'condition'])
+        shared = a.index.intersection(b.index)
+        if not len(shared):
+            continue
+        a, b = a.loc[shared], b.loc[shared]
+        for metric in ('baseline_r2', 'auc_norm'):
+            if metric not in a.columns:
+                continue
+            x = a[metric].astype(float)
+            y = b[metric].astype(float)
+            try:
+                _, p_value = (stats.wilcoxon(y, x) if len(shared) >= 6
+                              and float((y - x).abs().sum()) > 0
+                              else (np.nan, np.nan))
+            except ValueError:
+                p_value = np.nan
+            rows.append({
+                'dataset': dataset, 'base': base, 'variant': variant,
+                'metric': metric, 'n_paired_cells': int(len(shared)),
+                'n_representations': int(a.index.get_level_values(0).nunique()),
+                'n_conditions': int(a.index.get_level_values(1).nunique()),
+                'base_mean': float(x.mean()), 'variant_mean': float(y.mean()),
+                'variant_wins': int((y > x).sum()),
+                'median_difference': float((y - x).median()),
+                'p_value': float(p_value),
+            })
+    table = pd.DataFrame(rows)
+    if not len(table):
+        return {}, _verdict('V', 'Base model or its variant?', False,
+                            'no pair has cells on both sides')
+
+    keep, notes = [], []
+    for (base, variant), group in table.groupby(['base', 'variant'],
+                                                sort=False):
+        by = group.set_index('metric')
+        n = int(group['n_paired_cells'].iloc[0])
+        wins_clean = int(by.loc['baseline_r2', 'variant_wins']) \
+            if 'baseline_r2' in by.index else 0
+        wins_robust = int(by.loc['auc_norm', 'variant_wins']) \
+            if 'auc_norm' in by.index else 0
+        # TAKING THE BEST OF THE TWO IS WRONG HERE. This is a robustness paper,
+        # and a variant that buys clean accuracy by giving up noise tolerance is
+        # the most interesting case in the set rather than a winner: VBLL-beta's
+        # heteroscedastic head won clean R2 on 18 of 18 cells and lost AUC_norm
+        # on 18 of 18. Calling that "the variant" would put the wrong model in
+        # every cross-model figure. The two metrics are judged separately and a
+        # split is named as a split.
+        clearly = 0.7 * n
+        won_clean = wins_clean >= clearly
+        lost_clean = (n - wins_clean) >= clearly
+        won_robust = wins_robust >= clearly
+        lost_robust = (n - wins_robust) >= clearly
+        if won_robust and not lost_clean:
+            verdict = 'the variant'
+        elif lost_robust and won_clean:
+            verdict = 'SPLIT: the variant buys clean accuracy and pays for it in robustness'
+        elif lost_robust or lost_clean:
+            verdict = 'the base'
+        elif won_clean:
+            verdict = 'the variant on accuracy alone; robustness is a wash'
+        else:
+            verdict = 'neither clearly'
+        keep.append({'base': base, 'variant': variant, 'n_paired_cells': n,
+                     'variant_wins_clean_r2': wins_clean,
+                     'variant_wins_auc_norm': wins_robust,
+                     'clearer_choice': verdict})
+        notes.append(
+            f'{C.model_label(base)} against {C.model_label(variant)}: the '
+            f'variant wins clean R2 in {wins_clean} of {n} paired cells and '
+            f'robustness in {wins_robust} of {n} -- {verdict}')
+    says = ('Paired on representation and noise condition, never averaged over '
+            'them. ' + '; '.join(notes) + '. Which member of each pair enters '
+            'the cross-model figures is the author\'s call; this is the '
+            'evidence for it, not the answer.')
+    return ({'base_against_variant': table,
+             'base_against_variant_summary': pd.DataFrame(keep)},
+            _verdict('V', 'Base model or its variant?', fired=False, says=says))
+
+
+# ---------------------------------------------------------------------------
+# D2 -- how many noise conditions does F3 show
 # ---------------------------------------------------------------------------
 
 #: Two grids "agree" when they order the cells the same way AND differ by less
@@ -275,7 +490,7 @@ def d2_grid_similarity(summary, per_replicate=None):
     grid is a main-text panel and F3 becomes the largest figure in the paper.
     """
     if summary is None or not len(summary):
-        return {}, _verdict('D2', 'How many noise types does F3 show?', False,
+        return {}, _verdict('D2', 'How many noise conditions does F3 show?', False,
                             'no robustness numbers yet')
     usable = G.ranking_conditions(sorted(summary['condition'].dropna().unique()))
     wobble = (float(per_replicate.groupby(
@@ -365,14 +580,14 @@ def d2_grid_similarity(summary, per_replicate=None):
                f'deep run fills them in.'
                if unjudged else ''))
     return ({'d2_grid_similarity': table},
-            _verdict('D2', 'How many noise types does F3 show, and which?',
+            _verdict('D2', 'How many noise conditions does F3 show, and which?',
                      fired=bool(supplementary), says=says,
                      main_text=main_text, supplementary=supplementary,
                      not_judged=unjudged, replicate_wobble=wobble))
 
 
 # ---------------------------------------------------------------------------
-# D3 -- do the noise types separate the models
+# D3 -- do the noise conditions separate the models
 # ---------------------------------------------------------------------------
 
 def d3_condition_separation(per_replicate, summary, rep):
@@ -384,7 +599,7 @@ def d3_condition_separation(per_replicate, summary, rep):
     a two-sided signed-rank test on five pairs cannot go below p = 0.0625.
     """
     if summary is None or not len(summary):
-        return {}, _verdict('D3', 'Do the noise types separate the models?',
+        return {}, _verdict('D3', 'Do the noise conditions separate the models?',
                             False, 'no robustness numbers yet')
     one = summary[summary['rep'] == rep]
     usable = G.ranking_conditions(sorted(one['condition'].dropna().unique()))
@@ -432,7 +647,7 @@ def d3_condition_separation(per_replicate, summary, rep):
                'finding in its own right (row 8).'))
     return ({'d3_condition_pairs': paired, 'd3_condition_spread': spread,
              'd3_kendall_w': pd.DataFrame([kendall_row])},
-            _verdict('D3', 'Do the noise types separate the models?',
+            _verdict('D3', 'Do the noise conditions separate the models?',
                      fired=fired, says=says, n_significant=n_sig,
                      kendall_w=kendall['kendall_w']))
 

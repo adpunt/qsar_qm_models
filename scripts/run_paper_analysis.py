@@ -32,7 +32,7 @@ over:
   * it averaged the ten replicates before integrating the retention curve, so no
     robustness number had a spread -- and it separately computed the SAME metric
     per replicate elsewhere, under the same name;
-  * it averaged over representation and noise type together to build the
+  * it averaged over representation and noise condition together to build the
     cross-dataset figure, up to 36 values per bar;
   * it ranked models on representation-averaged means for Kendall's W;
   * it pooled every noise level and every replicate into the uncertainty table's
@@ -128,7 +128,7 @@ def parse_args(argv=None):
                         'out the evidence and this flag applies the answer')
     p.add_argument('--focus-model', default=None,
                    help='the model held constant on F4b, the chart of one '
-                        'model across every noise type. Default: the most '
+                        'model across every noise condition. Default: the most '
                         'robust model at the primary representation under the '
                         'reference condition, which is a reading off the data '
                         'and not a recommendation. RF and QRF are the obvious '
@@ -327,6 +327,30 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
     collect(D.d10_probabilistic(qm9_per))
+
+    # Evidence for a choice the author makes, not a decision the data makes:
+    # whether each base model's heteroscedastic variant is worth carrying
+    # through every cross-model figure.
+    collect(D.base_against_variant(qm9_summary))
+
+    # WHAT IS MISSING, said in terms of the slots that wanted it. d0_coverage
+    # says which cells are thin; this says what that costs -- which panel comes
+    # out grey, which table loses a column, which decision cannot fire. The
+    # author asked for the answer to live in the script rather than in a reply
+    # (2026-09-13), so the next run answers it by itself.
+    gaps = D.what_is_missing(tables, verdicts, primary)
+    if len(gaps):
+        tables['what_is_missing'] = gaps
+        print(f'\n  WHAT IS MISSING -- {len(gaps)} gap(s), each named by the '
+              f'figure or table that wanted it. Full detail in '
+              f'what_is_missing.csv:')
+        for _, row in gaps.iterrows():
+            print(f'    {row["slot"]}: {row["missing"]}')
+            print(f'        -> {row["consequence"]}')
+    else:
+        print('\n  WHAT IS MISSING: nothing -- every slot has the data it '
+              'asked for.')
+
     # Carried for the figures, not written out: the leading underscore keeps
     # them out of the CSV sweep in write_report.
     tables['_qm9_accuracy'] = qm9
@@ -392,8 +416,7 @@ def draw_figures(args, tables, verdicts):
 
     drawn = [d for d in drawn if d]
     FIG.write_captions(out)
-    waiting = [n for n, k in (('F6', 'unc_q5'), ('F7', '_unc_retention'))
-               if tables.get(k) is None]
+    waiting = [n for n, k in (('F6', 'unc_q5'),) if tables.get(k) is None]
     print(f'  {len(drawn)} figure(s) and captions.md.'
           + (f' {" and ".join(waiting)} wait on the uncertainty runs.'
              if waiting else ''))
@@ -419,6 +442,21 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
                 qm9, out, condition,
                 outliers=tables.get('d5_representation_outlier')))
 
+    # Each model against its own variant, and one representation against
+    # another. Both recovered from paper.tex on 2026-09-13 -- the submitted
+    # paper had them and this figure set had lost them. Neither is contingent:
+    # the variant pairs cannot be read off a nineteen-row heatmap at all, and
+    # the representation scatter is the evidence behind 14.9 item 5.
+    if accuracy is not None and len(accuracy) and rep:
+        drawn.append(FIG.r17_variant_families(accuracy, out, rep,
+                                              condition=first))
+    if qm9 is not None and len(qm9) and rep:
+        others = [r for r in C.REP_LABELS
+                  if r in set(qm9['rep']) and r != rep]
+        for other in others[:2]:
+            drawn.append(FIG.r18_representation_against_representation(
+                qm9, out, rep, other, condition=first))
+
     # row 9, fired by D9: the two sides disagree on the ranking, so T7 is
     # promoted from a table to a figure.
     if said.get('D9', {}).get('fired') and tables.get('d9_rank_transfer') is not None:
@@ -434,7 +472,7 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
                            FIG.sentence_auc_above_one(
                                tables['_qm9_per_replicate']))
 
-    # row 15: the rank ladder, one chart per noise type, and the mirror holding
+    # row 15: the rank ladder, one chart per noise condition, and the mirror holding
     # a model fixed. Not contingent on a decision -- 5.4a asks for it outright.
     if accuracy is not None and len(accuracy) and rep:
         for condition in (conditions or [first]):
@@ -487,11 +525,21 @@ def _most_robust_model(summary, rep, condition):
 
 
 def _draw_uncertainty(tables, said, out, rep, conditions):
-    """F6 and F7, which need the per-molecule uncertainty rows.
+    """F6 only. F7 IS DROPPED -- the author's call, 2026-09-13.
 
-    F7 is one of three options and D7 picks which from the numbers. Drawing all
-    three would put the decision back in the reader's hands, which is what 14.6
-    rows 1 to 3 exist to prevent.
+    F7 was a lift curve: molecules sorted by predicted uncertainty, worst first,
+    against how many of the corrupted labels had been found by that point. Three
+    problems, and the author named all three. Its bottom axis described a person
+    auditing a dataset, which is not what happened. NGBoost lay on the diagonal
+    past 60% because its model half is ONE number per fit, so past a point it
+    ranks nothing and the curve becomes the random line by construction -- a
+    property of NGBoost, not a result about noise. And the same finding stated
+    as an ordinary statistic is q4's Spearman correlation between predicted
+    uncertainty and the size of the injected noise, against its permutation
+    band, which T6 already carries.
+
+    D7 still runs and still decides. What it decides is now which sentence the
+    Results carries, not which of three curves is drawn.
     """
     drawn = []
     q5 = tables.get('unc_q5')
@@ -504,16 +552,10 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
             if got:
                 drawn.append(got)
                 break          # one condition is the headline; the rest are T6
-    option = said.get('D7', {}).get('option')
-    if option in ('7A', '7B', '7C'):
-        drawn.append(FIG.f7_uncertainty(
-            option, out, rep, first,
-            retention=tables.get('_unc_retention'),
-            enrichment=tables.get('_unc_enrichment'),
-            q4=tables.get('d7_q4')))
-    elif tables.get('_unc_retention') is not None:
-        print('  D7 is undecided, so no F7 is drawn. The three options are in '
-              'RERUN_PLAN.md 14.5 F7 and d7_q4.csv carries the numbers.')
+    said_d7 = said.get('D7', {})
+    if said_d7.get('fired'):
+        _note_for_the_text(out, 'can uncertainty find the corrupted labels',
+                           said_d7.get('says', ''))
     return drawn
 
 

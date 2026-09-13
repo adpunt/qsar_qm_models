@@ -19433,3 +19433,123 @@ The two sentences land in `results/decisions/figures/notes_for_the_text.md`, and
 - **One representation against another** (`fig_interaction.png` panel b): AUC_norm on PDV against
   AUC_norm on ECFP4, one point per model, with a Spearman correlation. R16 is NOT this — R16 is
   clean accuracy against robustness. This is the compact form of the §14.9 item 5 evidence.
+
+#### 14.11g BASE AGAINST VARIANT, AND THE ANOVA EXCLUSION THAT WAS LOST — 2026-09-13
+
+**The variant is a different fit, not a variance report bolted on.** Read off
+`slurm_scripts_qm9_rerun/generate_scripts.py`: `dnn_bnn_full_mve` is
+`-m dnn --bayesian-transformation full --loss heteroscedastic`, and the comment there says the
+variance head "adds one output column and CHANGES THE LOSS". A heteroscedastic likelihood weights
+each molecule's residual by that molecule's predicted variance, so the predictions differ. Same for
+`--loss het_gp` on the Gaussian process.
+
+**Paired evidence, from `auc_norm_qm9.csv` of 9 September.** Paired on the same representation and
+the same noise condition, never averaged over them. `base_against_variant` in
+`figlib_decisions.py` now produces this every run, into `base_against_variant.csv` and
+`base_against_variant_summary.csv`.
+
+| pair | paired cells | variant wins clean R² | variant wins AUC_norm | reading |
+|---|---|---|---|---|
+| BNN-α | 18 | 4 | 9 | the base |
+| BNN-β | 16 | **16** | 13 | the variant |
+| VBLL-α | 18 | 9 | **0** | the base |
+| VBLL-β | 18 | **18** | **0** | **SPLIT** — buys clean accuracy, pays in robustness |
+| GP (RBF) | 18 | 2 | 3 | the base |
+| RF / QRF | 18 | 9 | 5 | the base |
+
+Two findings worth a paragraph rather than nineteen heatmap rows:
+
+- **VBLL-β's heteroscedastic head wins clean accuracy on 18 of 18 cells (+0.037 R²) and loses
+  robustness on 18 of 18 (−0.056 AUC_norm).** As clean a trade as this study has produced. VBLL-α
+  loses robustness 0/18 without the accuracy gain. **Why the head costs robustness is UNTESTED** —
+  the obvious story, that letting a model call noise "observation noise" should help, predicts the
+  opposite of the measurement.
+- **The same head helps on BNN-β (16/16 clean, 13/16 robust) and not on BNN-α.** An architecture
+  effect, and the reason both architectures are in the study.
+
+The verdict rule judges the two metrics SEPARATELY and names a split as a split. Taking the better
+of the two would have put VBLL-β's variant into every cross-model figure of a robustness paper on
+the strength of an accuracy win it pays for in robustness.
+
+**The ANOVA exclusion was settled on 2026-09-01 and these modules lost it.**
+`generate_paper_figures_v2.ANOVA_MODELS_EXCLUDE` holds the five heteroscedastic variants, with the
+reason: they are a different model from the plain one beside them, so they must not enter a
+decomposition asking how much of the ACCURACY spread is the model. `figlib_metrics` applied no
+exclusion at all, so **every F2 and T3 number written before today included them.** Now in
+`figlib_config.ANOVA_MODELS_EXCLUDE` and applied by `figlib_metrics.drop_variant_models`, which
+prints what it set aside.
+
+**NOT carried over, deliberately:** v2 also dropped `sns` from the ANOVA as "redundant with ecfp4,
+rho = 0.90", and `qrf`, `gauche`, `gauche_rbf`. A representation this study is measuring is not
+dropped on a correlation, and §0 forbids pruning an axis on a theory. Those four are the author's to
+reinstate if they were meant.
+
+#### 14.11h HOW MANY REPLICATES THE RESIDUAL NEEDS — 2026-09-13
+
+The author asked whether the residual belongs in F2 at ten replicates. The binding number is not
+replicates per cell.
+
+**The residual is an effect size, not a confidence interval.** It is the share of the spread in
+AUC_norm that is seed-to-seed at fixed model, representation, condition and level. It is estimated
+from `cells x (replicates - 1)` degrees of freedom pooled across the whole decomposition, not from
+ten numbers.
+
+Off `anova_eta2.csv`, relative standard error on a variance is about `sqrt(2/df)`:
+
+| condition (robustness) | rows | cells | residual df | relative SE on the residual |
+|---|---|---|---|---|
+| gaussian | 1081 | 114 | 967 | 4.5% |
+| grouped_wider | 975 | 114 | 861 | 4.8% |
+| grouped_shifted | 959 | 114 | 845 | 4.9% |
+| student_t_nu5 | 90 | 9 | 81 | 15.7% |
+| laplace / outlier_p10 | 60 | 6 | 54 | 19.2% |
+| censoring | 50 | 10 | 40 | 22.4% |
+
+So on the three conditions that carry the paper, a residual of 35.1% is determined to about ±1.6
+percentage points and is quotable. On the deep conditions it is not, and they should not carry a
+residual claim until their arrays fill in — which the gap report now says out loud.
+
+**It belongs in the figure.** Without it a reader takes the leftover to be unexplained STRUCTURE
+rather than nothing, and every other share reads as explaining more than it does. It is also
+carrying a finding: under censoring the residual is 97.6% and the model term 2.4%, so nothing about
+the models is visible there at all. And the author's own reading is the right one — model at 42.3%
+against a residual of 35.1% under Gaussian noise is a much weaker statement than "the model explains
+42%", and saying so is the honest version.
+
+**The F2 whiskers are NOT confidence intervals** and must not be described as such. They are a
+leave-one-replicate-out jackknife: how much the answer moves when any one replicate is dropped. The
+caption should say that in those words.
+
+**The assay datasets have no residual at all** — five scaffold folds are a partition of one dataset,
+not repeats of an experiment — so no F8 or T4 number carries one, and the Limitations paragraph
+already says so.
+
+#### 14.11i WHAT IS MISSING NOW ANSWERS ITSELF — 2026-09-13
+
+`figlib_decisions.what_is_missing` walks the slots and asks each what it wanted and did not get,
+writing `what_is_missing.csv` and printing a summary every run. `d0_coverage` says which cells are
+thin; this says what that costs — which panel comes out grey, which table loses a column, which
+decision cannot fire. The author asked for the answer to live in the script rather than in a reply.
+
+#### 14.11j TWO FIGURES RECOVERED FROM paper.tex — 2026-09-13
+
+- **R17, `r17_variant_families`** — one panel per base-and-variant pair, R² against the noise level,
+  solid line the base and dashed the variant, band the interquartile range across replicates. This
+  was `fig_nn_family_comparison.png` in the submitted paper. It is where the `var. head` and `het.`
+  models belong once they leave the main line charts: against the model they are a variant OF, which
+  is the only comparison that makes them mean anything.
+- **R18, `r18_representation_against_representation`** — AUC_norm on one representation against
+  AUC_norm on another, one point per model, diagonal for equality, Spearman correlation. This was
+  `fig_interaction.png` panel b. **It is not R16**, which is clean accuracy against robustness. It
+  asks how far a model's robustness carries from one representation to the next, which is the
+  compact form of the evidence behind §14.9 item 5.
+
+Both are drawn unconditionally when the data exists. Neither averages over representations: R18's
+two axes are each one named representation and the points are paired on the model.
+
+**F7 IS DROPPED** (the author, 2026-09-13). D7 still runs and still decides; what it decides is now
+which sentence the Results carries, written to `notes_for_the_text.md`. T6 carries the finding as
+q4's correlation against its permutation band. `f7_uncertainty` and its three option builders stay
+in `figlib_figures.py` unused rather than being deleted.
+
+**The word is *noise condition*.** Applied across the modules.

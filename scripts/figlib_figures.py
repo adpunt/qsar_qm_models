@@ -8,7 +8,7 @@ carries a factor the figure has not accounted for -- and gets back the title
 text, generated from the data rather than typed, so a caption cannot drift away
 from the numbers behind it.
 
-  F1  what each noise type does to the labels          (Methods)
+  F1  what each noise condition does to the labels          (Methods)
   F2  model, representation, or their pairing          SHAPE D
   F3  WHICH model and WHICH representation             SHAPE C
   F4  what label noise costs you                       SHAPE A + SHAPE C
@@ -359,6 +359,7 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
     S.shared_legend(fig, axes[0], ncol=4)
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
+    n_reps_less = max(n_reps - 1, 0)
     empty = sorted(set(conditions) - set(
         long[long['outcome'] == outcomes[-1]]['condition']))
     missing_note = (
@@ -371,10 +372,16 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         model, the choice of representation, the pairing of the two, and what is
         left over, on {C.dataset_label(dataset)}. Bars are the share of variance
         from a two-way analysis with sequential sums of squares; the four shares
-        sum to 100 per cent. Whiskers span the {n_reps} replicates -- the
-        decomposition is repeated on each one separately, which no previous
-        version of this figure could do, because the robustness metric was
-        computed on a curve that had already been averaged over them.{missing_note}""")
+        sum to 100 per cent. The whiskers are NOT confidence intervals: they
+        are a leave-one-out jackknife over the {n_reps} replicates -- drop one
+        replicate, decompose the remaining {n_reps_less}, repeat -- so they say
+        how much the answer depends on any one replicate, not how precisely the
+        share is known. The leftover share is the variation between replicates
+        of the identical configuration: same model, same representation, same
+        noise condition, same level, different seed. It is reported because
+        without it a reader takes the leftover to be structure rather than
+        nothing, and every other share then reads as explaining more than it
+        does.{missing_note}""")
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
 
 
@@ -469,9 +476,9 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     by side looking like two views of one thing when they hold different things
     fixed.
 
-    F4a  accuracy against noise level, one line per MODEL, at one noise type.
-    F4b  accuracy against noise level, one line per NOISE TYPE, for one model.
-    F4c  the grid: models down the side, noise types across, robustness on each
+    F4a  accuracy against noise level, one line per MODEL, at one noise condition.
+    F4b  accuracy against noise level, one line per NOISE CONDITION, for one model.
+    F4c  the grid: models down the side, noise conditions across, robustness on each
          square, with clean accuracy as an uncoloured first column.
 
     Censoring is on none of them: its bottom axis is a fraction of labels
@@ -495,7 +502,7 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     level = C.reporting_level(dataset)
     written = []
 
-    # ---- F4a: the models, under one noise type ----------------------------
+    # ---- F4a: the models, under one noise condition ----------------------------
     curves = (acc[acc['model'].isin(keep)
                   & (acc['condition'] == reference_condition)]
               .groupby(['model', 'sigma'], as_index=False)
@@ -527,7 +534,7 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         paper reports at.""")
     written.append(S.save(fig, Path(output_dir) / 'F4a_models_under_noise.png'))
 
-    # ---- F4b: one model, across every noise type ---------------------------
+    # ---- F4b: one model, across every noise condition ---------------------------
     if focus_model:
         by_condition = (acc[acc['model'] == focus_model]
                         .groupby(['condition', 'sigma'], as_index=False)
@@ -543,7 +550,7 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                      reference_label='reported at', legend=False)
         ax.set_ylabel(G.metric_label('r2'))
         ax.set_xlabel(LEVEL_AXIS)
-        ax.set_title(f'{C.model_label(focus_model)} across noise types — '
+        ax.set_title(f'{C.model_label(focus_model)} across noise conditions — '
                      f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
                      fontweight='bold', fontsize=9, loc='left')
         ax.spines[['top', 'right']].set_visible(False)
@@ -551,16 +558,16 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         caption('F4b', f"""
             Whether the KIND of noise matters or only the amount, for
             {C.model_label(focus_model)} on {C.dataset_label(dataset)} at
-            {C.rep_label(rep)}. One line per noise type, same axes as the
+            {C.rep_label(rep)}. One line per noise condition, same axes as the
             previous figure. Lines that lie on top of each other mean this model
-            cannot tell the noise types apart at a matched dose; lines that
+            cannot tell the noise conditions apart at a matched dose; lines that
             separate mean the shape of the noise costs something beyond its
             size. Censoring is absent: its level is a fraction of labels clipped
             rather than a fraction of the label spread, so it does not share
             this bottom axis.""")
         written.append(S.save(
             fig, Path(output_dir) /
-            f'F4b_{focus_model}_across_noise_types.png'))
+            f'F4b_{focus_model}_across_noise_conditions.png'))
 
     # ---- F4c: the grid -----------------------------------------------------
     baseline = (summ.groupby('model', as_index=False)['baseline_r2'].median()
@@ -582,11 +589,11 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
     bar.set_label(G.metric_label('auc_norm'), fontsize=8)
     bar.ax.tick_params(labelsize=7)
-    ax.set_title(f'Robustness by model and noise type — '
+    ax.set_title(f'Robustness by model and noise condition — '
                  f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
                  fontweight='bold', fontsize=9, loc='left')
     caption('F4c', f"""
-        Robustness ({G.metric_label('auc_norm')}) by model and noise type on
+        Robustness ({G.metric_label('auc_norm')}) by model and noise condition on
         {C.dataset_label(dataset)} at {C.rep_label(rep)}, models ordered by
         robustness under {C.condition_label(reference_condition)}. The first
         column is clean accuracy and is deliberately uncoloured: it is the
@@ -706,7 +713,7 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
 
 def r15_rank_against_level(accuracy, output_dir, rep, condition,
                            dataset='qm9', baseline_gate=None):
-    """Hold one noise type and one representation. Plot every model. The bottom
+    """Hold one noise condition and one representation. Plot every model. The bottom
     axis is the noise level; the side axis is where that model ranks against the
     others. Each model is one line, and the lines cross as the noise rises.
 
@@ -1321,6 +1328,193 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
 
 
 # ---------------------------------------------------------------------------
+# R17 -- each model against its own variant (recovered from paper.tex,
+# fig_nn_family_comparison.png, 2026-09-13)
+# ---------------------------------------------------------------------------
+
+#: Each base model and the variant that adds a per-molecule noise term. The
+#: variant is NOT the same fit with a variance report attached: it trains under
+#: a heteroscedastic likelihood (`--loss heteroscedastic`, `--loss het_gp` in
+#: slurm_scripts_qm9_rerun/generate_scripts.py), which weights each molecule's
+#: residual by that molecule's predicted variance, so the predictions differ.
+#: This is the only place in the paper where the two are put side by side, and
+#: the reason it exists: the pairs cannot be read off a nineteen-row heatmap.
+VARIANT_PAIRS = [
+    ('dnn_bnn_full', 'dnn_bnn_full_mve'),
+    ('mlp_bnn_full', 'mlp_bnn_full_mve'),
+    ('dnn_vbll', 'dnn_vbll_hetero'),
+    ('mlp_vbll', 'mlp_vbll_hetero'),
+    ('gauche_rbf', 'het_gp_rbf'),
+    ('rf', 'qrf'),
+]
+
+
+def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
+                         condition='gaussian', pairs=None):
+    """One panel per pair: the base model and its variant on the same axes.
+
+    The submitted paper had this as fig_nn_family_comparison.png and this figure
+    set lost it. It is where the `var. head` and `het.` models belong: against
+    the model they are a variant OF, which is the only comparison that makes
+    them mean anything. Nineteen rows of a heatmap cannot show it, because the
+    pair is not adjacent and the difference is smaller than the spread between
+    families.
+    """
+    frame = accuracy[(accuracy['dataset'] == dataset)
+                     & (accuracy['rep'] == rep)
+                     & (accuracy['condition'] == condition)]
+    if not len(frame):
+        return None
+    have = set(frame['model'].unique())
+    use = [(a, b) for a, b in (pairs or VARIANT_PAIRS)
+           if a in have and b in have]
+    if not use:
+        return None
+    G.declare(frame, 'R17',
+              fixed={'dataset': dataset, 'rep': rep, 'condition': condition},
+              varies=('model', 'sigma'), aggregates=('replicate',))
+
+    ncols = min(len(use), 3)
+    nrows = int(np.ceil(len(use) / ncols))
+    fig, axes = _fig(height=2.6 * nrows + 1.0, nrows=nrows, ncols=ncols,
+                     sharex=True)
+    axes = np.atleast_1d(axes).ravel()
+    verdicts = []
+    for index, ((base, variant), ax) in enumerate(zip(use, axes)):
+        for model, style in ((base, '-'), (variant, '--')):
+            one = (frame[frame['model'] == model]
+                   .groupby('sigma', as_index=False)
+                   .agg(r2=('r2', 'median'),
+                        lo=('r2', lambda v: float(v.quantile(0.25))),
+                        hi=('r2', lambda v: float(v.quantile(0.75))))
+                   .sort_values('sigma'))
+            if not len(one):
+                continue
+            colour = C.model_color(model)
+            ax.plot(one['sigma'], one['r2'], linestyle=style, marker='o',
+                    markersize=3.5, linewidth=1.5, color=colour,
+                    label=C.model_label(model))
+            ax.fill_between(one['sigma'], one['lo'], one['hi'], color=colour,
+                            alpha=0.15, linewidth=0)
+        ax.legend(loc='lower left', fontsize=6.5, frameon=False,
+                  handlelength=1.6)
+        ax.spines[['top', 'right']].set_visible(False)
+        S.title(ax, 'abcdefgh'[index], C.model_label(base))
+        if index % ncols == 0:
+            ax.set_ylabel(G.metric_label('r2'))
+        # What the pair did, in the caption rather than on the panel.
+        clean = frame[frame['sigma'] == frame['sigma'].min()]
+        worst = frame[frame['sigma'] == frame['sigma'].max()]
+        def _at(f, m):
+            v = f[f['model'] == m]['r2']
+            return float(v.median()) if len(v) else float('nan')
+        verdicts.append(
+            f'({"abcdefgh"[index]}) {C.model_label(base)} '
+            f'{_at(clean, base):.2f} clean and {_at(worst, base):.2f} at the '
+            f'top of the ladder, against {C.model_label(variant)} '
+            f'{_at(clean, variant):.2f} and {_at(worst, variant):.2f}')
+    for ax in axes[len(use):]:
+        ax.set_visible(False)
+    for ax in axes[len(use) - ncols:len(use)]:
+        ax.set_xlabel(LEVEL_AXIS)
+        ax.tick_params(labelbottom=True)
+    fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
+                 f'{C.condition_label(condition)}',
+                 fontsize=9, fontweight='bold', x=0.01, ha='left')
+
+    caption('R17', f"""
+        Each model against the variant of itself that predicts a per-molecule
+        noise term, on {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}. One panel per pair; the solid line is
+        the base model and the dashed line its variant; the band is the
+        interquartile range across the ten replicates. The variant is not the
+        same fit with a variance report attached -- it trains under a
+        heteroscedastic likelihood, which weights each molecule's residual by
+        that molecule's predicted variance, so its predictions differ. Read at
+        the two ends: {'; '.join(verdicts)}.""")
+    return S.save(fig, Path(output_dir) /
+                  f'R17_variant_families_{rep}_{condition}.png')
+
+
+# ---------------------------------------------------------------------------
+# R18 -- one representation against another (recovered from paper.tex,
+# fig_interaction.png panel b, 2026-09-13)
+# ---------------------------------------------------------------------------
+
+def r18_representation_against_representation(summary, output_dir, a, b,
+                                              dataset='qm9',
+                                              condition='gaussian',
+                                              value='auc_norm'):
+    """Robustness on one representation against robustness on another.
+
+    One point per model, both axes the same quantity, a diagonal for equality
+    and a Spearman correlation. This is NOT R16 -- R16 is clean accuracy against
+    robustness, one representation at a time. This asks whether a model's
+    robustness carries from one representation to the next, which is the
+    compact form of the evidence behind the open choice of which representation
+    the main-text tables hold fixed (RERUN_PLAN.md 14.9 item 5).
+
+    NOTHING IS AVERAGED OVER REPRESENTATIONS here: each axis is one named
+    representation and the pairing is on the model.
+    """
+    frame = summary[(summary['dataset'] == dataset)
+                    & (summary['condition'] == condition)]
+    left = frame[frame['rep'] == a].set_index('model')[value]
+    right = frame[frame['rep'] == b].set_index('model')[value]
+    shared = left.index.intersection(right.index)
+    if len(shared) < 4:
+        return None
+    x, y = left.loc[shared].astype(float), right.loc[shared].astype(float)
+    G.declare(frame[frame['rep'].isin([a, b])], 'R18',
+              fixed={'dataset': dataset, 'condition': condition},
+              varies=('model', 'rep'))
+    rho, p_value = stats.spearmanr(x, y)
+
+    fig, ax = _fig(height=4.2)
+    for model in shared:
+        ax.scatter(float(left[model]), float(right[model]), s=60, alpha=0.85,
+                   marker=C.model_marker(model), color=C.model_color(model),
+                   linewidth=0.4, edgecolor='white', zorder=3,
+                   label=C.model_label(model))
+    lo = float(min(x.min(), y.min())) - 0.02
+    hi = float(max(x.max(), y.max())) + 0.02
+    ax.plot([lo, hi], [lo, hi], color='#777777', linestyle=':', linewidth=1.0,
+            zorder=1)
+    ax.annotate('equal on both', xy=(hi, hi), xytext=(-4, 4),
+                textcoords='offset points', ha='right', fontsize=6.5,
+                color='#777777')
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_xlabel(f'{G.metric_label(value)} on {C.rep_label(a)}')
+    ax.set_ylabel(f'{G.metric_label(value)} on {C.rep_label(b)}')
+    ax.set_title(f'{C.rep_label(a)} against {C.rep_label(b)} — '
+                 f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
+                 fontweight='bold', fontsize=9, loc='left')
+    ax.text(0.03, 0.96, f'Spearman ρ = {rho:.2f}'
+            + ('' if not np.isfinite(p_value) else
+               f' (p = {p_value:.1g})') + f', {len(shared)} models',
+            transform=ax.transAxes, va='top', fontsize=7.5,
+            bbox=dict(boxstyle='round,pad=0.35', facecolor='white',
+                      edgecolor='#CCCCCC', linewidth=0.6))
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=4)
+
+    caption('R18', f"""
+        Robustness ({G.metric_label(value)}) on {C.rep_label(a)} against the
+        same quantity on {C.rep_label(b)}, one point per model, on
+        {C.dataset_label(dataset)} under {C.condition_label(condition)}. The
+        dotted diagonal is equal robustness on both. A point above it is a model
+        that holds up better on {C.rep_label(b)}. Spearman ρ = {rho:.2f} over
+        {len(shared)} models: how far a model's robustness carries from one
+        representation to the other, which is what choosing one representation
+        for the main-text tables costs. Nothing here is averaged over
+        representations -- each axis is one named representation and the points
+        are paired on the model.""")
+    return S.save(fig, Path(output_dir) /
+                  f'R18_{a}_against_{b}_{condition}.png')
+
+
+# ---------------------------------------------------------------------------
 # R9 -- rank transfer as a figure (14.6 row 9)
 # ---------------------------------------------------------------------------
 
@@ -1526,7 +1720,7 @@ def sentence_rank_by_rep(accuracy, model, condition, dataset='qm9',
 
 def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
                                    dataset='qm9', baseline_gate=None):
-    """The mirror the author asked for: hold one noise type and one MODEL, and
+    """The mirror the author asked for: hold one noise condition and one MODEL, and
     plot every representation.
 
     Same chart as R15 with the two factors swapped. The three rules for a

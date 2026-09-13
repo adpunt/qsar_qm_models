@@ -474,6 +474,28 @@ def canonical_model(name, pipeline='qm9'):
     return mapping.get(raw, mapping.get(raw.lower(), raw.lower()))
 
 
+#: Models kept OUT of the variance decomposition, and only out of it. Carried
+#: over from generate_paper_figures_v2.ANOVA_MODELS_EXCLUDE, where it was
+#: settled on 2026-09-01 and where the new figure modules lost it -- every
+#: F2 and T3 number written before 2026-09-13 included these.
+#:
+#: The reason, quoted from there: they exist to answer the uncertainty question
+#: and are a DIFFERENT model from the plain one beside them -- an extra output
+#: column and a different loss -- so they must not enter a decomposition asking
+#: how much of the ACCURACY spread is the model and how much the
+#: representation. They would move the model term for a reason that has nothing
+#: to do with that question.
+#:
+#: NOT carried over: v2 also dropped `sns` from the ANOVA as "redundant with
+#: ecfp4, rho = 0.90", and a representation this study is measuring is not
+#: dropped on a correlation. That one is the author's to reinstate if it was
+#: meant.
+ANOVA_MODELS_EXCLUDE = {
+    'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
+    'dnn_vbll_hetero', 'mlp_vbll_hetero',
+    'het_gp_rbf',
+}
+
 DATASET_ORDER = ['qm9', 'logd', 'caco2', 'herg']
 DATASET_LABELS = {
     'qm9': 'QM9 (HOMO–LUMO gap)',
