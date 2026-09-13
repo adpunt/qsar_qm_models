@@ -9032,7 +9032,7 @@ The findings:
 | **The hERG ChEMBL filters do not run.** `fetch_chembl_herg_ki` returns the cached two-column CSV before reaching the binding-assay filter, the median collapse or the inter-assay standard-deviation filter, and a live fetch is refused without `KIRBY_ALLOW_CHEMBL_FETCH=1` | `KIRBy tests/alternative_data_noise_robustness.py:958-981`, filters at `:1036-1049` | The Methods cannot claim those filters. The release-36 stamp and the release-37 re-check exist only in a provenance file that says it was reconstructed on 2026-09-04. Guide `D2` |
 | **The tuning ranking excluded Avalon and the chosen setting was shipped to Avalon.** `NOISE_REPS`/rank over five representations, then written under all six | `scripts/write_chosen_settings.py:69-71`, `scripts/ship_tuned_settings.py:60` | Author's 2026-09-01 decision put Avalon out of the tuning; nothing put it out of the shipping. Guide `D17` |
 | **Additional file 1 contradicts the code and nothing generates it.** Hand-typed LaTeX for eleven models: `min_samples_leaf` 1 against the pinned 5, `max_features` sqrt against the pinned 0.3, the Gaussian process as Tanimoto only, no BNN/VBLL/MVE/hetero-GP rows, no epoch cap, patience or MC-pass count | `additional_files.tex:38-122` against `models/model_defaults.py` (SPEC_VERSION 1.7.0) | The Methods' first sentence points at it. It should be generated from `model_defaults.py`, not edited. Additional file 12 is the SVM-kernel table `paper.tex:197` cites for a claim that is being deleted |
-| **The tuned setting was ranked over five representations and shipped to six.** `write_chosen_settings.py:69-71` excludes Avalon under a comment reading "AVALON IS OUT OF THIS STUDY (author, 2026-09-01) ... no run collects it"; `ship_tuned_settings.py:58,84` writes the chosen setting under all six | `scripts/write_chosen_settings.py`, `scripts/ship_tuned_settings.py` | **The comment is false about the study** — `ALL_REPS` in both generators contains Avalon. So all four Bayesian networks carry an Avalon setting chosen by a ranking Avalon never entered. `HANDOFF.md` item 3 |
+| **The tuned setting was ranked over five representations and shipped to six.** `write_chosen_settings.py:69-71` excludes Avalon under a comment reading "AVALON IS OUT OF THIS STUDY (author, 2026-09-01) ... no run collects it"; `ship_tuned_settings.py:58,84` writes the chosen setting under all six | `scripts/write_chosen_settings.py`, `scripts/ship_tuned_settings.py` | **The comment is false about the study** — `ALL_REPS` in both generators contains Avalon. So all four Bayesian networks carry an Avalon setting chosen by a ranking Avalon never entered. `HANDOFF.md` item 3. **CLOSED 2026-09-13:** Avalon ranks as one of the six, and the comment was corrected from the session logs — she never dropped it. On 2026-09-01 an earlier chat offered dropping ECFP4 and Avalon from the tuning tables to save compute, she refused it sharply (she had asked which representation cost most so that she MIGHT remove it), and that chat wrote back "Nothing is decided. The runs are still going with all six". One shipped setting changed: BNN-Full on Caco-2 now trains at the shared default. Guard: `scripts/test_rep_lists_agree.py` |
 | **The two base networks are tuned over different parameter sets.** NN-alpha's optimiser always takes the shared default learning rate and its dropout is hard-coded at 0.2; NN-beta reads both from the tuned dictionary | `models/models.py:3458` and `:1050` against `:4193` and `:4066` | BNN-beta runs at lr 4.29e-3 and dropout 0.379 while BNN-alpha cannot leave 1e-3 and 0.2 whatever the sweep found. An alpha-versus-beta comparison is partly a comparison of how much tuning each was allowed. `HANDOFF.md` item 4 |
 | **The variance-head and heteroscedastic networks train at defaults beside tuned siblings.** Stated in the roster itself: "no sweep has ever scored them ... That is a fact about what has been measured, not a decision" | `models/tuning_rosters.py:161-172` | Four transformations per base network, two tuned and two not, so a BNN-versus-MVE comparison is partly tuned-versus-untuned. `HANDOFF.md` item 5 |
 | **ChemBERTa's collision count has never been produced** | `scripts/crosscheck_chemberta.py` gate 4 | Two percentages the Methods needs. `HANDOFF.md` item 6 |
@@ -18268,13 +18268,52 @@ tasks. Every pending row says `(Priority)`, which is queue position. **Not one o
 
 ---
 
-##### 1.1 — Read the queue. Queues nothing.
+##### 1.1 — The survey. What is on the server, what is pending. Queues nothing.
 
-Keep this output. Every block in Part 2 asks you to check a job name against it.
+Paste the whole block. It answers four questions in order: what is waiting, what is running, what
+died, and what is not on disk. Keep the output — every block in Part 2 asks you to check a job name
+against the first command.
 
 ```bash
-squeue -u $USER -o "%.20i %.12P %.20j %.2t %.11M %R"
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+
+echo "=== 1. WAITING AND RUNNING ==="
+squeue -u $USER -o "%.20i %.12P %.22j %.2t %.11M %.11l %R"
+echo "--- arrays by name, with how many tasks each still holds ---"
+squeue -u $USER -h -r -o "%j" | sort | uniq -c | sort -rn
+
+echo "=== 2. WHAT FINISHED AND WHAT DIED, LAST 14 DAYS ==="
+sacct -u $USER -S $(date -d '14 days ago' +%F) -X -n -P \
+      --format=JobName%34,State | sort | uniq -c | sort -rn | head -40
+echo "--- every task that did not COMPLETED ---"
+sacct -u $USER -S $(date -d '14 days ago' +%F) -X -n -P \
+      --format=JobID,JobName%34,State,Elapsed,ExitCode | grep -v COMPLETED | head -40
+
+echo "=== 3. WHAT IS ON DISK, AGAINST WHAT THE GENERATORS ASKED FOR ==="
+cd $QSAR
+python scripts/check_runs_landed.py --stage 0 --verbose
+python scripts/check_runs_landed.py --stage 1 --verbose
+python scripts/check_runs_landed.py --stage 2 --verbose
+python scripts/check_runs_landed.py --stage 2 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun
+
+echo "=== 4. THE TWO RESULT DIRECTORIES EXIST AND ARE THE RIGHT ONES ==="
+ls -d $KIRBY/results/validation_rerun $KIRBY/tests/results/uncertainty_rerun
+ls $KIRBY/results/validation_rerun | wc -l
+ls $KIRBY/tests/results/uncertainty_rerun | wc -l
 ```
+
+**How to read part 3 against part 1, which is the only way to read it.** `check_runs_landed.py`
+cannot see the queue, so anything still waiting reads as MISSING. A cell that is MISSING and whose
+job name appears in part 1 is waiting, and resubmitting it queues a second copy that races the
+first. A cell that is MISSING and whose job name is not in part 1 needs resubmitting. PARTIAL means
+the task wrote a file and died part-way through the noise levels, so squeue showed it finished;
+those always need resubmitting. THIN means it ran and has fewer replicates than the variance work
+needs.
+
+**If part 4 prints a count of zero, stop.** A wrong directory makes part 3 report everything
+missing, which reads like a disaster and is not one.
 
 ##### 1.2 — Put the fixes on the cluster. Queues nothing.
 
