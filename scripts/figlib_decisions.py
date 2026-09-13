@@ -344,120 +344,66 @@ def what_is_missing(tables, verdicts, rep):
 
 
 # ---------------------------------------------------------------------------
-# Base model against its own variant -- evidence, not a decision
+# Accuracy per model at each noise level, across representations
 # ---------------------------------------------------------------------------
 
-#: Each base model and the variant of it that predicts a per-molecule noise
-#: term. The variant trains under a heteroscedastic likelihood (`--loss
-#: heteroscedastic`, `--loss het_gp`), which weights each molecule's residual by
-#: that molecule's predicted variance, so it is a DIFFERENT FIT and not the same
-#: fit with a variance report attached.
-VARIANT_PAIRS = [
-    ('dnn_bnn_full', 'dnn_bnn_full_mve'),
-    ('mlp_bnn_full', 'mlp_bnn_full_mve'),
-    ('dnn_vbll', 'dnn_vbll_hetero'),
-    ('mlp_vbll', 'mlp_vbll_hetero'),
-    ('gauche_rbf', 'het_gp_rbf'),
-    ('rf', 'qrf'),
-]
+def accuracy_across_representations(accuracy, dataset='qm9',
+                                    condition='gaussian'):
+    """R2 per model at every noise level, averaged over the representations.
 
+    The author asked for this in as many words and got win counts instead.
+    It is one row per model and noise level: the mean R2 over the
+    representations, with the lowest and the highest so the average is never
+    read without its spread, and the count so nobody reads a mean of two as a
+    mean of six.
 
-def base_against_variant(summary, dataset='qm9'):
-    """Is the variant worth carrying through every cross-model comparison?
-
-    PAIRED ON THE REPRESENTATION AND THE NOISE CONDITION, never averaged over
-    them. The mean is reported beside the win count, and the win count is the
-    thing to read: "the variant wins 0 of 18" is a statement about the variant,
-    "the variant is 0.06 lower on average" is a statement about whichever
-    representations happened to run.
-
-    Which member of each pair enters the cross-model figures is the author's
-    call; this lays out the evidence for it.
+    THE MEAN OVER REPRESENTATIONS IS A DECISION AID, NOT A PAPER NUMBER.
+    Representation is a factor and no table in the paper averages over it
+    (RERUN_PLAN.md 14.2); this table exists so the author can decide which
+    models to carry through the cross-model figures, and it says so in its own
+    header row.
     """
-    if summary is None or not len(summary):
-        return {}, _verdict('V', 'Base model or its variant?', False,
-                            'no robustness numbers yet')
-    frame = summary[summary['dataset'] == dataset]
-    rows = []
-    for base, variant in VARIANT_PAIRS:
-        a = frame[frame['model'] == base].set_index(['rep', 'condition'])
-        b = frame[frame['model'] == variant].set_index(['rep', 'condition'])
-        shared = a.index.intersection(b.index)
-        if not len(shared):
-            continue
-        a, b = a.loc[shared], b.loc[shared]
-        for metric in ('baseline_r2', 'auc_norm'):
-            if metric not in a.columns:
-                continue
-            x = a[metric].astype(float)
-            y = b[metric].astype(float)
-            try:
-                _, p_value = (stats.wilcoxon(y, x) if len(shared) >= 6
-                              and float((y - x).abs().sum()) > 0
-                              else (np.nan, np.nan))
-            except ValueError:
-                p_value = np.nan
-            rows.append({
-                'dataset': dataset, 'base': base, 'variant': variant,
-                'metric': metric, 'n_paired_cells': int(len(shared)),
-                'n_representations': int(a.index.get_level_values(0).nunique()),
-                'n_conditions': int(a.index.get_level_values(1).nunique()),
-                'base_mean': float(x.mean()), 'variant_mean': float(y.mean()),
-                'variant_wins': int((y > x).sum()),
-                'median_difference': float((y - x).median()),
-                'p_value': float(p_value),
-            })
-    table = pd.DataFrame(rows)
-    if not len(table):
-        return {}, _verdict('V', 'Base model or its variant?', False,
-                            'no pair has cells on both sides')
+    if accuracy is None or not len(accuracy):
+        return {}, _verdict('A', 'How accurate is each model, level by level?',
+                            False, 'no accuracy rows yet')
+    frame = accuracy[(accuracy['dataset'] == dataset)
+                     & (accuracy['condition'] == condition)]
+    if not len(frame):
+        return {}, _verdict('A', 'How accurate is each model, level by level?',
+                            False, f'nothing at {dataset} under {condition}')
+    # Median over replicates first -- that is the only axis that may be
+    # collapsed -- then across representations.
+    per_cell = (frame.groupby(['model', 'rep', 'sigma'], dropna=False)['r2']
+                .median().reset_index())
+    out = (per_cell.groupby(['model', 'sigma'], dropna=False)['r2']
+           .agg(mean_r2='mean', lowest_r2='min', highest_r2='max',
+                n_representations='size')
+           .reset_index())
+    out.insert(0, 'dataset', dataset)
+    out.insert(1, 'condition', condition)
 
-    keep, notes = [], []
-    for (base, variant), group in table.groupby(['base', 'variant'],
-                                                sort=False):
-        by = group.set_index('metric')
-        n = int(group['n_paired_cells'].iloc[0])
-        wins_clean = int(by.loc['baseline_r2', 'variant_wins']) \
-            if 'baseline_r2' in by.index else 0
-        wins_robust = int(by.loc['auc_norm', 'variant_wins']) \
-            if 'auc_norm' in by.index else 0
-        # TAKING THE BEST OF THE TWO IS WRONG HERE. This is a robustness paper,
-        # and a variant that buys clean accuracy by giving up noise tolerance is
-        # the most interesting case in the set rather than a winner: VBLL-beta's
-        # heteroscedastic head won clean R2 on 18 of 18 cells and lost AUC_norm
-        # on 18 of 18. Calling that "the variant" would put the wrong model in
-        # every cross-model figure. The two metrics are judged separately and a
-        # split is named as a split.
-        clearly = 0.7 * n
-        won_clean = wins_clean >= clearly
-        lost_clean = (n - wins_clean) >= clearly
-        won_robust = wins_robust >= clearly
-        lost_robust = (n - wins_robust) >= clearly
-        if won_robust and not lost_clean:
-            verdict = 'the variant'
-        elif lost_robust and won_clean:
-            verdict = 'SPLIT: the variant buys clean accuracy and pays for it in robustness'
-        elif lost_robust or lost_clean:
-            verdict = 'the base'
-        elif won_clean:
-            verdict = 'the variant on accuracy alone; robustness is a wash'
-        else:
-            verdict = 'neither clearly'
-        keep.append({'base': base, 'variant': variant, 'n_paired_cells': n,
-                     'variant_wins_clean_r2': wins_clean,
-                     'variant_wins_auc_norm': wins_robust,
-                     'clearer_choice': verdict})
-        notes.append(
-            f'{C.model_label(base)} against {C.model_label(variant)}: the '
-            f'variant wins clean R2 in {wins_clean} of {n} paired cells and '
-            f'robustness in {wins_robust} of {n} -- {verdict}')
-    says = ('Paired on representation and noise condition, never averaged over '
-            'them. ' + '; '.join(notes) + '. Which member of each pair enters '
-            'the cross-model figures is the author\'s call; this is the '
-            'evidence for it, not the answer.')
-    return ({'base_against_variant': table,
-             'base_against_variant_summary': pd.DataFrame(keep)},
-            _verdict('V', 'Base model or its variant?', fired=False, says=says))
+    levels = sorted(out['sigma'].dropna().unique())
+    top = levels[-1] if levels else None
+    clean = levels[0] if levels else None
+    says = (f'R2 for {out["model"].nunique()} model(s) at '
+            f'{len(levels)} noise level(s) on {C.dataset_label(dataset)} under '
+            f'{C.condition_label(condition)}, averaged over the '
+            f'{int(out["n_representations"].max())} representations that ran. ')
+    if clean is not None and top is not None and clean != top:
+        at_clean = out[out['sigma'] == clean].set_index('model')['mean_r2']
+        at_top = out[out['sigma'] == top].set_index('model')['mean_r2']
+        shared = at_clean.index.intersection(at_top.index)
+        if len(shared):
+            drop = (at_clean.loc[shared] - at_top.loc[shared])
+            says += (f'From level {clean:g} to level {top:g} the mean R2 falls '
+                     f'by between {drop.min():.3f} and {drop.max():.3f}; '
+                     f'least for {C.model_label(drop.idxmin())} and most for '
+                     f'{C.model_label(drop.idxmax())}.')
+    says += (' The mean over representations is a decision aid only -- '
+             'representation is a factor and no paper table averages over it.')
+    return ({'model_accuracy_by_level': out},
+            _verdict('A', 'How accurate is each model, level by level?',
+                     fired=False, says=says))
 
 
 # ---------------------------------------------------------------------------

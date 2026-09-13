@@ -198,46 +198,6 @@ def d2_refuses_to_judge_a_condition_the_grid_barely_covers():
           f"is neither main text nor a repeat -- it is unjudged")
 
 
-def variant_split_is_named_as_a_split():
-    """A variant that buys accuracy and pays for it in robustness is not a winner.
-
-    VBLL-beta's heteroscedastic head won clean R2 on 18 of 18 paired cells and
-    lost AUC_norm on 18 of 18. Taking the better of the two metrics would have
-    called that "the variant" and put it into every cross-model figure of a
-    ROBUSTNESS paper. The two are judged separately.
-    """
-    rows = []
-    for rep in ('ecfp4', 'pdv', 'chemberta'):
-        for condition in ('gaussian', 'grouped_wider', 'grouped_shifted'):
-            for model, clean, auc in (
-                    # the split: variant better clean, worse under noise
-                    ('mlp_vbll', 0.81, 0.92), ('mlp_vbll_hetero', 0.85, 0.87),
-                    # a plain win for the variant on both
-                    ('mlp_bnn_full', 0.86, 0.91),
-                    ('mlp_bnn_full_mve', 0.87, 0.92),
-                    # a plain loss for the variant on both
-                    ('gauche_rbf', 0.88, 0.92), ('het_gp_rbf', 0.86, 0.89)):
-                rows.append({'dataset': 'qm9', 'model': model, 'rep': rep,
-                             'condition': condition, 'baseline_r2': clean,
-                             'auc_norm': auc, 'auc_norm_spread': 0.01})
-    tables, v = D.base_against_variant(summary(rows))
-    got = tables['base_against_variant_summary'].set_index('base')
-
-    assert 'SPLIT' in got.loc['mlp_vbll', 'clearer_choice'], \
-        got.loc['mlp_vbll', 'clearer_choice']
-    assert got.loc['mlp_bnn_full', 'clearer_choice'] == 'the variant', \
-        got.loc['mlp_bnn_full', 'clearer_choice']
-    assert got.loc['gauche_rbf', 'clearer_choice'] == 'the base', \
-        got.loc['gauche_rbf', 'clearer_choice']
-    assert not v['fired'], 'the choice is the author\'s, so nothing fires'
-    # Paired on the representation AND the condition, never averaged over them.
-    detail = tables['base_against_variant']
-    assert set(detail['n_representations']) == {3}, detail['n_representations']
-    assert set(detail['n_conditions']) == {3}, detail['n_conditions']
-    print('    a variant that wins accuracy and loses robustness is a SPLIT, '
-          'not a winner')
-
-
 def the_anova_leaves_the_variance_head_models_out():
     """Settled 2026-09-01, lost in the move to these modules, restored today.
 
@@ -504,8 +464,6 @@ def main():
               d2_merges_identical_grids_and_keeps_different_ones),
         check('D2 refuses to judge a condition the grid barely covers',
               d2_refuses_to_judge_a_condition_the_grid_barely_covers),
-        check('a variant split is named as a split, not as a win',
-              variant_split_is_named_as_a_split),
         check('the ANOVA leaves the variance-head models out',
               the_anova_leaves_the_variance_head_models_out),
         check('D3 fires when the conditions differ and not when they do not',

@@ -19553,3 +19553,119 @@ q4's correlation against its permutation band. `f7_uncertainty` and its three op
 in `figlib_figures.py` unused rather than being deleted.
 
 **The word is *noise condition*.** Applied across the modules.
+
+#### 14.11k THE VARIANTS ARE OUT OF THE CROSS-MODEL WORK — the author, 2026-09-13
+
+**Settled.** The base models carry every cross-model comparison. The five variants that add a
+per-molecule noise term appear only where they are the subject: the uncertainty work, and R17.
+They may be dropped entirely if the uncertainty side turns out not to use them.
+
+The five: `dnn_bnn_full_mve`, `mlp_bnn_full_mve`, `dnn_vbll_hetero`, `mlp_vbll_hetero`,
+`het_gp_rbf`. Named once in `figlib_config.VARIANT_MODELS`; `figlib_config.cross_model()` drops
+them and prints what it dropped. Applied at the entry point of F3, F4, F8, R6, R9, R15, R16, R18
+and T4. `ANOVA_MODELS_EXCLUDE` is now an alias for the same set.
+
+The GP keeps its kernel distinction in the ANOVA — `gauche` is Tanimoto and works on binary
+fingerprints only, `gauche_rbf` works across representations — and that is a different thing from
+the heteroscedastic variant, which is out.
+
+**Deleted: `base_against_variant` and its "clearer_choice" column.** It applied a rule the author
+had not approved to reach a conclusion the author had not asked for. The plain table is
+`accuracy_across_representations`, which reports R2 per model per noise level, averaged over the
+representations, with the lowest and highest beside every mean.
+
+#### 14.11l DOES THE NOISE CONDITION MATTER — measured 2026-09-13
+
+Off `results/decisions_arc/auc_norm_qm9.csv`, the ARC run of 2026-09-13. Base models only. Each
+condition against Gaussian, paired on the MODEL.
+
+| condition | models | mean change in AUC_norm | worse than Gaussian in | signed-rank p |
+|---|---|---|---|---|
+| grouped_shifted | 14 | **−0.029** | **14 of 14** | 0.00012 |
+| grouped_wider | 14 | +0.003 | 4 of 14 | 0.15 |
+| student_t_nu5 | 3 | +0.004 | 0 of 3 | — too few |
+| laplace, outlier_p10 | 2 | — | — | too few models to test |
+
+And grouped_shifted against Gaussian on every representation:
+
+| representation | models | mean change | worse in |
+|---|---|---|---|
+| ECFP4 | 14 | −0.029 | 14/14 |
+| PDV | 13 | −0.039 | 13/13 |
+| MHG-GNN | 13 | −0.036 | 13/13 |
+| Avalon | 13 | −0.048 | 13/13 |
+| ChemBERTa | 13 | −0.034 | 13/13 |
+| Sort & Slice | 13 | −0.037 | 13/13 |
+
+**The answer.** Noise that pushes a whole scaffold group in one direction costs every model, on
+every representation, without a single exception in 79 model-and-representation comparisons. Noise
+that widens a group's spread costs nothing measurable. The models do not differ much in HOW they
+respond — the ranking barely moves — so this is a property of the noise, not a way to tell models
+apart.
+
+#### 14.11m WHY THE CONDITIONS LOOK ALIKE IN F1 — traced 2026-09-13
+
+The author asked what had gone wrong, having re-run the experiments to avoid exactly this. **Nothing
+has gone wrong with the experiments. F1 is drawing a quantity that cannot show the difference.**
+
+`NOISE_DESIGN.md` §2a: grouped-shifted is `ε_i = √ρ·s·b_g + √(1−ρ)·s·e_i`, a per-GROUP offset plus a
+per-molecule error, both drawn from the shape at its own spread, with the two variances summing to
+`τ²`. Both draws are Gaussian. **The sum of two Gaussians is Gaussian with variance τ² — which is
+exactly the marginal distribution of the plain Gaussian condition.** F1 plots a histogram of all the
+labels, which is the marginal. It is blind to the difference by construction.
+
+What differs is the CORRELATION within a scaffold group, and §14.11l shows the experiment picks it
+up: grouped-shifted costs every model on every representation.
+
+**The fix is a panel, not a re-run.** F1 needs one panel showing the noise per scaffold group — the
+group means under Gaussian scattered around zero against the group means under grouped-shifted
+spread out — which is the thing the two conditions do differently. **NOT BUILT: the author has not
+asked for it.** Censoring is the only condition whose marginal differs, which is why it is the only
+one that currently looks different.
+
+#### 14.11n R17 REBUILT TO THE AUTHOR'S SHAPE, AND F6 LOSES ITS ONE-LINE PANELS
+
+**R17** is three panels, not six: (a) the first neural architecture as a plain network, a Bayesian
+network, and a Bayesian network with a variance head; (b) the same three on the second
+architecture; (c) RF against QRF. Solid lines throughout and one colour per ROLE, shared across the
+two neural panels — a dashed line and a solid line of the same colour were not separable in the key.
+The Gaussian process has no deterministic counterpart in the roster, so it has no panel.
+
+**F6** drops any model where only one of the two halves varies per molecule. A panel of one line is
+not a comparison. On QM9 / ECFP4 / Gaussian that takes it from six panels to three — VBLL-α and
+GP (RBF) report only an epistemic term, NGBoost only an aleatoric one, and those three become a
+sentence in the caption and in the paper. Their support flags are in T6.
+
+**Other figure changes, all the author's call 2026-09-13:** F4a loses its shaded bands (the spread is
+in T4) and F4b loses its reference line; R18 loses the "equal on both" text and the correlation box,
+both now in the caption, and its title uses a slash — `ECFP4 / MHG-GNN`, not "against".
+
+**Open in R18:** whether the Spearman correlation belongs in the figure at all or only in the text.
+Currently caption only.
+
+#### 14.11o IS ECFP4 THE RIGHT REPRESENTATION TO HOLD — measured 2026-09-13
+
+Base models only, Gaussian, AUC_norm, one point per model.
+
+| held out | models with a number | agreement with the other five (mean Spearman) | top three by AUC_norm |
+|---|---|---|---|
+| PDV | 13 | **0.740** | NGBoost, RF, QRF |
+| Avalon | 13 | 0.723 | NGBoost, RF, QRF |
+| **ECFP4** | **14** | 0.700 | NGBoost, RF, QRF |
+| Sort & Slice | 13 | 0.681 | NGBoost, RF, XGBoost |
+| MHG-GNN | 13 | 0.645 | NGBoost, RF, BNN-α |
+| ChemBERTa | 13 | 0.577 | NGBoost, RF, QRF |
+
+**The top two models are NGBoost and RF whichever representation is held.** Four of the six give the
+identical top three. So the headline does not depend on the choice.
+
+PDV is the most typical of the six and ECFP4 covers one more model. ChemBERTa is the least typical
+and is the one choice that would make the main tables least like the rest of the study.
+
+**Still the author's call** (§14.9 item 5); this is what changes either way.
+
+#### 14.11p A NESTING BUG I INTRODUCED
+
+`_note_for_the_text` wrote to `<out>/figures/notes_for_the_text.md` where `out` is already the
+figures directory, producing `figures/figures/`. Fixed; the stray directory in the local copy has
+been folded back.

@@ -41,7 +41,7 @@ _BANNED = ('mean', 'average', 'avg', 'overall', 'across')
 def assert_no_mean_column(table, where):
     """A mean across noise conditions describes none of them.
 
-    RERUN_PLAN.md 14.7 T4: "NO 'Mean' column -- a mean across noise types is
+    RERUN_PLAN.md 14.7 T4: "NO 'Mean' column -- a mean across noise conditions is
     averaging over a factor". The submitted paper's ranking table is sorted by
     exactly that column.
     """
@@ -191,7 +191,9 @@ def t4_robustness(summary, output_dir, rep, dataset='qm9'):
     ratio printed without its denominator, and this is the ratio the paper's
     headline rests on.
     """
-    frame = summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)]
+    frame = C.cross_model(
+        summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)],
+        'T4')
     if not len(frame):
         return None
     G.declare(frame, 'T4', fixed={'dataset': dataset, 'rep': rep},

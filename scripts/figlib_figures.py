@@ -398,7 +398,7 @@ def f3_model_by_representation(summary, output_dir, conditions,
     DIFFER from each other and sends the repeats to an additional file; if two
     conditions give the same grid, showing both is showing one thing twice.
     """
-    frame = summary[summary['dataset'] == dataset]
+    frame = C.cross_model(summary[summary['dataset'] == dataset], 'F3')
     frame = frame[frame['condition'].isin(conditions)]
     if not len(frame):
         return None
@@ -485,7 +485,9 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     clipped, not a fraction of the label spread, so it cannot share an axis or a
     colour scale, and it runs on five named pairs and cannot rank models.
     """
-    acc = accuracy[(accuracy['dataset'] == dataset) & (accuracy['rep'] == rep)]
+    acc = C.cross_model(
+        accuracy[(accuracy['dataset'] == dataset) & (accuracy['rep'] == rep)],
+        'F4')
     rankable = G.ranking_conditions(sorted(acc['condition'].dropna().unique()))
     acc = acc[acc['condition'].isin(rankable)]
     if not len(acc):
@@ -514,7 +516,9 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                'condition': reference_condition},
         varies=('model', 'sigma'), aggregates=('replicate',))
     fig, ax = _fig(height=4.0)
-    S.line_chart(ax, curves, 'sigma', 'r2', 'model', spread='spread',
+    # NO BANDS. Eight overlapping shaded ranges made the lines unreadable and
+    # the spread is in T4 (the author, 2026-09-13).
+    S.line_chart(ax, curves, 'sigma', 'r2', 'model',
                  labeller=C.model_label, reference_x=level,
                  reference_label='reported at', legend=False)
     ax.set_ylabel(G.metric_label('r2'))
@@ -529,9 +533,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         {len(keep)} most robust under {C.condition_label(reference_condition)}.
         Bottom axis: the amount of noise put into the training labels, as a
         fraction of the clean training label spread. Side axis: R2 on held-out
-        molecules. The shaded band around each line is the spread across the ten
-        replicates; the dashed vertical line marks the level every table in the
-        paper reports at.""")
+        molecules, median over the ten replicates. The dashed vertical line
+        marks the level every table in the paper reports at. There are no bands:
+        eight overlapping ranges hid the lines, and the spread across replicates
+        is in T4.""")
     written.append(S.save(fig, Path(output_dir) / 'F4a_models_under_noise.png'))
 
     # ---- F4b: one model, across every noise condition ---------------------------
@@ -544,10 +549,12 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                   fixed={'dataset': dataset, 'rep': rep, 'model': focus_model},
                   varies=('condition', 'sigma'), aggregates=('replicate',))
         fig, ax = _fig(height=4.0)
+        # No reference line: this panel is about the SHAPE of the curves
+        # against each other, and a vertical rule through them was clutter
+        # (the author, 2026-09-13).
         S.line_chart(ax, by_condition, 'sigma', 'r2', 'condition',
                      spread='spread', labeller=C.condition_label,
-                     colours=C.CONDITION_COLORS, reference_x=level,
-                     reference_label='reported at', legend=False)
+                     colours=C.CONDITION_COLORS, legend=False)
         ax.set_ylabel(G.metric_label('r2'))
         ax.set_xlabel(LEVEL_AXIS)
         ax.set_title(f'{C.model_label(focus_model)} across noise conditions — '
@@ -624,7 +631,8 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
     scale paints the whole reference column in the map's dark end and it reads
     as every model being terrible.
     """
-    frame = summary[(summary['rep'] == rep) & (summary['dataset'] != 'qm9')]
+    frame = C.cross_model(
+        summary[(summary['rep'] == rep) & (summary['dataset'] != 'qm9')], 'F8')
     rankable = G.ranking_conditions(sorted(frame['condition'].dropna().unique()))
     frame = frame[frame['condition'].isin(rankable)]
     if not len(frame):
@@ -728,9 +736,10 @@ def r15_rank_against_level(accuracy, output_dir, rep, condition,
     an averaged score answers a different question.
     """
     gate = C.BASELINE_THRESHOLD if baseline_gate is None else baseline_gate
-    frame = accuracy[(accuracy['dataset'] == dataset)
-                     & (accuracy['rep'] == rep)
-                     & (accuracy['condition'] == condition)]
+    frame = C.cross_model(accuracy[(accuracy['dataset'] == dataset)
+                                   & (accuracy['rep'] == rep)
+                                   & (accuracy['condition'] == condition)],
+                          'R15')
     if not len(frame):
         return None
     title = G.declare(frame, 'R15',
@@ -818,7 +827,9 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9'):
     scores well by having less to lose. That is why the baseline is an axis and
     not a footnote.
     """
-    frame = summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)]
+    frame = C.cross_model(
+        summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)],
+        'R16')
     if not len(frame):
         return None
     title = G.declare(frame, 'R16', fixed={'dataset': dataset, 'rep': rep},
@@ -918,6 +929,22 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
     # A SHAPE THAT DIVIDES. Six panels came out as four across the top and two
     # underneath, which reads as two figures. The columns are chosen so the rows
     # are equal where the count allows it: six becomes three by two.
+    # A PANEL WITH ONE LINE IS NOT A COMPARISON. Where one of the two halves is
+    # a single number per fit there is nothing to plot against anything, and the
+    # panel was a line with a note beside it saying the other half is missing.
+    # Those models come out of the figure and go into a sentence (the author,
+    # 2026-09-13); the sentence is built below and the caption carries it.
+    drawn_components = (frame.groupby('model')['component'].nunique()
+                        if 'component' in frame.columns else None)
+    single = ([m for m in models if drawn_components.get(m, 0) < 2]
+              if drawn_components is not None else [])
+    models = [m for m in models if m not in single]
+    if not models:
+        print('  F6: every model has only one component that varies per '
+              'molecule, so there is nothing to draw. The support flags are '
+              'in T6.')
+        return None
+
     ncols = next((c for c in (3, 4, 2) if len(models) % c == 0 and len(models) // c <= 3),
                  min(len(models), 3))
     nrows = int(np.ceil(len(models) / ncols))
@@ -1000,8 +1027,12 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
         zero, so a component that holds still looks like one. A component that
         is one number per fit rather than one per molecule is not drawn, and
         which those are is said here: {' '.join(notes) if notes else
-        'every component shown varies per molecule.'} These readings come from
-        the fitted slopes, not from the picture.""")
+        'every component shown varies per molecule.'}
+        {('Not shown at all, because only one of their two halves varies per '
+          'molecule and a panel of one line is not a comparison: '
+          + ', '.join(C.model_label(m) for m in single) + '. Their support '
+          'flags are in T6.') if single else ''}
+        These readings come from the fitted slopes, not from the picture.""")
     return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
 
 
@@ -1273,8 +1304,8 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
     cannot exist. The grid keeps the outlier marks, which are the finding (D5),
     and drops the false slope.
     """
-    frame = summary[(summary['dataset'] == dataset)
-                    & (summary['condition'] == condition)]
+    frame = C.cross_model(summary[(summary['dataset'] == dataset)
+                                  & (summary['condition'] == condition)], 'R6')
     if not len(frame):
         return None
     G.declare(frame, 'R6',
@@ -1332,33 +1363,41 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
 # fig_nn_family_comparison.png, 2026-09-13)
 # ---------------------------------------------------------------------------
 
-#: Each base model and the variant that adds a per-molecule noise term. The
-#: variant is NOT the same fit with a variance report attached: it trains under
-#: a heteroscedastic likelihood (`--loss heteroscedastic`, `--loss het_gp` in
-#: slurm_scripts_qm9_rerun/generate_scripts.py), which weights each molecule's
-#: residual by that molecule's predicted variance, so the predictions differ.
-#: This is the only place in the paper where the two are put side by side, and
-#: the reason it exists: the pairs cannot be read off a nineteen-row heatmap.
-VARIANT_PAIRS = [
-    ('dnn_bnn_full', 'dnn_bnn_full_mve'),
-    ('mlp_bnn_full', 'mlp_bnn_full_mve'),
-    ('dnn_vbll', 'dnn_vbll_hetero'),
-    ('mlp_vbll', 'mlp_vbll_hetero'),
-    ('gauche_rbf', 'het_gp_rbf'),
-    ('rf', 'qrf'),
+#: The three families, each as a list of models that belong on ONE panel. The
+#: author's shape, 2026-09-13: the alpha architecture with its Bayesian version
+#: and its variance-head version, the same for beta, and the two forests. The
+#: Gaussian process has no deterministic counterpart, so it has no panel -- a
+#: panel of one line is not a comparison.
+VARIANT_FAMILIES = [
+    ('NN-α family', ['dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve']),
+    ('NN-β family', ['mlp', 'mlp_bnn_full', 'mlp_bnn_full_mve']),
+    ('Forests', ['rf', 'qrf']),
 ]
+
+#: One colour per ROLE, shared across the two neural panels so the same kind of
+#: model is the same colour in both, and its own pair for the forests. Solid
+#: lines throughout -- a dashed line and a solid line of the same colour were
+#: not separable in the key (the author, 2026-09-13).
+FAMILY_ROLE_COLORS = {
+    'dnn': '#0072B2', 'mlp': '#0072B2',
+    'dnn_bnn_full': '#D55E00', 'mlp_bnn_full': '#D55E00',
+    'dnn_bnn_full_mve': '#009E73', 'mlp_bnn_full_mve': '#009E73',
+    'rf': '#CC79A7', 'qrf': '#7B3294',
+}
 
 
 def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
-                         condition='gaussian', pairs=None):
-    """One panel per pair: the base model and its variant on the same axes.
+                         condition='gaussian', families=None):
+    """Three panels: does making a model probabilistic change how noise hurts it?
 
-    The submitted paper had this as fig_nn_family_comparison.png and this figure
-    set lost it. It is where the `var. head` and `het.` models belong: against
-    the model they are a variant OF, which is the only comparison that makes
-    them mean anything. Nineteen rows of a heatmap cannot show it, because the
-    pair is not adjacent and the difference is smaller than the spread between
-    families.
+    Panel one is the alpha architecture -- the plain network, its Bayesian
+    version, and the Bayesian version with a variance head. Panel two is the
+    same for beta. Panel three is RF against QRF. One line per model, solid, one
+    colour per role, so the same kind of model is the same colour in both neural
+    panels.
+
+    The Gaussian process is not here: it has no deterministic counterpart in the
+    roster, so there is nothing to compare it against.
     """
     frame = accuracy[(accuracy['dataset'] == dataset)
                      & (accuracy['rep'] == rep)
@@ -1366,79 +1405,56 @@ def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
     if not len(frame):
         return None
     have = set(frame['model'].unique())
-    use = [(a, b) for a, b in (pairs or VARIANT_PAIRS)
-           if a in have and b in have]
+    use = [(name, [m for m in members if m in have])
+           for name, members in (families or VARIANT_FAMILIES)]
+    use = [(name, members) for name, members in use if len(members) >= 2]
     if not use:
         return None
     G.declare(frame, 'R17',
               fixed={'dataset': dataset, 'rep': rep, 'condition': condition},
               varies=('model', 'sigma'), aggregates=('replicate',))
 
-    ncols = min(len(use), 3)
-    nrows = int(np.ceil(len(use) / ncols))
-    fig, axes = _fig(height=2.6 * nrows + 1.0, nrows=nrows, ncols=ncols,
-                     sharex=True)
+    fig, axes = _fig(height=3.2, nrows=1, ncols=len(use), sharey=True)
     axes = np.atleast_1d(axes).ravel()
-    verdicts = []
-    for index, ((base, variant), ax) in enumerate(zip(use, axes)):
-        for model, style in ((base, '-'), (variant, '--')):
+    for index, ((name, members), ax) in enumerate(zip(use, axes)):
+        for model in members:
             one = (frame[frame['model'] == model]
-                   .groupby('sigma', as_index=False)
-                   .agg(r2=('r2', 'median'),
-                        lo=('r2', lambda v: float(v.quantile(0.25))),
-                        hi=('r2', lambda v: float(v.quantile(0.75))))
+                   .groupby('sigma', as_index=False)['r2'].median()
                    .sort_values('sigma'))
             if not len(one):
                 continue
-            colour = C.model_color(model)
-            ax.plot(one['sigma'], one['r2'], linestyle=style, marker='o',
-                    markersize=3.5, linewidth=1.5, color=colour,
+            ax.plot(one['sigma'], one['r2'], marker='o', markersize=3.5,
+                    linewidth=1.6,
+                    color=FAMILY_ROLE_COLORS.get(model, C.model_color(model)),
                     label=C.model_label(model))
-            ax.fill_between(one['sigma'], one['lo'], one['hi'], color=colour,
-                            alpha=0.15, linewidth=0)
-        ax.legend(loc='lower left', fontsize=6.5, frameon=False,
-                  handlelength=1.6)
+        ax.legend(loc='lower left', fontsize=7, frameon=False,
+                  handlelength=1.6, labelspacing=0.3)
         ax.spines[['top', 'right']].set_visible(False)
-        S.title(ax, 'abcdefgh'[index], C.model_label(base))
-        if index % ncols == 0:
-            ax.set_ylabel(G.metric_label('r2'))
-        # What the pair did, in the caption rather than on the panel.
-        clean = frame[frame['sigma'] == frame['sigma'].min()]
-        worst = frame[frame['sigma'] == frame['sigma'].max()]
-        def _at(f, m):
-            v = f[f['model'] == m]['r2']
-            return float(v.median()) if len(v) else float('nan')
-        verdicts.append(
-            f'({"abcdefgh"[index]}) {C.model_label(base)} '
-            f'{_at(clean, base):.2f} clean and {_at(worst, base):.2f} at the '
-            f'top of the ladder, against {C.model_label(variant)} '
-            f'{_at(clean, variant):.2f} and {_at(worst, variant):.2f}')
-    for ax in axes[len(use):]:
-        ax.set_visible(False)
-    for ax in axes[len(use) - ncols:len(use)]:
         ax.set_xlabel(LEVEL_AXIS)
-        ax.tick_params(labelbottom=True)
+        S.title(ax, 'abc'[index], name)
+        if index == 0:
+            ax.set_ylabel(G.metric_label('r2'))
     fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
                  f'{C.condition_label(condition)}',
                  fontsize=9, fontweight='bold', x=0.01, ha='left')
 
     caption('R17', f"""
-        Each model against the variant of itself that predicts a per-molecule
-        noise term, on {C.dataset_label(dataset)} at {C.rep_label(rep)} under
-        {C.condition_label(condition)}. One panel per pair; the solid line is
-        the base model and the dashed line its variant; the band is the
-        interquartile range across the ten replicates. The variant is not the
-        same fit with a variance report attached -- it trains under a
-        heteroscedastic likelihood, which weights each molecule's residual by
-        that molecule's predicted variance, so its predictions differ. Read at
-        the two ends: {'; '.join(verdicts)}.""")
+        Does making a model probabilistic change how label noise hurts it, on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}. Bottom axis: the amount of noise put
+        into the training labels, as a fraction of the clean training label
+        spread. Side axis: R2 on held-out molecules, median over the ten
+        replicates, shared across the panels. (a) the first neural architecture
+        as a plain network, as a Bayesian network, and as a Bayesian network
+        with a variance head; (b) the same three for the second architecture;
+        (c) the random forest against the quantile forest. Lines that stay
+        together mean the probabilistic version neither gains nor loses
+        robustness. The Gaussian process has no deterministic counterpart in the
+        roster and so has no panel here.""")
     return S.save(fig, Path(output_dir) /
                   f'R17_variant_families_{rep}_{condition}.png')
 
 
-# ---------------------------------------------------------------------------
-# R18 -- one representation against another (recovered from paper.tex,
-# fig_interaction.png panel b, 2026-09-13)
 # ---------------------------------------------------------------------------
 
 def r18_representation_against_representation(summary, output_dir, a, b,
@@ -1457,8 +1473,8 @@ def r18_representation_against_representation(summary, output_dir, a, b,
     NOTHING IS AVERAGED OVER REPRESENTATIONS here: each axis is one named
     representation and the pairing is on the model.
     """
-    frame = summary[(summary['dataset'] == dataset)
-                    & (summary['condition'] == condition)]
+    frame = C.cross_model(summary[(summary['dataset'] == dataset)
+                                  & (summary['condition'] == condition)], 'R18')
     left = frame[frame['rep'] == a].set_index('model')[value]
     right = frame[frame['rep'] == b].set_index('model')[value]
     shared = left.index.intersection(right.index)
@@ -1480,22 +1496,16 @@ def r18_representation_against_representation(summary, output_dir, a, b,
     hi = float(max(x.max(), y.max())) + 0.02
     ax.plot([lo, hi], [lo, hi], color='#777777', linestyle=':', linewidth=1.0,
             zorder=1)
-    ax.annotate('equal on both', xy=(hi, hi), xytext=(-4, 4),
-                textcoords='offset points', ha='right', fontsize=6.5,
-                color='#777777')
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel(f'{G.metric_label(value)} on {C.rep_label(a)}')
     ax.set_ylabel(f'{G.metric_label(value)} on {C.rep_label(b)}')
-    ax.set_title(f'{C.rep_label(a)} against {C.rep_label(b)} — '
+    # NOTHING WRITTEN ON THE PANEL. The correlation and the reading of the
+    # diagonal are in the caption (the author, 2026-09-13); see RERUN_PLAN.md
+    # 14.11k for whether the number belongs in the figure at all.
+    ax.set_title(f'{C.rep_label(a)} / {C.rep_label(b)} — '
                  f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
                  fontweight='bold', fontsize=9, loc='left')
-    ax.text(0.03, 0.96, f'Spearman ρ = {rho:.2f}'
-            + ('' if not np.isfinite(p_value) else
-               f' (p = {p_value:.1g})') + f', {len(shared)} models',
-            transform=ax.transAxes, va='top', fontsize=7.5,
-            bbox=dict(boxstyle='round,pad=0.35', facecolor='white',
-                      edgecolor='#CCCCCC', linewidth=0.6))
     ax.spines[['top', 'right']].set_visible(False)
     S.shared_legend(fig, ax, ncol=4)
 
@@ -1503,8 +1513,9 @@ def r18_representation_against_representation(summary, output_dir, a, b,
         Robustness ({G.metric_label(value)}) on {C.rep_label(a)} against the
         same quantity on {C.rep_label(b)}, one point per model, on
         {C.dataset_label(dataset)} under {C.condition_label(condition)}. The
-        dotted diagonal is equal robustness on both. A point above it is a model
-        that holds up better on {C.rep_label(b)}. Spearman ρ = {rho:.2f} over
+        dotted diagonal is equal robustness on both: a point above it is a
+        model that holds up better on {C.rep_label(b)}, a point below it one
+        that holds up better on {C.rep_label(a)}. Spearman ρ = {rho:.2f} over
         {len(shared)} models: how far a model's robustness carries from one
         representation to the other, which is what choosing one representation
         for the main-text tables costs. Nothing here is averaged over
@@ -1528,8 +1539,9 @@ def r9_rank_transfer(transfer, output_dir, rep, condition='gaussian'):
     """
     if transfer is None or not len(transfer):
         return None
-    frame = transfer[(transfer['rep'] == rep)
-                     & (transfer['condition'] == condition)]
+    frame = C.cross_model(transfer[(transfer['rep'] == rep)
+                                   & (transfer['condition'] == condition)],
+                          'R9')
     if not len(frame):
         return None
     G.declare(frame, 'R9', fixed={'rep': rep, 'condition': condition},

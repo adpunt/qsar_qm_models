@@ -328,10 +328,7 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
     collect(D.d10_probabilistic(qm9_per))
 
-    # Evidence for a choice the author makes, not a decision the data makes:
-    # whether each base model's heteroscedastic variant is worth carrying
-    # through every cross-model figure.
-    collect(D.base_against_variant(qm9_summary))
+    collect(D.accuracy_across_representations(qm9))
 
     # WHAT IS MISSING, said in terms of the slots that wanted it. d0_coverage
     # says which cells are thin; this says what that costs -- which panel comes
@@ -500,7 +497,9 @@ def _note_for_the_text(out, heading, sentence):
     """
     if not sentence:
         return
-    path = Path(out) / 'figures' / 'notes_for_the_text.md'
+    # `out` IS the figures directory here. Appending 'figures' to it made
+    # figures/figures/notes_for_the_text.md on the last run -- my bug.
+    path = Path(out) / 'notes_for_the_text.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text() if path.exists() else '# Findings that are one sentence\n'
     if heading not in existing:

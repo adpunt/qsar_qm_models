@@ -490,11 +490,36 @@ def canonical_model(name, pipeline='qm9'):
 #: ecfp4, rho = 0.90", and a representation this study is measuring is not
 #: dropped on a correlation. That one is the author's to reinstate if it was
 #: meant.
-ANOVA_MODELS_EXCLUDE = {
+#: The five models that add a per-molecule noise term to a model already in the
+#: roster. The author's call, 2026-09-13: the BASE models carry every
+#: cross-model comparison, and these appear only where they are the subject --
+#: the uncertainty work, and the one figure that puts each against its own base.
+#: They may be dropped entirely if the uncertainty side does not use them.
+VARIANT_MODELS = {
     'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
     'dnn_vbll_hetero', 'mlp_vbll_hetero',
     'het_gp_rbf',
 }
+
+#: Same set, kept under its old name because the ANOVA is one of the places it
+#: applies.
+ANOVA_MODELS_EXCLUDE = set(VARIANT_MODELS)
+
+
+def cross_model(frame, where='this figure', column='model'):
+    """Drop the variant models from a cross-model comparison.
+
+    Every figure and table that ranks models against each other holds the base
+    models only. A figure whose SUBJECT is a variant passes it through instead.
+    """
+    if frame is None or not len(frame) or column not in frame.columns:
+        return frame
+    drop = frame[column].isin(VARIANT_MODELS)
+    if drop.any():
+        print(f'  {where}: {int(drop.sum())} row(s) held back -- '
+              f'{", ".join(sorted(set(frame.loc[drop, column])))}. The base '
+              f'models carry the cross-model comparisons.')
+    return frame[~drop]
 
 DATASET_ORDER = ['qm9', 'logd', 'caco2', 'herg']
 DATASET_LABELS = {
