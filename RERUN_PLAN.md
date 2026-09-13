@@ -19669,3 +19669,119 @@ and is the one choice that would make the main tables least like the rest of the
 `_note_for_the_text` wrote to `<out>/figures/notes_for_the_text.md` where `out` is already the
 figures directory, producing `figures/figures/`. Fixed; the stray directory in the local copy has
 been folded back.
+
+#### 14.11q WHY THE GROUPED CONDITIONS LOOK LIKE GAUSSIAN — belongs in the paper, 2026-09-13
+
+**This is a Methods paragraph, not a defect.** It answers the first question any reader will ask of
+F1, and without it F1 looks like a failed experiment.
+
+`NOISE_DESIGN.md` §2a gives grouped-shifted as a constant offset per scaffold group plus a
+per-molecule error on top, both drawn from the same shape, with the two variances summing to the
+same total the other conditions deliver. Both draws are Gaussian. **The sum of two Gaussians is a
+Gaussian with that total variance — which is exactly the marginal distribution of the plain Gaussian
+condition.** A histogram of the noised labels therefore cannot tell them apart, and never could.
+
+What differs is how much of the noise a whole scaffold group shares. F1's final panel measures it:
+the spread of the per-group mean errors divided by the spread of all the errors. Near zero means the
+noise scatters inside a group; near one means the group moves as a block. Written to
+`F1_group_share.csv` beside the figure.
+
+Censoring is the only condition whose marginal genuinely differs, which is why it is the only one
+that looked different.
+
+**Draft sentence for Methods, to be filled from `F1_group_share.csv`:**
+
+> The grouped conditions are constructed so that the total amount of noise, and its marginal
+> distribution over molecules, match the ungrouped Gaussian condition exactly; they differ only in
+> how the noise is correlated within a scaffold group, for which the share of the total noise
+> variance carried by the group mean is [X] under grouped-shifted against [Y] under the ungrouped
+> condition. A comparison between them is therefore a comparison of the structure of the error and
+> not of its size.
+
+#### 14.11r WHAT THE NOISE CONDITION DOES TO THE RANKING — measured 2026-09-13
+
+QM9, ECFP4, base models, AUC_norm, ranks out of 14. Off `results/decisions_arc/auc_norm_qm9.csv`.
+
+| model | clean R² | Gaussian rank | grouped_wider | grouped_shifted |
+|---|---|---|---|---|
+| NGBoost | 0.706 | 1 | 4 | 2 |
+| RF | 0.832 | 2 | 2 | **1** |
+| QRF | 0.830 | 3 | **1** | 3 |
+| XGBoost | 0.835 | 4 | 5 | 5 |
+| GP (RBF) | 0.842 | 5 | 6 | **9** |
+| LightGBM | 0.845 | 6 | 7 | 7 |
+| SVM | 0.844 | 7 | **3** | 8 |
+| GP | 0.830 | 8 | 9 | 10 |
+| VBLL-α | 0.772 | 9 | 8 | **4** |
+| VBLL-β | 0.754 | 10 | 10 | **6** |
+| BNN-β | 0.808 | 11 | 11 | 11 |
+| NN-β | 0.851 | 12 | 12 | 14 |
+| NN-α | 0.842 | 13 | 14 | 13 |
+| BNN-α | 0.820 | 14 | 13 | 12 |
+
+**Group-shifted noise is resisted by the variational networks and punishes the Gaussian processes.**
+VBLL-α climbs five places and VBLL-β four; both lose under 0.01 AUC_norm where the rest of the
+roster loses 0.03 to 0.05. GP (RBF) falls four places and GP two — the largest drops in the table.
+
+**Group-widened noise is resisted by SVM** (up four) and costs NGBoost its first place (down three).
+NGBoost is the only model that is clearly best under one condition and not another.
+
+**The trees are indifferent.** RF, XGBoost and LightGBM move at most one place across all three.
+
+⚠️ **A MECHANISM THAT FITS, AND IS NOT MEASURED.** Shifted noise moves a whole scaffold
+neighbourhood together; a tree partitions and can isolate a region, while a process with one global
+kernel interpolates across neighbourhoods and carries the offset into them. **Untested.** It needs
+its own experiment before it goes anywhere near the paper.
+
+**Representations, counted per model rather than averaged over them.** Which representation is the
+most robust, for each model separately, out of 14 models:
+
+| representation | best under Gaussian | wider | shifted | WORST under Gaussian |
+|---|---|---|---|---|
+| ChemBERTa | **7** | 6 | **7** | 0 |
+| PDV | 3 | 5 | 2 | 0 |
+| Sort & Slice | 2 | 1 | 2 | 2 |
+| ECFP4 | 1 | 1 | 2 | 5 |
+| Avalon | 1 | 1 | 0 | 1 |
+| MHG-GNN | 0 | 0 | 1 | 6 |
+
+ChemBERTa is the best representation for half the roster and the worst for none, under every
+condition. The ordering hardly moves with the condition; the one change is Avalon, worst for 6 of 14
+models under shifted against 1 of 14 under Gaussian.
+
+#### 14.11s WHAT CHANGES IF A DIFFERENT REPRESENTATION IS HELD — measured 2026-09-13
+
+Gaussian, base models, clean R² and AUC_norm side by side. **Reporting only the AUC_norm ordering
+hides the thing that matters**, which is why the earlier version of this section was wrong.
+
+- **NGBoost tops AUC_norm at every representation and is LAST or next to last on clean accuracy at
+  every representation** — 14th of 14 at ECFP4, 12th of 13 at PDV, 13th of 13 at ChemBERTa. It is
+  not the top model; it is the clearest case of the decoupling, and that is a result of its own.
+- **PDV compresses the roster.** All 13 models within 0.058 clean R² and 0.040 AUC_norm, against
+  0.145 and 0.098 at ECFP4. A main table at PDV makes the models look interchangeable.
+- **Two models' standing depends almost entirely on the choice.** BNN-α is 14th of 14 at ECFP4 and
+  6th of 13 at PDV; VBLL-α is 9th at ECFP4 and last at PDV.
+- **ChemBERTa is the kindest.** Its lowest AUC_norm, 0.926, is above ECFP4's median.
+
+Top three are NGBoost, RF, QRF at all three. The headline does not move; the middle of the table
+does.
+
+#### 14.11t THE DEEP-RUN COLUMNS LEAVE THE HEATMAPS — the author, 2026-09-13
+
+Student-t, Outlier and Laplace run on a named subset of model-and-representation pairs by design, so
+their column in a nineteen-row grid is mostly grey and nothing queued will fill it. Publishing that
+reads as missing work.
+
+`figlib_guard.full_roster_conditions` keeps a column only where the condition covers at least 80% of
+the widest model coverage in the frame, and says what it held out. Applied to F4c and F8. The held
+conditions go to **R19**, one panel per representation over only the pairs that ran, with Gaussian
+as the left column for reference, so every cell carries a number.
+
+The other two kinds of grey stay and are not gaps: `GP` (Tanimoto) on the five non-fingerprint
+representations is undefined, and cells that ran and were dropped say `excluded`.
+
+#### 14.11u RF HOLDS F4b — the author's instruction, 2026-09-13
+
+`C.DEFAULT_FOCUS_MODEL = 'rf'`. It was left to a `--focus-model` flag with the data's own pick as
+the default, which overruled an instruction that had already been given. The data's pick is NGBoost,
+and §14.11s is why that is the wrong model to meet first.

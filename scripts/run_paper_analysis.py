@@ -454,6 +454,14 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
             drawn.append(FIG.r18_representation_against_representation(
                 qm9, out, rep, other, condition=first))
 
+    # The deep-run conditions, over the pairs they were run on. They leave the
+    # main grid because their column there is mostly grey by design.
+    if qm9 is not None and len(qm9):
+        import figlib_guard as _G
+        _, thin = _G.full_roster_conditions(qm9, where='the deep-run figure')
+        if thin:
+            drawn.append(FIG.r19_deep_conditions(qm9, out, thin))
+
     # row 9, fired by D9: the two sides disagree on the ranking, so T7 is
     # promoted from a table to a figure.
     if said.get('D9', {}).get('fired') and tables.get('d9_rank_transfer') is not None:

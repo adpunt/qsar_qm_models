@@ -521,6 +521,14 @@ def cross_model(frame, where='this figure', column='model'):
               f'models carry the cross-model comparisons.')
     return frame[~drop]
 
+#: The model F4b holds fixed while the noise conditions vary. The author's
+#: instruction, 2026-09-13. Not a reading off the data: the data's pick is
+#: NGBoost, which tops AUC_norm while sitting 14th of 14 on clean R2 at ECFP4,
+#: 12th of 13 at PDV and 13th of 13 at ChemBERTa. That decoupling is a result in
+#: its own right and gets its own figure; it is not the example a reader should
+#: meet first.
+DEFAULT_FOCUS_MODEL = 'rf'
+
 DATASET_ORDER = ['qm9', 'logd', 'caco2', 'herg']
 DATASET_LABELS = {
     'qm9': 'QM9 (HOMO–LUMO gap)',

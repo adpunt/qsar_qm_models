@@ -391,6 +391,37 @@ def ranking_conditions(conditions):
     return out
 
 
+
+def full_roster_conditions(frame, column='condition', model='model',
+                           share=0.8, where='this grid'):
+    """The conditions that ran on most of the roster, for a grid that ranks models.
+
+    The deep-run conditions run on a NAMED SUBSET of model-and-representation
+    pairs by design, so their column in a nineteen-row heatmap is mostly grey
+    and always will be -- nothing is queued that would fill it. A mostly grey
+    column in a published figure reads as missing work. Those conditions get
+    their own figure, over the pairs that ran, where every cell has a number.
+
+    A condition needs `share` of the widest model coverage in the frame to keep
+    its column. The author's call, 2026-09-13.
+    """
+    if frame is None or not len(frame) or column not in frame.columns:
+        return [], []
+    per = frame.groupby(column)[model].nunique()
+    if not len(per):
+        return [], []
+    widest = int(per.max())
+    keep = [c for c in per.index if per[c] >= share * widest]
+    thin = [c for c in per.index if c not in keep]
+    if thin:
+        print(f'  {where}: {len(thin)} condition(s) held out of the grid -- '
+              + ', '.join(f'{c} ({int(per[c])} of {widest} models)'
+                          for c in thin)
+              + '. They run on a named subset of pairs by design, so their '
+                'column would be mostly grey however long anyone waits. They '
+                'have their own figure.')
+    return keep, thin
+
 # Re-exported rather than reimplemented: two implementations of one rule is
 # failure mode 10, and this one already stops runs.
 try:

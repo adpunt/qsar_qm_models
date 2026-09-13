@@ -206,7 +206,14 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
     delivered = pd.DataFrame(delivered)
 
     ncols = 2
-    nrows = int(np.ceil(len(conditions) / ncols))
+    # +1 row for the scaffold-group panel. A HISTOGRAM CANNOT SHOW WHAT THE
+    # GROUPED CONDITIONS DO. Grouped-shifted is a per-group offset plus a
+    # per-molecule error, both Gaussian, with the two variances summing to the
+    # same total -- so its marginal distribution IS the Gaussian condition's,
+    # exactly, by construction. The difference lives entirely in how much of the
+    # noise a scaffold group shares, and this panel is the only place in the
+    # figure that shows it (the author, 2026-09-13).
+    nrows = int(np.ceil(len(conditions) / ncols)) + 1
     import matplotlib.pyplot as plt
     fig = plt.figure(figsize=(C.TEXTWIDTH_IN,
                               min(C.MAX_HEIGHT_IN, 1.35 * nrows)))
@@ -243,6 +250,37 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         if index >= len(conditions) - ncols:
             ax.set_xlabel('Label value', fontsize=8)
 
+    # The scaffold-group panel, across the full width.
+    ax = fig.add_subplot(spec[nrows - 1, :])
+    order = C.sort_conditions(conditions)
+    shared = []
+    for position, condition in enumerate(order):
+        noised = drawn[condition]
+        error = noised - clean
+        # How much of the noise a whole scaffold group shares: the spread of the
+        # group means, against the spread of the noise overall. Near zero means
+        # the noise scatters within a group; near one means the group moves as a
+        # block.
+        means = pd.Series(error).groupby(groups).mean()
+        overall = float(np.std(error))
+        share = float(np.std(means) / overall) if overall > 0 else np.nan
+        shared.append({'condition': condition, 'group_share': share})
+        colour = C.CONDITION_COLORS.get(condition, '#666666')
+        ax.bar([position], [share], width=0.62, color=colour, alpha=0.9)
+        ax.annotate(f'{share:.2f}', xy=(position, share), xytext=(0, 3),
+                    textcoords='offset points', ha='center', fontsize=7,
+                    color='#333333')
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([C.condition_label(c) for c in order], rotation=25,
+                       ha='right', fontsize=8)
+    ax.set_ylabel('Share of the noise a\nscaffold group shares', fontsize=8)
+    ax.set_ylim(0, 1.0)
+    S.title(ax, 'abcdefghij'[len(conditions)],
+            'How much of the noise a whole scaffold group shares')
+    ax.spines[['top', 'right']].set_visible(False)
+    pd.DataFrame(shared).to_csv(
+        Path(output_dir) / 'F1_group_share.csv', index=False)
+
     # THE DOSE PANEL IS GONE -- the author's call, 2026-09-13. It showed that
     # every condition delivers the amount it was asked for, which is a
     # precondition of the comparison rather than a result, and it is one
@@ -273,7 +311,17 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         label spread — censoring at {censored_fraction:.0%} of labels clipped,
         because its level is a fraction clipped rather than a fraction of the
         spread. Drawn with the injector the pipeline runs, not a
-        reimplementation. That the conditions deliver the same amount of noise,
+        reimplementation. The final panel is the one that separates the grouped
+        conditions from the plain one, and it is there because the panels above
+        it cannot: grouped-shifted gives every scaffold group a constant offset
+        and every molecule its own error on top, both drawn from the same shape,
+        with the two variances summing to the same total — so the distribution
+        of its noise is the same as the plain condition's, exactly. What differs
+        is how much of the noise a whole scaffold group shares, which is what
+        the final panel measures: the spread of the group mean errors divided by
+        the spread of all the errors. Near zero means the noise scatters inside
+        a group; near one means the group moves as a block. That the conditions
+        deliver the same amount of noise,
         and so differ in kind rather than in dose, is reported in the text and
         measured in F1_delivered_dose.csv rather than drawn as a panel.""")
     return S.save(fig, Path(output_dir) / 'F1_noise_conditions.png')
@@ -499,7 +547,14 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     order = (summ[summ['condition'] == reference_condition]
              .sort_values('auc_norm', ascending=False)['model'].tolist())
     order = order or C.sort_models(acc['model'].unique())
-    focus_model = focus_model or (order[0] if order else None)
+    # RF, BY INSTRUCTION (the author, 2026-09-13). The data's own pick is
+    # NGBoost, which is top by AUC_norm and near LAST by clean accuracy -- an
+    # interesting case that earns its own figure, not the model a reader should
+    # meet first as the example of what noise does. --focus-model overrides.
+    if focus_model is None:
+        focus_model = (C.DEFAULT_FOCUS_MODEL
+                       if C.DEFAULT_FOCUS_MODEL in set(acc['model'])
+                       else (order[0] if order else None))
     keep = order[:top_models]
     level = C.reporting_level(dataset)
     written = []
@@ -577,6 +632,11 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
             f'F4b_{focus_model}_across_noise_conditions.png'))
 
     # ---- F4c: the grid -----------------------------------------------------
+    # A MOSTLY GREY COLUMN IS NOT PUBLISHABLE and will never fill in: the deep
+    # run covers a named subset of pairs by design. Those conditions leave the
+    # grid and get their own figure (the author, 2026-09-13).
+    wide, thin = G.full_roster_conditions(summ, where='F4c')
+    summ = summ[summ['condition'].isin(wide)] if wide else summ
     baseline = (summ.groupby('model', as_index=False)['baseline_r2'].median()
                 .assign(condition='clean')
                 .rename(columns={'baseline_r2': 'auc_norm'}))
@@ -640,6 +700,9 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
     title = G.declare(frame, 'F8', fixed={'rep': rep},
                       varies=('dataset', 'model', 'condition'))
 
+    wide, thin = G.full_roster_conditions(frame, where='F8')
+    frame = frame[frame['condition'].isin(wide)] if wide else frame
+    conditions_thin = thin
     datasets = [d for d in C.DATASET_ORDER if d in set(frame['dataset'])]
     models = C.sort_models(frame['model'].unique())
     conditions = C.sort_conditions(frame['condition'].unique())
@@ -1523,6 +1586,74 @@ def r18_representation_against_representation(summary, output_dir, a, b,
         are paired on the model.""")
     return S.save(fig, Path(output_dir) /
                   f'R18_{a}_against_{b}_{condition}.png')
+
+
+# ---------------------------------------------------------------------------
+# R19 -- the deep-run conditions, over the pairs that actually ran
+# ---------------------------------------------------------------------------
+
+def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
+                        value='auc_norm'):
+    """The conditions the main grid cannot hold, on the pairs they were run on.
+
+    Student-t, Outlier and Laplace run on a NAMED SUBSET of model-and-
+    representation pairs -- six models across three representations, not the
+    full cross. In a nineteen-row heatmap their column is mostly grey and no
+    queued task will ever fill it. Here the rows are only the models that were
+    run, so every cell carries a number, and Gaussian sits beside them as the
+    reference the deep conditions are read against.
+
+    The author's call, 2026-09-13: fill the grey cells or take the columns out.
+    They cannot be filled, so they come out and land here.
+    """
+    if summary is None or not len(summary) or not conditions:
+        return None
+    frame = C.cross_model(summary[summary['dataset'] == dataset], 'R19')
+    show = ['gaussian'] + [c for c in C.sort_conditions(conditions)
+                           if c != 'gaussian']
+    frame = frame[frame['condition'].isin(show)]
+    if not len(frame):
+        return None
+    # Only the pairs the deep conditions were actually run on -- otherwise the
+    # Gaussian reference column is nineteen rows against their six.
+    deep = frame[frame['condition'].isin([c for c in show if c != 'gaussian'])]
+    pairs = set(map(tuple, deep[['model', 'rep']].drop_duplicates().to_numpy()))
+    if not pairs:
+        return None
+    frame = frame[[(m, r) in pairs for m, r
+                   in zip(frame['model'], frame['rep'])]]
+    reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
+    models = C.sort_models(frame['model'].unique())
+    G.declare(frame, 'R19', fixed={'dataset': dataset},
+              varies=('model', 'rep', 'condition'))
+
+    fig, axes = _fig(height=C.grid_height(len(models), len(reps)),
+                     nrows=len(reps), sharex=True)
+    axes = np.atleast_1d(axes).ravel()
+    image = None
+    for index, (ax, rep) in enumerate(zip(axes, reps)):
+        panel = frame[frame['rep'] == rep]
+        image, _ = S.grid(ax, panel, 'model', 'condition', value,
+                          row_order=models,
+                          column_order=[c for c in show
+                                        if c in set(panel['condition'])],
+                          vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1])
+        S.title(ax, 'abcdef'[index], C.rep_label(rep))
+    if image is not None:
+        bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
+        bar.set_label(G.metric_label(value), fontsize=8)
+        bar.ax.tick_params(labelsize=7)
+
+    named = ', '.join(C.condition_label(c) for c in show if c != 'gaussian')
+    caption('R19', f"""
+        The noise conditions that run on a named subset of pairs rather than on
+        the whole roster: {named}, on {C.dataset_label(dataset)}. One panel per
+        representation; rows are the {len(models)} models these conditions were
+        run on and Gaussian is the left column, as the reference they are read
+        against. These conditions are absent from the main robustness grid
+        because their column there would be mostly empty by design, not because
+        anything is still running.""")
+    return S.save(fig, Path(output_dir) / f'R19_deep_conditions_{dataset}.png')
 
 
 # ---------------------------------------------------------------------------

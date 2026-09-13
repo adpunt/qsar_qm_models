@@ -1107,6 +1107,30 @@ in it is a property of the design rather than of the results.
 > axis clean but means we do not measure whether a model could be retuned to resist noise better
 > than it does at its default.
 
+## M4a. Why the grouped conditions share a distribution with the plain one (append to M4)
+
+Without this, F1 looks like a failed experiment: six of the seven panels show the same shape. They
+are supposed to.
+
+> The grouped conditions are constructed so that the total amount of noise, and its distribution
+> over molecules, match the ungrouped Gaussian condition exactly. Grouped-shifted gives every
+> scaffold group a constant offset and every molecule its own error on top, both drawn from the same
+> distribution, with the two variances summing to the amount the dose solver was asked for; the sum
+> of two Gaussian terms is itself Gaussian with that total variance. The conditions therefore differ
+> only in how the error is correlated within a scaffold group, measured as the share of the total
+> noise variance carried by the group mean: [X] under grouped-shifted against [Y] under the
+> ungrouped condition. A comparison between them is a comparison of the structure of the error and
+> not of its size. Censoring is the exception and is not dose-matched to the others, because
+> clipping has no variance parameter to match.
+
+Fill [X] and [Y] from `results/decisions/figures/F1_group_share.csv`, column `group_share`. The last
+panel of F1 is the same quantity drawn.
+
+**This sentence also does work in Results:** it is why "grouped-shifted costs every model accuracy
+while grouped-wider costs none" is a statement about correlated error rather than about dose.
+
+---
+
 ## L1. Four findings that are text, not figures (author's call, 2026-09-13)
 
 Four things were being drawn as figures that are one or two sentences each. The measurements are
