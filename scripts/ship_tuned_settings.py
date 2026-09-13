@@ -55,6 +55,14 @@ DECISIONS = os.path.join(_ROOT, 'results', 'hyperparameter_decisions.json')
 # alternative_data_noise_robustness.py.
 LAB = os.path.join(_ROOT, 'results', 'master_tuned_hyperparameters_lab.json')
 LAB_DATASETS = ['herg', 'caco2', 'logd']
+# THIS LIST AND THE ONE IN write_chosen_settings.py MUST HOLD THE SAME SIX.
+# Between 2026-09-01 and 2026-09-12 they did not: the ranking ran over five and
+# the winner was written out to six, so Avalon was given a setting chosen
+# without it. Shortening this list is not the repair either -- the laboratory
+# reader RAISES on a dataset-and-model entry that is missing a representation
+# (alternative_data_noise_robustness.py, tuned_neural_params), so five here
+# would stop every Avalon task rather than run it at the default.
+# Guard: python scripts/test_rep_lists_agree.py
 REPS = ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']
 
 

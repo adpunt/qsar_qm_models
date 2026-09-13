@@ -1,37 +1,5 @@
 {
   "caco2": {
-    "dnn_bnn_full": {
-      "avalon": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      },
-      "chemberta": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      },
-      "ecfp4": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      },
-      "mhggnn": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      },
-      "pdv": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      },
-      "sns": {
-        "activation": "tanh",
-        "hidden_size1": 64,
-        "hidden_size2": 32
-      }
-    },
     "dnn_bnn_full_variational": {
       "avalon": {
         "activation": "relu",

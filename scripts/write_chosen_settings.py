@@ -67,9 +67,35 @@ _ROOT = os.path.dirname(_HERE)
 OUT_DIR = os.path.join(_ROOT, 'results', 'tuning_local')
 
 DATASETS = ['qm9', 'herg', 'caco2', 'logd']
-# AVALON IS OUT OF THIS STUDY (author, 2026-09-01). Its columns are not
-# shown and no run collects it. Rows already on disk are kept but unread.
-REPS = ['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'sns']
+# AVALON IS ONE OF THE SIX AND WAS NEVER DROPPED. Read out of the session logs
+# on 2026-09-13, not from a document.
+#
+# The comment that stood here until then said "AVALON IS OUT OF THIS STUDY
+# (author, 2026-09-01). Its columns are not shown and no run collects it."
+# Both halves are false. What happened on 2026-09-01 is this. At 08:10 an
+# earlier chat offered dropping ECFP4 and Avalon from the tuning tables to save
+# compute, ECFP4 costing 3.06x PDV per fit and Avalon 2.48x. At 08:11 the
+# author refused it sharply: she had asked which representation cost the most
+# so that she MIGHT remove it from the tables, and she had not asked for it to
+# be done. At 08:12 the same chat wrote back "Nothing is decided. The runs are
+# still going with all six", and at 08:13 she asked how many tuning runs were
+# left on ECFP4 and Avalon. There is no message of hers, that day or after,
+# dropping Avalon. The one sentence that reads like it -- "Drop Avalon, which
+# behaves almost identically to ECFP4" -- is an assistant's proposal of
+# 2026-08-28, not hers.
+#
+# So Avalon ranks here as one of the six. It has to: the setting chosen here is
+# shipped to Avalon by scripts/ship_tuned_settings.py, and a representation
+# cannot be given a setting picked by a contest it never entered. Both job
+# generators keep it in ALL_REPS and CLAUDE.md lists it as one of the six.
+# scripts/test_rep_lists_agree.py fails if these lists drift apart again.
+#
+# What the ranking can see is limited by what was fitted. Avalon has clean rows
+# in 4 of the 16 dataset-and-model tables, because an earlier chat stopped
+# collecting it on 2026-09-01 against the exchange above. The other 12 still
+# rank over five representations. Closing that means running the missing Avalon
+# tuning fits.
+REPS = ['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'avalon', 'sns']
 NOISE_REPS = ['pdv', 'chemberta']
 MODELS = {'dnn_bnn_full': 'Bayesian alpha',
           'mlp_bnn_full': 'Bayesian beta',

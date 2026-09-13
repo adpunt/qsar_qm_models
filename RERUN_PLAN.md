@@ -8995,7 +8995,50 @@ Two decisions it records: the three measured datasets are called **assay dataset
 and the Methods gains a seventh subsection, **Uncertainty quantification**, absorbing
 `paper.tex:217-219`.
 
-Three things it found that are not listed below and that no compute fixes:
+#### Second pass, 2026-09-12: 74 of 302 claims corrected
+
+The Methods drafts were re-read against the code by seven readers, one per subsection, plus three
+reading comparable published Methods sections for how much detail is normal. **302 claims checked,
+74 corrected, 31 not establishable from code.** All are applied in the guide, with the ones that
+changed a sentence's meaning listed under each subsection. Thirty-three judgement calls are marked
+`D1`-`D33` and are the author's.
+
+**The largest finding is that the drafts stated as properties of the study things that are
+properties of one pipeline.** Twenty-four of the seventy-four corrections are of that shape. The
+guide's new §M0 holds the thirteen-row table of how QM9 and the assay pipeline differ.
+
+**Nine findings are about the code or the run configuration rather than the text, and are written up
+as a handoff at the top of `HANDOFF.md` (2026-09-12)** with a line number for each. **None of them is
+a missing-results claim.** Six arrays and three running tasks were outstanding on 2026-09-12 --- two
+`unc_gp_h`, plus `unc_mlp_`, `unc_vbll`, `unc_ngbo`, `qm92_mlp`, `val_mlp-`, `qm90_mlp` and three
+running `qm92_ngb` --- every pending one at `(Priority)`, which is queue position and nothing else.
+`check_runs_landed.py` cannot see the queue, so anything pending reads as MISSING there; the queue
+snapshot is in the handoff. Summarised here so
+this file carries them too; the handoff has the reasoning and what to do.
+
+**One thing I reported as a defect and withdrew.** Five of the seven QM9 conditions never run noise
+level zero, and `copy_zero_rows.py` refuses to copy a clean *uncertainty* row into them. That is the
+author's decision of 2026-08-28, reasoned out at `slurm_scripts_qm9_rerun/generate_scripts.py:468-503`:
+`grouped_wider` is keyed to the scaffold group the out-of-fold pass splits on and `outlier_p10` picks
+at random, so both are structural nulls whatever is measured, and censoring is the only condition
+whose own clean level buys anything. Not a gap.
+
+The findings:
+
+| What | Where | Why it matters |
+|---|---|---|
+| **Three per-molecule models get no out-of-fold rows on QM9.** `uncertainty_pairs.json` names six models; `heteroscedastic_gp`, `dnn_bnn_full_variational_hetero` and `mlp_bnn_full_variational_hetero` are not among them although they are in the deep run | `slurm_scripts_qm9_rerun/generate_scripts.py:161-169`, `:1723-1730` | Three of the five configurations whose aleatoric term varies per molecule cannot answer a per-molecule question on QM9. On the assay side GP-Hetero was added 2026-09-07 and can |
+| **QM9's heteroscedastic Gaussian process skips the median-distance lengthscale initialisation.** It runs its own joint Adam loop rather than `fit_gp_with_fallback`, so it starts at gpytorch's default | `models/models.py:8449-8470` against `:2672-2706` | This is the initialisation that stopped the collapsed fits. The assay-side heteroscedastic process does do it (`KIRBy:1762`). One side of one model is still on the setting that produced the -0.016 |
+| **The hERG ChEMBL filters do not run.** `fetch_chembl_herg_ki` returns the cached two-column CSV before reaching the binding-assay filter, the median collapse or the inter-assay standard-deviation filter, and a live fetch is refused without `KIRBY_ALLOW_CHEMBL_FETCH=1` | `KIRBy tests/alternative_data_noise_robustness.py:958-981`, filters at `:1036-1049` | The Methods cannot claim those filters. The release-36 stamp and the release-37 re-check exist only in a provenance file that says it was reconstructed on 2026-09-04. Guide `D2` |
+| **The tuning ranking excluded Avalon and the chosen setting was shipped to Avalon.** `NOISE_REPS`/rank over five representations, then written under all six | `scripts/write_chosen_settings.py:69-71`, `scripts/ship_tuned_settings.py:60` | Author's 2026-09-01 decision put Avalon out of the tuning; nothing put it out of the shipping. Guide `D17` |
+| **Additional file 1 contradicts the code and nothing generates it.** Hand-typed LaTeX for eleven models: `min_samples_leaf` 1 against the pinned 5, `max_features` sqrt against the pinned 0.3, the Gaussian process as Tanimoto only, no BNN/VBLL/MVE/hetero-GP rows, no epoch cap, patience or MC-pass count | `additional_files.tex:38-122` against `models/model_defaults.py` (SPEC_VERSION 1.7.0) | The Methods' first sentence points at it. It should be generated from `model_defaults.py`, not edited. Additional file 12 is the SVM-kernel table `paper.tex:197` cites for a claim that is being deleted |
+| **The tuned setting was ranked over five representations and shipped to six.** `write_chosen_settings.py:69-71` excludes Avalon under a comment reading "AVALON IS OUT OF THIS STUDY (author, 2026-09-01) ... no run collects it"; `ship_tuned_settings.py:58,84` writes the chosen setting under all six | `scripts/write_chosen_settings.py`, `scripts/ship_tuned_settings.py` | **The comment is false about the study** — `ALL_REPS` in both generators contains Avalon. So all four Bayesian networks carry an Avalon setting chosen by a ranking Avalon never entered. `HANDOFF.md` item 3 |
+| **The two base networks are tuned over different parameter sets.** NN-alpha's optimiser always takes the shared default learning rate and its dropout is hard-coded at 0.2; NN-beta reads both from the tuned dictionary | `models/models.py:3458` and `:1050` against `:4193` and `:4066` | BNN-beta runs at lr 4.29e-3 and dropout 0.379 while BNN-alpha cannot leave 1e-3 and 0.2 whatever the sweep found. An alpha-versus-beta comparison is partly a comparison of how much tuning each was allowed. `HANDOFF.md` item 4 |
+| **The variance-head and heteroscedastic networks train at defaults beside tuned siblings.** Stated in the roster itself: "no sweep has ever scored them ... That is a fact about what has been measured, not a decision" | `models/tuning_rosters.py:161-172` | Four transformations per base network, two tuned and two not, so a BNN-versus-MVE comparison is partly tuned-versus-untuned. `HANDOFF.md` item 5 |
+| **ChemBERTa's collision count has never been produced** | `scripts/crosscheck_chemberta.py` gate 4 | Two percentages the Methods needs. `HANDOFF.md` item 6 |
+| ✅ **`decompose_seed_ensemble` was used and not imported** — latent `NameError` reachable only at `ngboost_ensemble_seeds > 1`, which the spec pins at 1 | `models/models.py:2466`, import at `:89-91` | **Fixed 2026-09-12**: added to the import. No behaviour change at the pinned setting |
+
+Three things the first pass found that are not listed below and that no compute fixes:
 
 | Where | Problem |
 |---|---|
@@ -17565,8 +17608,8 @@ not from a document: each of the four holds
 `case "$rep" in ecfp4 | pdv | chemberta) OOF_FLAGS="--oof-folds 5"`. So every training
 molecule is scored by a model that never saw it, which is what makes the split answerable at
 all — the injected noise lives in the training labels. `--oof-folds-scored` is set for
-`ngboost` alone (`OOF_FOLDS_SCORED = {'ngboost': 3}`, `:226`), so these four score all five
-folds.
+`ngboost` alone, from the table at `slurm_scripts_qm9_rerun/generate_scripts.py:226` which owns
+the value, so these four score all five folds.
 
 **On the laboratory datasets, all four are in the uncertainty runs.** `MODELS` in
 `slurm_scripts_uncertainty_rerun/generate_scripts.py` reads `QRF`, `NGBoost`, `GP`,
@@ -18186,6 +18229,322 @@ on the same rows.
 - **Deferred by the author, 2026-09-07:** figures, the analysis job's output, paper
   replacement text, and the six-decision menu. Threads T04 T05 T19 T20 T21 T42 T43 T44 T49
   T50 are parked, not closed.
+
+---
+
+#### D7. THE ORDERED SHEET FOR THE FIXES OF 2026-09-12 — paste top to bottom
+
+This covers the code fixes made on 2026-09-12 and nothing else. §13.29a still holds for
+everything before them and none of it is repeated here.
+
+**Every array range below was written by a generator.** Each generator was run on the laptop
+on 2026-09-12 and the range was read out of the `submit_all*.sh` file it wrote. No range was
+typed.
+
+**Two halves, and the first one is the urgent one.** A queued task reads the repository at the
+moment it starts, so a fix that is pulled before an array dispatches needs no resubmission at
+all. `sbatch` takes its own copy of the `.sh` file when it is submitted, so regenerating a job
+script does not disturb an array that is already in the queue. Part 1 is the pull. Part 2 is
+the work that has already run and has to run again.
+
+**What was outstanding when this was written**, from the author's `squeue` of 2026-09-12: six
+arrays pending and three tasks running. Two `unc_gp_h`, one `unc_mlp_`, one `unc_vbll`, one
+`unc_ngbo`, one `qm92_mlp`, one `val_mlp-`, one `qm90_mlp`, and three running `qm92_ngb`
+tasks. Every pending row says `(Priority)`, which is queue position. **Not one of them is a
+`heteroscedastic_gp` array on QM9**, and that model is what both QM9 blocks below are about.
+
+##### What needs nothing at all
+
+- **The uncertainty runs on logD, Caco-2 and hERG.** Their generator now reads its model list
+  out of `uncertainty_pairs.json` instead of holding a second copy. Generated on the laptop on
+  2026-09-12 it writes seven arrays of 27 tasks for the first submission and seven arrays of
+  36 tasks for the second — the same seven models, the same three representations and the same
+  walls as the arrays now in the queue. The two `unc_gp_h` arrays need nothing.
+- **The depth conditions on logD, Caco-2 and hERG.** `noise_conditions.json` now carries the
+  author's ruling of 2026-08-28 in its `scope` blocks. All three depth-only conditions were
+  already declared for that side, so the depth submission generates the same six conditions in
+  19 arrays and 327 tasks that it did before.
+- **Every QM9 array for a model other than `heteroscedastic_gp`.**
+
+---
+
+##### 1.1 — Read the queue. Queues nothing.
+
+Keep this output. Every block in Part 2 asks you to check a job name against it.
+
+```bash
+squeue -u $USER -o "%.20i %.12P %.20j %.2t %.11M %R"
+```
+
+##### 1.2 — Put the fixes on the cluster. Queues nothing.
+
+Two repositories. One of the day's fixes is in the assay runner, which lives in the KIRBy
+checkout. Print KIRBy's branch before pulling it, so you can see which branch you are on.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd $QSAR && bash scripts/pull_safely.sh && git log --oneline -1
+git -C $KIRBY rev-parse --abbrev-ref HEAD
+git -C $KIRBY pull --ff-only && git -C $KIRBY log --oneline -1
+```
+
+The KIRBy change is a pull and not a resubmission. `DeterministicRegressor` there now takes a
+dropout fraction from the tuned setting instead of the literal 0.2 that was written twice in
+its layers, and the value it falls back to is that same 0.2. No entry in either master tuned
+file carries a dropout under a `dnn` key today, so nothing already fitted differs.
+
+##### 1.3 — Prove the pull carried the two fixes. Queues nothing.
+
+Two greps, which cannot fail for an unrelated reason:
+
+```bash
+cd $QSAR
+grep -n 'init_rbf_lengthscale' models/models.py
+grep -n 'het_gp_rbf' uncertainty_pairs.json
+```
+
+**Good result:** the first `grep` prints six lines. Three of them are comments. The three that
+are code are where `init_rbf_lengthscale` is defined, the call to it in `fit_gp_with_fallback`,
+and a new call inside `_fit_het_gp` — that last one is the fix, and it is the last line
+printed. The second `grep` finds `het_gp_rbf` in `uncertainty_pairs.json`, which it was not in
+before 2026-09-12.
+
+Then the guards. Five of them, all exit 0 on the laptop on 2026-09-12:
+
+```bash
+cd $QSAR
+python scripts/test_het_gp_lengthscale.py
+python scripts/test_neural_tuned_keys.py
+python scripts/test_uncertainty_rosters_agree.py
+python scripts/test_rep_lists_agree.py
+python scripts/test_depth_conditions_scope.py
+```
+
+If one of these dies with `GLIBCXX_3.4.30 not found`, that is the login node's C++ runtime and
+not the fix — `runenv.sh` prints a warning about it. The two greps above are the proof that
+matters. A sixth guard, `scripts/test_tuning_sweep_buildable.py`, reads
+`results/tuning_local/timing.csv`, which is gitignored and lives on the laptop, so run that one
+there.
+
+---
+
+##### 2.1 — Regenerate QM9's four submissions. Queues nothing.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+python generate_scripts.py --stage 0 --max-hours 720
+python generate_scripts.py --stage 1 --max-hours 720
+python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
+python generate_scripts.py --stage 2 --conditions censoring --runtime-selection $CEN \
+    --max-hours 720 --out-dir $QSAR/slurm_scripts_qm9_censoring
+grep -A1 '^# qm9_s0_heteroscedastic_gp.sh' submit_all_s0.sh
+grep -A1 '^# qm9_s1_heteroscedastic_gp.sh' submit_all_s1.sh
+grep -A1 '^# qm9_s2_heteroscedastic_gp.sh' submit_all_s2.sh
+grep -A1 '^# qm9_s2_heteroscedastic_gp.sh' $QSAR/slurm_scripts_qm9_censoring/submit_all_s2.sh
+```
+
+**Good result**, which is what the same four commands wrote on the laptop on 2026-09-12:
+
+| submission | tasks | range the generator wrote | wall |
+|---|---|---|---|
+| the screen | 18 | `0-17` | `7:59:00` |
+| the main grid | 18 | `0-17` | `58:59:00` |
+| the deep run | 36 | `0-35` | `64:59:00` |
+| censoring | 6 | `0-5` | `64:59:00` |
+
+**The walls rose because the model now runs the out-of-fold pass.** `heteroscedastic_gp` joined
+`uncertainty_pairs.json` on 2026-09-12, so on ECFP4, PDV and ChemBERTa it fits six times per
+training run instead of once. The screen was `2:59:00` before, the main grid `10:59:00`, the
+deep run and censoring `11:59:00`. Memory is unchanged at 64 GB on all four.
+
+**Do not run `submit_all_s0.sh` or any of its three siblings.** Each submits all 19 arrays —
+327 tasks on the screen alone.
+
+##### 2.2 — Submit the four `heteroscedastic_gp` arrays. Queues 78 tasks.
+
+Job names these would duplicate: `qm90_heteroscedastic_gp`, `qm91_heteroscedastic_gp` and
+`qm92_heteroscedastic_gp`. The deep run and censoring both emit the last one, from two
+different directories (§13.23 A1). **Skip any line whose job name is still pending in the
+`squeue` output from block 1.1.** None of the three was in the queue on 2026-09-12.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+sbatch --account=stat-cadd --partition=long --array=0-17%5 qm9_s0_heteroscedastic_gp.sh
+sbatch --account=stat-cadd --partition=long --array=0-17%5 qm9_s1_heteroscedastic_gp.sh
+sbatch --account=stat-cadd --partition=long --array=0-35%5 qm9_s2_heteroscedastic_gp.sh
+cd $QSAR/slurm_scripts_qm9_censoring
+sbatch --account=stat-cadd --partition=long --array=0-5%5 qm9_s2_heteroscedastic_gp.sh
+```
+
+Each range here is the one the matching `grep` in block 2.1 printed. If a `grep` printed
+something else, use what it printed.
+
+**Of the 78 tasks, 55 fit anything.** In the deep run, 18 of the 36 are representations that
+`deep_run_pairs.json` does not list for this model and they exit 0 in seconds. In censoring the
+pair is this model on ECFP4 alone, so 1 task of the 6 does work.
+
+**What this replaces, counted from `results/decisions_arc/d0_coverage.csv` on 2026-09-12.** 28
+combinations of representation and noise condition are already on disk for this model on QM9,
+carrying 1,717 result rows. All six representations and all seven noise conditions appear. Not
+one of the 28 is marked collapsed, and the clean R² runs from 0.8345 on ECFP4 to 0.8914 on Sort
+& Slice — so nothing is being rescued. Every one of those 1,717 rows was fitted starting from
+gpytorch's lengthscale of 0.69 instead of from the median distance between training molecules,
+which makes them a different fit under the same name.
+
+**Nothing is deleted.** The re-run appends and the figure script keeps the last row per
+combination, so the new numbers win while both copies sit in the file. To keep the old rows
+separately, copy the directory aside before submitting.
+
+##### 2.3 — The assay BNN-Full on Caco-2. Queues 6 tasks.
+
+The ranking that picks one setting per model per dataset ran over five representations and the
+winner was then shipped to six. With Avalon in the ranking, BNN-Full on Caco-2 has no setting
+that beats the shared default, so its entry is gone from
+`results/master_tuned_hyperparameters_lab.json` and it now trains at the default. **That is the
+only entry in either master tuned file that changed.** The Caco-2 rows on disk were fitted at
+tanh with hidden widths 64 and 32.
+
+Job name this would duplicate: `val_bnn-full`. It was not in the queue on 2026-09-12.
+
+```bash
+cd $QSAR/slurm_scripts_validation_rerun
+python generate_scripts.py
+grep -n '^REPS=(\|^DATASETS=(' val_bnn-full.sh
+grep -n 'SBATCH --time' val_bnn-full.sh
+sbatch --account=stat-cadd --partition=long --array=6-11%4 val_bnn-full.sh
+```
+
+The two `grep` lines are where `6-11` comes from. The script picks its representation with the
+task index modulo the number of representations and its dataset with the task index divided by
+that number, so the six tasks whose dataset is the second name in `DATASETS` are 6 to 11. Read
+the `grep` output before running the `sbatch`. The wall is `17:00:00`.
+
+##### 2.4 — The two tuning sweeps. Generated on the laptop. Queues 42 tasks.
+
+Two reasons these are generated on the laptop and not on the cluster. The generator sizes every
+wall from `results/tuning_local/timing.csv`, which is gitignored and is on the laptop. And
+generated `.sh` files are gitignored on both sides, so they travel by `scp`.
+
+The first sweep is the four transformations that have never been scored by any sweep: the two
+variance-head networks and the two heteroscedastic variational networks. Four arrays of 6
+tasks, 24 tasks, 130.4 core-hours before headroom. The second is the DNN family, whose settings
+were chosen over a search of three numbers while the search now moves five — the learning rate
+and the dropout fraction were added to it on 2026-09-12. Three arrays of 6 tasks, 18 tasks,
+43.5 core-hours before headroom.
+
+On the laptop:
+
+```bash
+cd /Users/apunt/repos/qsar_qm_models
+python slurm_scripts_tuning/generate_scripts.py --settings 12 \
+    --models dnn_bnn_full_mve mlp_bnn_full_mve \
+             dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero
+python slurm_scripts_tuning/generate_scripts.py --settings 12 \
+    --models dnn dnn_bnn_full dnn_bnn_full_variational
+scp slurm_scripts_tuning/tune_dnn_bnn_full_mve.sh \
+    slurm_scripts_tuning/tune_mlp_bnn_full_mve.sh \
+    slurm_scripts_tuning/tune_dnn_bnn_full_variational_hetero.sh \
+    slurm_scripts_tuning/tune_mlp_bnn_full_variational_hetero.sh \
+    slurm_scripts_tuning/tune_dnn.sh \
+    slurm_scripts_tuning/tune_dnn_bnn_full.sh \
+    slurm_scripts_tuning/tune_dnn_bnn_full_variational.sh \
+    scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_tuning/
+```
+
+Each of those two commands ends by printing its own `sbatch` lines, range included. What they
+printed on 2026-09-12 is below, and all seven are `medium`. Job names are `tune_<model>`; none
+was in the queue on 2026-09-12.
+
+```bash
+cd $QSAR/slurm_scripts_tuning
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_mve.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_mlp_bnn_full_mve.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_variational_hetero.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_mlp_bnn_full_variational_hetero.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_variational.sh
+```
+
+| script | tasks | wall | slowest representation |
+|---|---|---|---|
+| `tune_dnn.sh` | 6 | `5:59:00` | Sort & Slice, 382 s per fit |
+| `tune_dnn_bnn_full.sh` | 6 | `11:59:00` | Sort & Slice, 974 s per fit |
+| `tune_dnn_bnn_full_variational.sh` | 6 | `29:59:00` | MHG-GNN, 2,650 s per fit |
+| `tune_dnn_bnn_full_mve.sh` | 6 | `16:59:00` | Sort & Slice, 1,461 s per fit |
+| `tune_mlp_bnn_full_mve.sh` | 6 | `25:59:00` | ECFP4, 2,255 s per fit |
+| `tune_dnn_bnn_full_variational_hetero.sh` | 6 | `44:59:00` | MHG-GNN, 3,991 s per fit |
+| `tune_mlp_bnn_full_variational_hetero.sh` | 6 | `43:59:00` | ECFP4, 3,911 s per fit |
+
+One task is one representation. Each fits 12 settings plus the default, 13 fits, on a sample of
+10,000 molecules at seed 42. The four transformations have no measured timing row of their own,
+so each is sized from the sibling it is one flag away from at the ratio the QM9 job generator
+already uses — 1.50 for the two variance-head networks and 1.51 for the two heteroscedastic
+ones. The generator prints every derived pairing by name. Derived is not measured.
+
+##### 2.5 — After a sweep finishes. Queues nothing.
+
+These five are the ones each generated script carries in its own header. A winner picked on the
+split that chose it proves nothing, so `--confirm` is not optional.
+
+```bash
+cd $QSAR
+python scripts/tune_hyperparameters.py --merge
+python scripts/tune_hyperparameters.py --confirm
+python scripts/tune_hyperparameters.py --write-master --margin 0.01
+python scripts/confirm_tuned_on_validation_datasets.py --run
+python scripts/confirm_tuned_on_validation_datasets.py --prune
+```
+
+`--write-master` writes `results/master_tuned_hyperparameters.json` in the cluster checkout,
+which is where the jobs read it. Copy it back to the laptop afterwards so the two agree.
+
+---
+
+##### 3.1 — What took. Queues nothing.
+
+```bash
+squeue -u $USER -o "%.20i %.12P %.20j %.2t %.11M %R"
+sacct -S 2026-09-12 -X -n -P --format=JobID,JobName%34,State,Elapsed \
+  | grep -E 'heteroscedastic_gp|tune_|val_bnn-full'
+```
+
+##### 3.2 — What is missing. Queues nothing.
+
+```bash
+cd $QSAR
+python scripts/check_runs_landed.py --stage 0 --verbose
+python scripts/check_runs_landed.py --stage 1 --verbose
+python scripts/check_runs_landed.py --stage 2 --verbose
+python scripts/check_runs_landed.py --stage 2 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun
+```
+
+On the laptop the same two directories are
+`/Users/apunt/repos/KIRBy/results/validation_rerun` and
+`/Users/apunt/repos/KIRBy/tests/results/uncertainty_rerun`. Both held zero entries when this was
+written, so it is the cluster copy that answers the question; a wrong directory reports
+everything missing, which reads like a catastrophe.
+
+**Read MISSING against the `squeue` output from 3.1, never on its own.** This tool cannot see
+the queue. A combination that is MISSING and is in `squeue` is waiting. A combination that is
+MISSING and is not in `squeue` needs resubmitting. Six arrays and three running tasks were
+outstanding on 2026-09-12, so the two halves are not a small correction.
+
+---
+
+##### One test exits 1, and it did before this sheet
+
+`python scripts/test_uncertainty_pairs.py` exits 1 with seven complaints, one per model on the
+uncertainty list, each of the form *"asks for 7h; the generator's own formula gives 84h"*. The
+same seven come back from the version of that file at the previous commit, so this is not
+something 2026-09-12 introduced. The cause is that the test prices a screen task from the
+model's laptop hours in the roster table, while the generator prices it from the ARC rate in
+`model_hours.json` — for `heteroscedastic_gp` those are 174 hours per 110 training runs against
+8.3228, measured on 15 finished tasks of an array of 18 on 2026-09-07. The walls in block 2.1
+are the generator's. Fixing the test to read the same graded rate the generator uses is an open
+thread and is not done.
 
 ---
 

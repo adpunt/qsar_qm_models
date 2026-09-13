@@ -61,14 +61,53 @@
   "stage_2_depth_only": [
     {
       "name": "student_t_nu5",
+      "scope": {
+        "mode": "pair_grid",
+        "settled": "2026-08-28",
+        "applies_to": [
+          "qm9_deep_run",
+          "validation_robustness",
+          "uncertainty_runs"
+        ],
+        "selection_file": "deep_run_pairs.json",
+        "confirmed_by_author": "2026-08-28",
+        "why": "The author, 2026-08-28, asked whether logD, Caco-2 and hERG were seeing only gaussian, grouped_wider and grouped_shifted while QM9 saw all seven: 'It should get all the same noise as qm9, update the documentation and wire it in.' So this condition runs on the three experimental datasets as well as on QM9. It is NOT a full-grid condition on either pipeline: on QM9 it is the deep run and on the experimental datasets it is the depth run, both of which are the model list crossed with the representation list in deep_run_pairs.json. That is a cross product, not the five named pairs censoring uses, so the mode is not pair_subset and the pair-subset cap in either generator must not be applied to it.",
+        "defined_on_experimental_datasets": "Yes, and it needs less structure than what already runs there. noiseInject resolves it to strategy 'uniform' with distribution 'student_t' -- it draws per label off the clean training spread and reads nothing else. grouped_wider and grouped_shifted resolve to the grouped strategies, which DO read the scaffold groups, and those have run on all three experimental datasets since the breadth grid. Nothing about this condition is degenerate, broken or undefined on logD, Caco-2 or hERG."
+      },
       "why": "One tail weight, not three. The three settings are within 0.0036 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.0076 to 0.0120 -- that being what the model carrying each effect could itself have detected, not the best model's threshold quoted against another model's effect, which is what this file said before 2026-08-27. Every figure here is on the two roster models at twelve replicates; the wider ranges quoted before 2026-08-27 were Ridge rows, and Ridge is not in the study. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
     },
     {
       "name": "outlier_p10",
+      "scope": {
+        "mode": "pair_grid",
+        "settled": "2026-08-28",
+        "applies_to": [
+          "qm9_deep_run",
+          "validation_robustness",
+          "uncertainty_runs"
+        ],
+        "selection_file": "deep_run_pairs.json",
+        "confirmed_by_author": "2026-08-28",
+        "why": "Same ruling as student_t_nu5: the author, 2026-08-28, 'It should get all the same noise as qm9, update the documentation and wire it in.' A cross product of the deep run's model list and representation list, not the five named pairs censoring uses, so the mode is not pair_subset.",
+        "defined_on_experimental_datasets": "Yes. noiseInject resolves it to strategy 'outlier' with p = 0.1 and lam = 3.0 -- it picks a tenth of the training labels at random and gives those a larger draw. It reads the labels and nothing else, so it needs less structure than the grouped conditions already running on logD, Caco-2 and hERG. Not degenerate, broken or undefined on any of the three."
+      },
       "why": "One contamination fraction, not three. Same evidence: the largest step of the 1% -> 5% -> 10% ladder is 0.0049 R2 and the largest of the three against Gaussian is 0.0047. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
     },
     {
       "name": "laplace",
+      "scope": {
+        "mode": "pair_grid",
+        "settled": "2026-08-28",
+        "applies_to": [
+          "qm9_deep_run",
+          "validation_robustness",
+          "uncertainty_runs"
+        ],
+        "selection_file": "deep_run_pairs.json",
+        "confirmed_by_author": "2026-08-28",
+        "why": "Same ruling as student_t_nu5: the author, 2026-08-28, 'It should get all the same noise as qm9, update the documentation and wire it in.' A cross product of the deep run's model list and representation list, not the five named pairs censoring uses, so the mode is not pair_subset. NOISE_DESIGN.md section 7 asks whether Laplace is queued; on the experimental datasets it is, in the same submission as the other two.",
+        "defined_on_experimental_datasets": "Yes, and this is the one of the seven with an experimental-assay argument behind it: Laplace is the only distribution family in the set actually fitted to real bioactivity error, and logD, Caco-2 and hERG are the datasets that error was measured on. noiseInject resolves it to strategy 'uniform' with distribution 'laplace', reading the labels alone. Not degenerate, broken or undefined on any of the three."
+      },
       "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every roster model at both levels tested. The largest difference anywhere is 0.0136 R2 -- LightGBM at level 1.5, against a replicate-to-replicate spread of 0.0574, so 0.24 of the wobble, paired t p = 0.350. At the reporting level it is 0.0024. Two earlier figures here, 0.0058 and 0.0087, were both wrong: the first was a Ridge row and Ridge is not in the study, the second understated the level-1.5 difference. Corrected 2026-08-27 from results/setting_selection_test.csv, so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
     }
   ],

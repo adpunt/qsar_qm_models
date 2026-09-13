@@ -160,9 +160,37 @@ TUNED_KEY = {
     'mlp_bnn_full_variational_hetero': 'mlp_bnn_full_variational_hetero',
     # The two variance-head networks. They have their own keys, so they read
     # their own entry or none -- and no sweep has ever scored them, so as things
-    # stand they train at their defaults. That is a fact about what has been
-    # measured, not a decision to leave them untuned; tuning them needs a sweep
-    # that includes `--loss heteroscedastic`.
+    # stand they train at their defaults while their siblings do not. That is a
+    # fact about what has been measured, not a decision to leave them untuned.
+    #
+    # SETTLED 2026-09-12: the sweep is run with `--loss heteroscedastic` so that
+    # all four transformations of each base network are on the same footing.
+    # Both builders now read hidden width, depth, dropout and learning rate from
+    # the same four keys (models/models.py, train_dnn_model and
+    # train_mlp_variant_model), with the shared spec as the fallback, so the
+    # entry that sweep writes is picked up with no further code change. Guard:
+    # scripts/test_neural_tuned_keys.py.
+    #
+    # TWO THINGS BLOCKED THAT SWEEP and both were fixed the same day, in
+    # scripts/tune_hyperparameters.py rather than here.
+    #
+    # `search_family` strips '_bnn_full', '_bnn_full_variational' and
+    # '_bnn_full_variational_hetero' to find a model's search space, and
+    # '_bnn_full_mve' was not among them -- so these two resolved to no search
+    # space at all and every sweep recorded them 'blocked' and exited 0. That is
+    # why no sweep has ever scored them. The suffix is in the list now.
+    #
+    # And SEARCH_SPACES['dnn'] searched two hidden widths and the activation
+    # while SEARCH_SPACES['mlp'] searched one width, the depth, the dropout
+    # fraction and the learning rate. The dnn family was tuned over three
+    # numbers and the mlp family over four, which is why every mlp entry in
+    # results/master_tuned_hyperparameters.json carries an lr and a dropout_rate
+    # and no dnn entry carries either. Both now search the same two on top of
+    # their own widths. The settings already in the file for the dnn family were
+    # drawn from the narrower space, so they are a re-sweep, not a comparison.
+    #
+    # Sizing the sweep is slurm_scripts_tuning/generate_scripts.py; these two
+    # have no measured timing row and are sized from their plain siblings there.
     'dnn_bnn_full_mve':         'dnn_bnn_full_mve',
     'mlp_bnn_full_mve':         'mlp_bnn_full_mve',
     # The heteroscedastic Gaussian process still has NO tuned path:

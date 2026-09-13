@@ -10,10 +10,17 @@
 > paragraph. Everything else is a heading and one line saying what it waits for. Those units need
 > the re-run, and drafting them before it would mean inventing findings and then rewriting them.
 >
-> **Part One is sourced from the code.** Every factual claim in it was read out of the code in
-> September 2026 and then independently re-checked against the same lines by a second pass —
-> nothing comes from `RERUN_PLAN.md`, from a code comment, or from memory. Where a number could not
-> be established from code it is marked `TODO` rather than guessed.
+> **Part One is sourced from the code, and has now been through two passes.** The second pass
+> (12 September 2026) re-read every claim against the pipelines that implement it and **corrected 74
+> of 302**; 31 more could not be established from code at all. Nothing comes from `RERUN_PLAN.md`,
+> from a code comment, or from memory. Where a number could not be established it is marked `TODO`
+> rather than guessed. The corrections that changed what a sentence says are listed under each
+> subsection as **Corrected against the code in this pass**, so you can see what moved.
+>
+> **What is left is nine code defects, not writing choices.** They are in `HANDOFF.md`, each verified
+> at a line number, and each names where it lands in the Methods. Where the text needed a call
+> between two defensible forms I made it and said which comparable paper it came from, so any of them
+> reverses in one edit. Four numbers are `TODO` because they wait on a run or a read.
 >
 > Line numbers are from `paper.tex` as of 4 September 2026 and were each confirmed by searching for
 > the quoted text. They will drift as you edit, so anchor on the quotation.
@@ -28,7 +35,7 @@
 
 | Unit | State |
 |---|---|
-| Methods, M1–M7 | **Drafted** |
+| Methods, M0–M7 | **Drafted**, second pass applied. Nine code defects in `HANDOFF.md` block four sentences |
 | Limitations | **Drafted** |
 | Results | **Outlined** — structure and figure set fixed, prose waiting on the re-run |
 | Everything else | Heading only — waiting on the re-run |
@@ -38,7 +45,7 @@
 ## What broke, and why the Methods cannot be patched
 
 The Methods in `paper.tex` describes a study that no longer exists in the code. Not in emphasis — in
-substance. Eight things changed, and each one forces text:
+substance. Nine things changed, and each one forces text:
 
 1. **The six noise strategies are gone.** Gaussian, Outlier, Quantile, Threshold, Value-proportional
    and Heteroscedastic were, on measurement, one strategy at six doses. They were replaced on
@@ -58,17 +65,22 @@ substance. Eight things changed, and each one forces text:
    which two.
 5. **The model roster is 19 configurations, not 11.** The heteroscedastic Gaussian process, the two
    heteroscedastic VBLL networks and the two mean-variance networks are in the run and absent from
-   the paper. The last two are the study's flagship decomposition case, which line 218 says was not
-   attempted.
+   the paper. Four Bayesian transformations are applied to each base network, not three, and the
+   last four configurations are the ones line 218 says were not decomposed.
 6. **The uncertainty decomposition is real machinery now.** One shared definition, five routines, a
    declaration on every row of whether each half varies per molecule, and a check that refuses a row
    disagreeing with it. Line 218's list of what was not decomposed is now wrong in both directions.
 7. **hERG is 1,415 compounds, not 1,482** (lines 197 and 556).
 8. **Several load-bearing implementation choices are new and undescribed**: the split is no longer
    DeepChem's; target standardisation uses the clean training statistics; the Gaussian process
-   lengthscale is initialised from the data and a collapsed fit is recorded rather than scored;
-   Gaussian processes are capped at 5,000 training molecules; the full BNNs now carry a KL term that
-   they did not have when the paper's numbers were produced.
+   lengthscale is initialised from the data and a collapsed fit is flagged and keeps its accuracy
+   score while losing its per-molecule uncertainty; Gaussian processes are capped at 5,000 training
+   molecules on QM9; the full BNNs now carry a KL term that they did not have when the paper's
+   numbers were produced; and four Bayesian network configurations run at tuned settings rather than
+   at the shared default.
+9. **QM9 and the three assay datasets are two implementations, not one method**, and they differ in
+   thirteen ways that change how a result reads. This is the largest finding of the second pass and
+   it has its own subsection, M0.
 
 ---
 
@@ -87,9 +99,10 @@ paragraph of Models, which has grown too large to sit there.
 | — | **M5 Uncertainty quantification** | New subsection |
 | NoiseInject Framework (364–373) | **M7 NoiseInject framework** | Three sentence fixes |
 
-The current Methods is 3,226 words of prose. The drafts below come to roughly 4,000. The growth is
-in Label noise and the new uncertainty subsection; everything else is close to its current length or
-shorter.
+The current Methods is about 3,200 words of prose. The drafts below come to about 4,000 — a quarter
+longer, not double, and the cuts made on the literature's advice paid for roughly half the growth.
+Ten comparable benchmarks run 1,740 to 6,000 words of Methods, four of them in this journal, so
+there is room either way; what matters is where the words sit.
 
 **Naming.** The three measured datasets are called **assay datasets** throughout. The code calls
 them "validation" everywhere, which collides with the early-stopping validation split inside each
@@ -97,12 +110,45 @@ fold; nothing is being renamed in the code, but the paper should not use that wo
 
 ---
 
+## M0. The thing that broke every draft before this one: two pipelines, not one method
+
+This is the largest finding of the re-check and it shapes every subsection below. QM9 and the three
+assay datasets are **two separate implementations of the same design**, and they differ in ways a
+reader would never guess and that change how a result reads:
+
+| | QM9 | Assay datasets |
+|---|---|---|
+| Split | one 80/10/10 scaffold split per replicate | 5-fold scaffold cross-validation, one deterministic partition |
+| Repetition | 10 replicates, each a new 10,000-molecule draw and a new split | one fit per cell |
+| Fitted share | 80% of the sample | about 65% of the dataset |
+| Noise dosed against | that replicate's clean **training** label spread | the **whole** clean label column's spread |
+| Noise drawn | per split | once over the whole column, then indexed by molecule |
+| Grouped conditions | affected groups chosen on the training split, so held-out molecules are unaffected | affected groups chosen over the whole column, so held-out molecules **can** be affected |
+| Conditions run | 3 at full breadth, 3 more on named pairs, censoring on named pairs | 3 at full breadth; the other four were not submitted |
+| Level zero | run only for Gaussian and censoring; copied to the rest | run for every condition |
+| Validation split | every model has one, and it is noised | only the neural models have one |
+| Temperature calibration | fitted on validation, recorded | none |
+| GP training cap | binds (5,000 of ~8,000) | never binds |
+| NGBoost early stopping | on the held-out validation split | on a fifth it carves from its own training rows |
+| Noise injector | Rust | Python (`noiseInject`) |
+
+Every one of those rows is code-verified, and the last three are being fixed rather than described
+(`HANDOFF.md` items 1, 2 and the confirmation at the end).
+
+**The drafts below scope every sentence** — "on QM9 …; on the three assay datasets …" — rather than
+writing about "the study" and leaving a reader to guess. It costs perhaps eighty words across the
+whole Methods and it is the only form that is true everywhere. The table above is the supplementary
+version if you would rather state the differences once and write unscoped prose; that is a smaller
+Methods and a reader who has to hold a table in their head.
+
+---
+
 ## M1. Datasets: full rewrite (replaces lines 192–200)
 
-**Why wholesale:** five of its factual claims are now wrong (the subset is not fixed across
-replicates, the splitter is not DeepChem's, six strategies and eleven levels are gone, hERG's count
-is wrong, and the standardisation sentence is silent on the two things that were fixed), and the
-assay datasets need the fold structure stated because their error bars mean something different from
+**Why wholesale:** five of its factual claims are wrong (the subset is not fixed across replicates,
+the splitter is not DeepChem's, six strategies and eleven levels are gone, hERG's count is wrong,
+and the standardisation sentence is silent on the two things that were fixed), and the assay
+datasets need their fold structure stated because their error bars mean something different from
 QM9's.
 
 > The majority of experiments were conducted on the QM9 molecular property dataset
@@ -117,71 +163,126 @@ QM9's.
 > $10{,}000$, $20{,}000$, and $30{,}000$, resulting in similar performance at all sizes except
 > $N = 5{,}000$ which experienced minor degradation.
 >
-> We selected HOMO--LUMO energy gap as the primary prediction target in QM9, as it captures
+> We selected the HOMO--LUMO energy gap as the primary prediction target in QM9, as it captures
 > electronic characteristics relevant to molecular reactivity and stability \citep{Islam2019,
-> Hllermeier2021}. The HOMO--LUMO gap is a well-established target for quantum chemistry benchmarks,
-> and is defined as the difference between the highest occupied and lowest unoccupied molecular
-> orbital energies, directly relating to a molecule's electronic excitability, charge transfer
-> capability, and chemical stability \citep{Fediai2023}. Labels are used in electronvolts; across a
-> typical replicate the gap has a mean of 6.86\,eV and a standard deviation of 1.27\,eV, which is
-> the scale against which injected noise is dosed. We also assumed that thanks to the consistent
-> calculation method, and notwithstanding approximations in the level of theory used, the QM data
-> were ``free'' of noise.
+> Hllermeier2021, Fediai2023}. Labels are used in electronvolts; across a replicate the clean
+> training labels have a mean near 6.86\,eV and a standard deviation near 1.28\,eV, and that
+> training standard deviation is the scale against which injected noise is dosed. We also assumed
+> that thanks to the consistent calculation method, and notwithstanding approximations in the level
+> of theory used, the QM data were ``free'' of noise.
 >
 > For each replicate, a scaffold-based train/validation/test split (80/10/10) was generated on
 > Bemis--Murcko scaffolds computed with \texttt{RDKit} \citep{rdkit}. Acyclic molecules have no
-> Murcko scaffold, and each is treated as its own group rather than being pooled into a single
-> empty-scaffold group; groups are then assigned to the three parts in random order until each
-> reaches its quota. The distinction matters on QM9, where acyclic molecules are close to half the
-> sample: pooling them places nearly all of them in the training set and removes them from
-> evaluation entirely. Scaffold splits were used to minimize structural overlap between sets. While
-> predictive performance typically drops when switching from random splitting to a more challenging
-> scenario like scaffold splitting, the use of scaffold splitting discourages the QSAR model from
-> overfitting \citep{Heid2023}.
+> Murcko scaffold; rather than pooling them into a single empty-scaffold group, each distinct
+> acyclic structure forms a group of its own. Groups are placed in random order, and each is
+> assigned to the first of training, validation and test it still fits in under an 80\% and a 90\%
+> cumulative cap, with the remainder going to test. The distinction matters because pooling the
+> acyclic molecules places all of them in the training set and removes them from evaluation
+> entirely; in a typical replicate they are about a tenth of the sample. Scaffold splits were used
+> to minimize structural overlap between sets. While predictive performance typically drops when
+> switching from random splitting to a more challenging scenario like scaffold splitting, the use of
+> scaffold splitting discourages the QSAR model from overfitting \citep{Heid2023}.
 >
-> Prior to modeling, all molecular structures were sanitized and canonicalized using \texttt{RDKit}
-> to remove invalid valence states and standardize atom and bond typing \citep{rdkit}. Target values
-> were standardized to zero mean and unit variance using the mean and standard deviation of the
-> \emph{clean training} labels alone, so that the target scale does not move with the amount of
-> noise injected; noise is added to the raw label before this step. Errors are converted back into
-> the label's own units before being reported. Data loading and pre-processing were performed from a
-> fixed base random seed, from which each replicate derives its own.
+> Prior to modeling, molecules were parsed and sanitized with \texttt{RDKit} and rewritten as
+> canonical SMILES without stereochemistry \citep{rdkit}; anything \texttt{RDKit} could not parse was
+> dropped. Every representation is therefore computed from a stereochemistry-free structure. Target
+> values were standardized to zero mean and unit variance using the mean and standard deviation of
+> the \emph{clean training} labels alone, so that the target scale does not move with the amount of
+> noise injected; noise is added to the raw label before this step, and errors are converted back
+> into the label's own units before being reported. Data loading and pre-processing were performed
+> from a fixed base random seed, from which each replicate derives its own. The molecule subset and
+> the split depend on the replicate index alone, so a given replicate holds the same molecules,
+> divided the same way, under every noise condition, every noise level and every representation.
 >
 > To assess whether noise robustness results generalize beyond the HOMO--LUMO gap, we evaluated the
 > same models and representations on three datasets with experimentally measured endpoints. From the
 > OpenADMET initiative \citep{openadmet} we used LogD (lipophilicity, $N = 5{,}039$) and Caco-2
 > efflux permeability ($N = 2{,}161$), the latter modelled as $\log_{10}$ of the efflux ratio. We
-> also selected hERG $K_i$ data from ChEMBL \citep{Zdrazil2023}, following a protocol inspired by
-> \citet{landrum2024}: filter for binding assays and deduplicate by median pChEMBL value. We then
-> removed compounds with inter-assay standard deviation $> 1.0$ log unit \citep{Zdrazil2023}. This
-> results in $N = 1{,}415$ compounds, extracted from ChEMBL release 36 and re-checked against
-> release 37 without change. For all three datasets, structures were standardized by retaining the
-> largest covalently bonded fragment and canonicalizing with \texttt{RDKit}, and duplicate
-> structures were collapsed to their median label. The clean label standard deviations are 1.19,
-> 0.44 and 0.91 log units respectively.
+> also used hERG binding data from ChEMBL \citep{Zdrazil2023}, extracted following a protocol
+> inspired by \citet{landrum2024}: binding assays only, unqualified pChEMBL values deduplicated to a
+> median per compound, and compounds whose inter-assay standard deviation exceeded 1.0 log unit
+> removed, giving $N = 1{,}415$ compounds. For all three datasets, structures were standardized by
+> retaining the largest covalently bonded fragment and canonicalizing with \texttt{RDKit}, and
+> duplicate structures were collapsed to their median label. The clean label standard deviations are
+> 1.19, 0.44 and 0.91 log units respectively, and each is the scale against which noise is dosed on
+> that dataset.
 >
-> The three assay datasets were evaluated under the same noise conditions and the same noise levels
-> as QM9. Five-fold scaffold cross-validation was conducted using \texttt{GroupKFold} on Murcko
-> scaffolds; within each fold a further 20\% of the training block was carved off, again by scaffold
-> group, to provide an early-stopping set, so approximately two thirds of each dataset is fitted in
-> any one fold. Unlike QM9, each configuration here is fitted once rather than repeated under new
-> seeds. The assay results therefore carry variation across the five folds, which mixes sampling
-> with scaffold difficulty, but no run-to-run error term.
+> Each assay dataset was evaluated under five-fold scaffold cross-validation using
+> \texttt{GroupKFold} on Murcko scaffolds; within each fold a further fifth of the training block's
+> scaffold groups was held out as an early-stopping set, so approximately 65\% of a dataset is
+> fitted in any one fold. Labels are standardized within a fold on that fold's clean training labels,
+> as on QM9. The five folds are a single deterministic partition, and each configuration is fitted
+> once rather than repeated under new seeds; the noise is likewise drawn once over the whole label
+> column and indexed by molecule, so a molecule carries the same corruption in whichever fold it
+> falls. The assay results therefore carry variation across folds, which mixes sampling with
+> scaffold difficulty, but no run-to-run error term.
 
 **What that last sentence buys you, and why it is not optional.** With one fit per cell there is no
 estimable residual term in an assay-side variance decomposition, and no assay model-versus-model
 comparison carries a run-to-run error bar. A reader who assumes the fold spread is a replicate
 spread will over-read every assay comparison in the paper. State it once here and the Results can
-lean on it.
+lean on it. The second half — that even the noise draw is fixed across folds — makes the claim
+stronger than the earlier draft admitted.
+
+**Corrected against the code in this pass.**
+
+- The acyclic share is **about a tenth of a replicate**, not "close to half". 1,024 of 10,000 in
+  replicate 0, reproduced from the pipeline's own sampling code. The 42.5% in the splitter's
+  docstring is the rate in the first 2,000 rows of QM9 *in file order*, and QM9 is ordered by
+  molecule size. The earlier draft carried the docstring's number into prose.
+- The label spread is **1.28 eV, not 1.27**, and it varies 1.27–1.30 across draws. 1.27 was one
+  replicate. The dose anchor is specifically the clean **training** split's population standard
+  deviation, which is a different 80% subset from the replicate the earlier draft attributed it to.
+- Group assignment is **first-fit under cumulative caps**, not "until each reaches its quota". Test
+  has no cap and takes the remainder; a group too large for training does not block a later smaller
+  one.
+- Acyclic groups are keyed on the **stereochemistry-free canonical SMILES**, not on the row index,
+  so two copies of one acyclic molecule stay in the same group and the same split.
+- Sanitisation **drops** what it cannot parse; nothing repairs a valence state. "To remove invalid
+  valence states and standardize atom and bond typing" describes work the code does not do.
+- The assay early-stopping carve is **20% of the training block's scaffold groups**, not of its rows;
+  the realised row share runs 16.5–22.5%. The fitted share is **65%** (measured 0.620–0.668), not
+  "approximately two thirds", which was close but was arrived at from the wrong arithmetic.
+
+**Blocked on a fix, not on a choice.**
+
+- **The hERG sentence above cannot be written yet.** The binding-assay filter, the median collapse
+  and the inter-assay standard-deviation filter are real code that **does not run**: the loader
+  returns a cached two-column CSV before reaching any of them. The release-36 stamp and the
+  release-37 re-check live only in a provenance file that says it was reconstructed on 2026-09-04.
+  `HANDOFF.md` item 8 settles it by fetching into a separate file and comparing — **not** by
+  re-fetching onto the working path, which would change N and invalidate every assay result. Until
+  that comparison comes back, the fallback wording is *"a cached extract of 1,415 compounds prepared
+  by the protocol of \citet{landrum2024}"*, with the release numbers dropped.
+- **"Could not be processed by \texttt{RDKit}" rests on a comment.** No script regenerates
+  `data/valid_qm9_indices.pth`. `HANDOFF.md` item 7. If it comes back unreproducible, the clause
+  goes and only the count stays.
+
+**Decided here, so you do not have to.**
+
+- **The HOMO--LUMO paragraph is cut from 110 words to two clauses.** Heid et al. (JCIM 2023) select
+  the same target with "as well as the HOMO-LUMO gap as a size-intensive property"; Kolmar & Grulke
+  justify all eight of their endpoints in one sentence. The original is at `paper.tex:194` if you
+  want it back — it is the only correct prose I cut from M1.
+- **The preliminary sample-size sentence stays.** Nothing in the repository sets up that sweep, so it
+  is yours rather than the code's, but one-sentence pilot justifications are house style: Scalia et
+  al. (2020) and Kolmar & Grulke both carry the identical move.
+- **The dose-anchor difference is stated by saying each dataset's own spread is its scale**, which is
+  true on both sides without a sentence about the difference. QM9 doses against the clean *training*
+  labels; the assay runner doses against the whole clean label column, deliberately, so a molecule's
+  corruption does not depend on which fold it lands in.
+- **The ChEMBL field list goes in once item 8 reports** — target, standard type, pChEMBL not null,
+  relation, data-validity comment, about thirty words. Landrum & Riniker name theirs verbatim and you
+  cite them for the protocol.
+
 
 ---
 
 ## M2. Molecular Representations: full rewrite (replaces lines 201–206)
 
-**Why wholesale:** it describes six representations, two of which (one-hot SMILES, mol2vec) are
-refused by name in the code, and omits two that are in the run (Avalon, ChemBERTa). It also calls
-Sort & Slice binary, which it no longer is, and attributes feature extraction to Rust, which does
-none.
+**Why wholesale:** it describes six representations, two of which are no longer in the study, and
+omits two that are (Avalon, ChemBERTa). It also calls Sort & Slice binary, which it no longer is,
+and attributes feature extraction to Rust, which does none.
 
 > In this study we evaluated six molecular representations spanning circular fingerprints, a
 > substructure-count fingerprint, physicochemical descriptors, and pretrained embeddings. Two are
@@ -198,84 +299,111 @@ none.
 > Substructures are sorted by prevalence in the training set, and the top $L$ ($L=1024$) are sliced.
 > We retain the substructure \emph{counts} rather than reducing them to presence bits, so SNS is a
 > small-integer count vector rather than a binary one. The vocabulary is fitted on training
-> molecules only; on the assay datasets it is refitted within each cross-validation fold, so that no
-> held-out structure enters the feature basis. Three QM9 molecules -- methane, ammonia and water --
-> each contain a single Morgan substructure that occurs in only one molecule, so none of them can
-> enter a top-$L$ vocabulary selected by training prevalence and their SNS vector is identically
-> zero. These three were excluded from every representation rather than from SNS alone, so that all
-> six representations are compared on the same molecules. Part of the QM9 grid completed before this
-> exclusion was applied; since each replicate draws 10{,}000 molecules from 132{,}480, approximately
-> one replicate in five contains one or two of the three, and in those replicates the earlier runs
-> trained on 10{,}000 molecules where the later ones trained on 9{,}999 or 9{,}998. Measured on three
-> matched pairs of runs, the resulting difference in clean $R^2$ ranged from 0.0013 to 0.0239. Across
-> the 351 combinations of a model, a representation and a noise type, the clean $R^2$ range between
-> replicates of the same combination has a median of 0.062 and exceeds 0.0239 in 314 of them, so the
-> effect of the exclusion is smaller than the replicate-to-replicate variation already present and
-> runs from either side are reported together.
+> molecules only, and is refitted for every replicate on QM9 and within every fold on the assay
+> datasets, so no held-out structure enters the feature basis. A molecule whose count vector is
+> identically zero under the fitted vocabulary carries no information in this representation, and is
+> removed from every representation rather than from SNS alone, so that all six are compared on the
+> same molecules; on QM9 this removes none, one or two molecules from a replicate's 10,000. Part of
+> the QM9 grid completed before this rule was applied, and runs from either side are reported
+> together: the measured difference in clean $R^2$ between matched runs is smaller than the spread
+> already present between replicates of the same model, representation and noise condition
+> (Additional file~[N]).
 >
 > We also used 200-dimensional physicochemical descriptor vectors (PDVs) computed from RDKit
-> molecular descriptors (\texttt{MolecularDescriptorCalculator}), encompassing molecular weight,
-> LogP, topological polar surface area, topological connectivity indices, partial charges, VSA bins,
-> EState indices, hydrogen bond donor/acceptor counts, and functional group counts, among others
-> \citep{Cherkasov2014}.
+> molecular descriptors (\texttt{MolecularDescriptorCalculator}) \citep{Cherkasov2014}.
 >
 > Two pretrained learned representations were included. ChemBERTa \citep{Chithrananda2020}
 > embeddings were taken from the \texttt{ChemBERTa-77M-MTR} checkpoint as the mean over non-padding
 > token embeddings, giving a 384-dimensional vector. The tokenizer distributed with this checkpoint
 > falls back to single characters, so the encoding does not distinguish two-letter halogens, formal
-> charges, stereocentres or azole tautomers, and a small proportion of molecules consequently
-> receive identical embeddings (TODO\% on QM9, TODO\% on hERG). Results for ChemBERTa here should be
-> read as results for this checkpoint rather than for transformer embeddings in general. As a
-> representative GNN-based learned representation, we included graph embeddings generated by
-> Molecular Hypergraph Grammar GNNs (MHG-GNN) \citep{kishimoto2023}. MHG-GNNs are a GIN-based
-> autoencoder pre-trained on 1.34 million PubChem molecules using $\beta$-VAE loss, producing
-> 1024-dimensional embeddings through iterative message passing. MHG-GNN was originally developed
-> for material science, and has demonstrated strong performance on property prediction tasks for
-> polymers, photoresistors, and chromophores \citep{kishimoto2023}.
+> charges, stereocentres or azole tautomers, and a proportion of molecules consequently receive
+> identical embeddings (TODO\% on QM9, TODO\% on hERG). Results for ChemBERTa here should be read as
+> results for this checkpoint rather than for transformer embeddings in general. As a representative
+> GNN-based learned representation, we included graph embeddings generated by Molecular Hypergraph
+> Grammar GNNs (MHG-GNN) \citep{kishimoto2023}, a GIN-based autoencoder pre-trained on 1.34 million
+> PubChem molecules using $\beta$-VAE loss, producing 1024-dimensional embeddings through iterative
+> message passing.
 >
-> All representations are stored as 32-bit floating point values with no per-molecule rescaling.
-> Whether a representation is standardized is decided from the feature matrix rather than from its
-> name: the continuous representations (PDV, ChemBERTa and MHG-GNN) are z-score normalized per
-> feature, with the mean and standard deviation computed on the training set and constant-variance
-> features set to unit scale, while binary fingerprints and substructure counts are passed to the
-> model unscaled. Representations were precomputed in Python using \texttt{RDKit} and the two
-> pretrained encoders; a Rust component performs label processing, noise injection and serialization.
+> No representation is rescaled per molecule. The continuous representations (PDV, ChemBERTa and
+> MHG-GNN) are z-score normalized per feature, with the mean and standard deviation computed on the
+> training set and constant-variance features set to unit scale, while binary fingerprints and
+> substructure counts are passed to the model unscaled. Stereochemistry is absent from every
+> representation: the substructure fingerprints are generated without chirality, and on QM9 the
+> SMILES they are computed from are canonicalized without it. Representations were precomputed in
+> Python using \texttt{RDKit} and the two pretrained encoders; on QM9 a Rust component performs
+> label processing, noise injection and serialization, and the three assay datasets use a Python
+> implementation of the same noise scheme.
 
-**Three notes.**
+**Corrected against the code in this pass.**
 
-- **The Sort & Slice exclusion sentence is the author's decision, taken 2026-09-07**, between
-  re-running every QM9 task that ran before the exclusion and stating the difference. She chose to
-  state it. The numbers in it are measured, not asserted: the 0.0013 to 0.0239 shift is from three
-  matched pairs of runs (`RERUN_PLAN.md` §13.27 D4g), and the replicate range comes from
-  `python scripts/sns_exclusion_cost.py --results results` over 3,191 clean rows. Re-run that
-  command and update the median and the 314 if more replicates land before submission.
-  ⚠️ Part of that replicate range is refit nondeterminism rather than sampling: the loader reports
-  145 repeated combination-and-replicate pairs differing by more than 0.001 $R^2$ with the same
-  seed and hyperparameters, largest 0.1621. That is tracked in `RERUN_PLAN.md` §13.28 and §13.30 and
-  does not change the comparison, because both numbers are measured on the same rows.
-- The ChemBERTa caveat is not optional. The tokenizer collapses the checkpoint's chemical vocabulary
-  to single characters, so two chemically distinct molecules can receive one vector. The counting
-  code exists (`scripts/crosscheck_chemberta.py`, gate 4) but **has not been run**, so the two
-  percentages are `TODO` rather than quoted. Run it before this paragraph goes in.
-- `\citep{avalon}` does not exist in `refs.bib`. Add it — Gedeck, Rohde & Bartels, *J. Chem. Inf.
-  Model.* 46(5):1924–1936, 2006. `\citep{Chithrananda2020}` **does** exist in `refs.bib` (line 1427).
+- **The pool count was wrong here and right in M1.** The earlier draft said each replicate draws
+  10,000 "from 132,480". The code's pool is 129,428. 132,480 is the non-blank line count of an
+  untracked SMILES dump on disk and appears nowhere in the pipeline.
+- **The three-molecule story does not survive.** Methane's and water's single Morgan substructure
+  each occur in one molecule, but **ammonia's occurs in 74**, because QM9 holds multi-component
+  entries carrying an NH$_3$ fragment. More importantly the code is not a list of three: it rebuilds
+  the vocabulary every replicate and drops whatever comes back all-zero. On three simulated
+  replicates the drop count was 0, 0 and 1. The Methods should state the rule, not the anecdote —
+  which is what the draft above now does, and it is shorter for it.
+- **"The earlier runs trained on 10,000 molecules"** was wrong twice over: 10,000 is the sample, and
+  the training block is about 8,000.
+- **Only three of the six representations are 32-bit floats.** ECFP4 and Avalon are stored as packed
+  bits, SNS as unsigned 16-bit counts. The sentence claiming float32 for all six also contradicted
+  the same paragraph's "binary vectors of 2048 bits". Cut, on the literature's advice as well —
+  no comparable paper reports its float width.
+- **mol2vec is not refused by name**, because it has no code path at all. The names refused outright
+  are `smiles`, `randomized_smiles` and `continuous_pdv`. None of this needs to be in the paper;
+  it corrects the *reason* the subsection is being rewritten, not the text.
+- **Stereo-blindness is not a ChemBERTa-only caveat.** The substructure fingerprints are generated
+  with `chirality=False` and QM9's SMILES are canonicalized without stereochemistry, so no
+  representation in the study sees a stereocentre. That is now one clause in the standardisation
+  paragraph, and it is worth having because QM9's labels are conformer-specific.
+- **The Sort & Slice vocabulary is refitted per replicate on QM9 too**, not only per fold on the
+  assay side, so slot $k$ does not name the same substructure across replicates.
+
+**Blocked on a fix.**
+
+- **The two ChemBERTa percentages are `TODO`.** `scripts/crosscheck_chemberta.py` gate 4 counts them
+  and has never been run — `HANDOFF.md` item 6. The sentence works with the mechanism and no numbers
+  if the count does not arrive, but a percentage placeholder is the one thing a reviewer will
+  certainly catch.
+
+**Decided here.**
+
+- **The Sort & Slice passage is two sentences, not 180 words**, and it still states the thing you
+  decided on 2026-09-07 to state rather than re-run. No comparable paper gives an exclusion more than
+  a sentence: *Count your bits* (J Cheminform 2026) writes "We removed 30 entries from the 718,097
+  compounds in the dataset that RDKit could not convert to fingerprints" and stops. The matched-pair
+  range, the median of 0.062 and the 314 of 351 go to an Additional file. The long form is in this
+  file's git history if you want it back.
+- **The restriction to three representations is stated in M5**, where the out-of-fold pass is
+  described, not here — M2 is about what the six representations are, and six is right for every
+  robustness grid.
+- **MHG-GNN keeps its corpus and its dimension and loses the polymers-and-photoresistors sentence**,
+  which is prior-work framing and belongs in the Introduction if anywhere.
+
+**Mechanical.** `\citep{avalon}` is in neither bib file — Gedeck, Rohde & Bartels, *J. Chem. Inf.
+Model.* 46(5):1924–1936, 2006. `\citep{Chithrananda2020}` is present in `refs.bib` (line 1427).
+
 
 ---
 
 ## M3. Models: rewrite (replaces lines 207–219; the last paragraph moves to M5)
 
-**Why wholesale:** it names eleven families and the run has nineteen configurations; two of its
-statements about the SVM and the GP kernels are contradicted by the code; the VBLL description is of
-a variant that is deliberately excluded from the run; and the closing decomposition paragraph is now
-its own subsection.
+**Why wholesale:** it names eleven families and the run has nineteen configurations; its statements
+about the SVM and GP kernels are contradicted by the code; the VBLL description is of a variant
+deliberately excluded from the run; and the closing decomposition paragraph is now its own
+subsection.
 
 **Keep the opening paragraph as it stands** (lines 207–208, the Kolmar framing). It is still exactly
 right and it sets up the whole paper. Change only its final sentence, and continue:
 
-> All hyperparameters for the models below are included in Additional file~1. Nineteen model
-> configurations were evaluated, each on all six representations except where noted. No model merges
-> its validation split into its training data, so every configuration is fitted on the same 80\% of
-> the sample and validation is reserved for early stopping and calibration.
+> All hyperparameters are listed in Additional file~1. Nineteen model configurations were evaluated.
+> In the main grids each runs on all six representations, except the Tanimoto-kernel Gaussian
+> process, which is defined on binary vectors and runs on ECFP4 alone, giving 109
+> model--representation pairs; the reduced runs described in the following section use named subsets
+> of those pairs. Validation is used for early stopping and, on QM9, for a temperature fit, and is
+> never merged into training.
 >
 > Random Forests (RFs) are one of the most common choices for QSAR modeling thanks to their
 > robustness and interpretability \citep{Svetnik2003}. During bootstrapping, each tree trains on a
@@ -283,50 +411,50 @@ right and it sets up the whole paper. Change only its final sentence, and contin
 > particularly useful when working with noisy labels \citep{Breiman2001}. Quantile Regression
 > Forests (QRFs) extend RF predictions to full distributions by keeping the distribution of training
 > labels in each leaf and computing quantiles across all trees for a given prediction
-> \citep{Meinshausen2006}. It inherently accounts for heteroscedasticity, such that the quantiles
-> will reflect the spread of a target variable's domain. Both forests use a minimum leaf size of
-> five rather than one, which is what allows a within-leaf spread to be computed for every
-> prediction (see Uncertainty quantification). We also used eXtreme Gradient Boosting (XGBoost)
-> \citep{Mustapha2016, Tian2022}, Light Gradient-Boosting Machine (LightGBM) \citep{ke2017lightgbm},
-> and Natural Gradient Boosting (NGBoost) \citep{Duan2020}. NGBoost extends deterministic gradient
-> boosting by treating the parameters of a chosen parametric distribution as regression targets and
-> learns them via boosting with a natural gradient update rule \citep{Duan2020}; we fit a Gaussian
-> distribution by maximum likelihood, over at most 500 boosting iterations, with the number used
-> selected by early stopping on the validation split. Computationally, NGBoost scales like standard
-> boosting in $N$ but with larger constants that depend on the number of distributional parameters
-> $p$: each iteration fits $p$ learner series and inverts $N$ matrices of size $p \times p$, adding
-> $O(Np^3)$ cost per iteration \citep{Duan2020}. Even with a two-parameter Gaussian distribution,
-> this additional cost is non-trivial and may limit scalability to larger datasets.
+> \citep{Meinshausen2006}; we report the median as the prediction and half the 16--84\% interval as
+> its uncertainty, and fit 300 trees rather than 100 because the quantile estimate is this model's
+> deliverable. It inherently accounts for heteroscedasticity, such that the quantiles will reflect
+> the spread of a target variable's domain. Both forests use a minimum leaf size of five rather than
+> one, which is what allows a within-leaf spread to be computed for every prediction (see
+> Uncertainty quantification). We also used eXtreme Gradient Boosting (XGBoost) \citep{Mustapha2016,
+> Tian2022}, Light Gradient-Boosting Machine (LightGBM) \citep{ke2017lightgbm}, and Natural Gradient
+> Boosting (NGBoost) \citep{Duan2020}. NGBoost extends deterministic gradient boosting by treating
+> the parameters of a chosen parametric distribution as regression targets and learns them via
+> boosting with a natural gradient update rule \citep{Duan2020}; we fit a Gaussian distribution by
+> maximum likelihood over at most 500 boosting iterations, with the number used chosen by early
+> stopping after fifty rounds without improvement and predictions taken at the best iteration. On
+> QM9 that early stopping uses the held-out validation split; on the assay datasets, where the
+> non-neural models have no validation split, NGBoost holds out a scaffold-grouped fifth of its own
+> training rows for the purpose.
 >
 > Support Vector Machines (SVMs) are a well-established baseline in QSAR modeling, mapping inputs
 > into a high-dimensional feature space where a maximum-margin hyperplane separates predictions
-> \citep{Vapnik1995, Svetnik2003}. A radial basis function (RBF) with $C = 1.0$ and
-> $\gamma = \texttt{scale}$ was used as the kernel, on every representation, so that the SVM carries
-> no kernel-by-representation confound.
+> \citep{Vapnik1995, Svetnik2003}. A radial basis function (RBF) kernel with $C = 1.0$ and
+> $\gamma = \texttt{scale}$ was used on every representation, so that the SVM carries no
+> kernel-by-representation confound.
 >
 > One ML method that has had particular success in molecular property prediction are Gaussian
 > Processes (GPs) \citep{Obrezanova2007, gauche}, a non-parametric class of models that use a kernel
-> to produce a Gaussian predictive distribution over every data point \citep{Obrezanova2007}. One of
-> the major limitations of using GPs in practice is computational scaling; inference has $O(N^3)$
-> time complexity and $O(N^2)$ memory, where $N$ is the number of training points
-> \citep{Rasmussen2005}. This can be mitigated with sparse GP approximations, but these introduce
-> approximation error and can be more difficult to tune \citep{quinonero2005}. Tree-based ensembles
-> are typically more efficient for larger data sizes \citep{lakshminarayanan2017}. We implemented GP
-> models using the \texttt{Gauche} framework \citep{gauche}, which provides kernels optimized for
-> molecular input \citep{gauche}. Rather than assigning a kernel per representation, we evaluated
-> the two kernels as separate models: an RBF kernel, which runs on all six representations, and the
-> Tanimoto kernel \citep{Ralaivola2005, moss2020, gauche}, which is defined on binary vectors and
-> therefore runs on ECFP4 alone, so that the kernel comparison is like-for-like where both are
-> defined. The RBF lengthscale is initialised at the median pairwise distance between training
-> molecules rather than at the library default. This matters: on these representations pairwise
-> distances run in the tens to hundreds, and a lengthscale left near unity gives the kernel nothing
-> to learn from, so the process returns its prior and predicts a single value for every molecule. A
-> fit whose predictions vary by less than 5\% of the standard deviation of the labels it was fitted
-> on is recorded as collapsed and excluded rather than scored. Gaussian processes were fitted on a
-> random subsample of at most 5,000 training molecules; every other model sees the full training
-> split. We additionally evaluated a heteroscedastic variant in which the single observation-noise
-> parameter is replaced by a small feed-forward network predicting the noise variance from the
-> molecule's features, trained jointly with the process.
+> to produce a Gaussian predictive distribution over every data point \citep{Obrezanova2007}. We
+> fitted exact Gaussian processes with a constant mean and a scaled kernel using \texttt{gpytorch};
+> the Tanimoto kernel is taken from the \texttt{Gauche} framework \citep{gauche, Ralaivola2005,
+> moss2020}. Rather than assigning a kernel per representation, we evaluated the two kernels as
+> separate models: an RBF kernel, which runs on all six representations, and the Tanimoto kernel,
+> which is defined on binary vectors and therefore runs on ECFP4 alone, so that the kernel
+> comparison is like-for-like where both are defined. The RBF lengthscale is initialised at the
+> median pairwise distance between training molecules rather than at the library default, because on
+> these representations pairwise distances are far from unity and a lengthscale left there gives the
+> kernel nothing to learn from, so the process returns its prior and predicts a single value for
+> every molecule. A fit whose predictions vary by less than 5\% of the standard deviation of the
+> labels it was fitted on is recorded as collapsed: its accuracy is reported and its per-molecule
+> model uncertainty is withheld (TODO: how many fits, on which models and representations). Because
+> exact inference costs $O(N^3)$ in the number of training points \citep{Rasmussen2005}, Gaussian
+> processes on QM9 were fitted on a random subsample of at most 5,000 of the roughly 8,000 training
+> molecules, where every other model sees the full training split; on the three assay datasets the
+> training blocks are smaller than that cap and no subsampling occurs. We additionally evaluated a
+> heteroscedastic variant in which the single observation-noise parameter is replaced by a small
+> feed-forward network predicting the noise variance from the molecule's features, trained in the
+> same optimisation against the squared residuals of the fitted process.
 >
 > While standard feed-forward neural networks (NNs) are deterministic, they can be transformed into
 > probabilistic models. We tested two architectures: (i) NN-$\alpha$ with two hidden layers of sizes
@@ -334,13 +462,13 @@ right and it sets up the whole paper. Change only its final sentence, and contin
 > 128 and a single dropout layer before the output. Both use ReLU activations and dropout $p=0.2$,
 > and were implemented in \texttt{PyTorch} \citep{pytorchGeometric}. Each was trained using the Adam
 > optimizer at a learning rate of $10^{-3}$ with a batch size of 32, for up to 100 epochs, with
-> early stopping on the validation loss after ten epochs without improvement and the best weights
-> restored.
+> early stopping on the mean validation loss after ten epochs without improvement and the best
+> weights restored.
 >
 > We used Bayesian transformations to convert NNs into Bayesian neural networks (BNNs). BNNs
 > introduce priors on the weights and compute a posterior distribution given the data, providing
 > uncertainty quantification. This can be done by approximations such as Monte Carlo dropout,
-> variational inference, or ensembles \citep{gal2016}. Three transformations were applied to each of
+> variational inference, or ensembles \citep{gal2016}. Four transformations were applied to each of
 > the two architectures. In the full-BNN, every linear layer is replaced by a Bayesian layer with a
 > Gaussian prior $\mathcal{N}(0, 0.1^2)$ on all weights, and the network is fitted on the evidence
 > lower bound with the Kullback--Leibler term scaled by $1/N$. The Variational Bayesian Last Layers
@@ -349,50 +477,122 @@ right and it sets up the whole paper. Change only its final sentence, and contin
 > \text{diag}(\boldsymbol{\sigma}_W^2))$ against a standard normal prior, and the output layer
 > additionally carries a learned scalar observation-noise variance; it is trained by maximizing the
 > evidence lower bound, which can be thought of as minimizing the reconstruction loss plus KL
-> divergence $D_{\text{KL}}(q(\mathbf{W}) \| p(\mathbf{W}))$, scaled by $1/N$
-> \citep{Harrison2024}. A heteroscedastic VBLL variant replaces that scalar with a noise variance
-> predicted from the input, so that observation noise varies per molecule. Finally, a mean-variance
-> estimation (MVE) variant takes the full-BNN and widens its output head to a mean and a
-> log-variance, fitted with a Gaussian negative log-likelihood; this is the only network family in
-> which both uncertainty components vary per molecule. All BNN variants estimated predictive
-> distributions with 100 Monte Carlo forward passes at inference.
+> divergence $D_{\text{KL}}(q(\mathbf{W}) \| p(\mathbf{W}))$, scaled by $1/N$ \citep{Harrison2024}.
+> A heteroscedastic VBLL variant replaces that scalar with a noise variance predicted from the
+> input. Finally, a mean-variance estimation (MVE) variant takes the full-BNN and widens its output
+> head to a mean and a log-variance, fitted with a Gaussian negative log-likelihood. The
+> heteroscedastic VBLL and the MVE variants are the two network families in which both uncertainty
+> components vary per molecule. All BNN variants estimated predictive distributions with 100 Monte
+> Carlo forward passes at inference.
 >
-> Hyperparameters were held at a single shared default across every model, representation and noise
-> level, so that the noise axis is the only thing that moves. A random search of 12 settings per
-> model--representation pairing was run on clean labels; a tuned setting was adopted only where it
-> beat the shared default on the held-out QM9 test split and survived the same comparison on the
-> three assay datasets. TODO: state how many pairings were adopted, once the sweep is final.
-> Searching separately at each noise level was not attempted, as it would make ``the tuned setting''
-> a different setting at every level and confound the noise axis with model capacity.
+> Hyperparameters are held fixed across representations and across noise levels, so that the noise
+> axis is the only thing that moves. Fifteen of the nineteen configurations run at a single shared
+> default. The four Bayesian and variational networks run at a tuned setting instead, chosen by a
+> random search on clean labels: candidates were ranked by their mean change from the default across
+> representations, and the top-ranked one adopted subject to three conditions --- that it was not an
+> extreme width or depth, that it cost no more than twice the default's slowest fit, and that it was
+> no worse than the default when refitted with training labels noised to half the clean training
+> label spread. One setting is adopted per model and used for all six representations, so that no
+> part of a model-by-representation difference is tuning; on the assay datasets the choice is made
+> separately for each dataset. Searching separately at each noise level was not attempted, as it
+> would make ``the tuned setting'' a different setting at every level and confound the noise axis
+> with model capacity.
 
-**Three notes.**
+**Corrected against the code in this pass.** These are the ones that change what the paragraph
+says, not how it reads.
 
-- **The SVM/Tanimoto claim at line 197 must go.** The SVM is RBF on every representation, on both
-  pipelines, with no branch on the representation anywhere. The paper contradicts itself here: lines
-  212 and 214 already say RBF. Line 197 is the wrong one.
-- **The VBLL description at line 216 describes a model that is deliberately not run.** The paper
-  says VBLL "maintains a mean-field variational posterior over the last-layer weights". A
-  last-layer-only variant exists in the code and is excluded from the roster; what runs makes
-  *every* layer variational and keeps the learned observation noise on the output layer alone. Both
-  halves of that sentence need changing.
-- **NN-$\beta$'s dropout.** The paper's "[128, 128] with dropout applied before the output layer" is
-  right, and is worth keeping in that form — the two architectures differ in where dropout sits as
-  well as in width, and that is the point of having both.
+- **"No model merges its validation split into its training data, so every configuration is fitted
+  on the same 80% of the sample."** The first half is true. The second does not follow from it and
+  is false three ways: the Gaussian processes fit 5,000 of about 8,000 on QM9; on the assay datasets
+  every model fits about 65% of the dataset; and NGBoost there fits four fifths of that again. The
+  positive half survives in the draft above, which is also what every comparable paper does — none
+  of them describes what its code does not do.
+- **"Validation is reserved for early stopping and calibration"** is a QM9 sentence. On the assay
+  datasets only the neural models have a validation split at all; the trees, the SVM and the Gaussian
+  processes never see those rows, and nothing there fits a temperature.
+- **A collapsed Gaussian-process fit is not excluded.** Its $R^2$ and RMSE are computed and written
+  with a `gp_collapsed` flag, and the figure script drops nothing. What is withheld is the
+  per-molecule model-uncertainty column. The earlier draft said "excluded rather than scored", which
+  would have been a claim about which rows exist in your results.
+- **The lengthscale probe is at most 500 training molecules**, not all of them — and QM9's
+  heteroscedastic Gaussian process does not do the initialisation at all, because it runs its own
+  joint optimisation rather than the shared fitting path. The assay-side heteroscedastic process
+  does. That asymmetry is not in the draft above; see D15.
+- **Only the Tanimoto kernel comes from Gauche.** Both pipelines build a plain `gpytorch` exact
+  process, and the RBF kernel is `gpytorch`'s own. "We implemented GP models using the Gauche
+  framework" overstates it.
+- **Four transformations, not three.** The heteroscedastic VBLL variant is a fourth, and both
+  generators submit it.
+- **MVE is not the only network family with both components per molecule.** The heteroscedastic VBLL
+  variants carry both too, by the support table that gates every written row.
+- **Hyperparameters are not held at a single shared default.** Four Bayesian and variational network
+  families run tuned whenever the two tuned files are present when a task starts, which is the
+  configuration on disk. The adoption rule is the ranking described above, not "beat the default on
+  the held-out QM9 test split and survive the same comparison on the three assay datasets" — that is
+  a different route, in different code, and it did not produce the files the cluster reads. The
+  assay-side confirmation script cannot reach these four models at all.
+- **The tuned count.** 24 QM9 pairings carry a tuned setting (four models by six representations),
+  though only four distinct settings exist, one per model. On the assay side there are seven
+  model-and-dataset entries: Caco-2 has BNN-$\alpha$, VBLL-$\alpha$ and BNN-$\beta$; hERG has
+  VBLL-$\alpha$ and BNN-$\beta$; LogD has VBLL-$\alpha$ and VBLL-$\beta$. This is repository state on
+  12 September 2026, not a value fixed in code, so re-read it before it goes in.
+
+**Cut, on the literature's advice.**
+
+- **NGBoost's complexity passage** (the $O(Np^3)$ per iteration and the scalability prediction).
+  All three passes said cut, two of them "clear". Dutschmann et al. (J Cheminform 2023) describe all
+  five of their modelling techniques in 166 words total; Kolmar & Grulke give four algorithms 1,200
+  words and no complexity analysis. If NGBoost's cost shaped the study — and it did, since three of
+  five out-of-fold folds are scored on QM9 — say it where that restriction is described.
+- **The GP sparse-approximation and tree-efficiency sentences.** Same objection, with one exception
+  kept: the $O(N^3)$ clause survives, attached directly to the 5,000-molecule cap it motivates,
+  because there it explains a choice you made rather than one you did not.
+
+**Blocked on fixes, and this subsection cannot be finished until they land.** All five are in
+`HANDOFF.md`.
+
+- **The architecture paragraph above describes architectures that eight of the nineteen
+  configurations do not run at.** The shipped tuned files put BNN-$\alpha$ at [64, 32] with **tanh**,
+  VBLL-$\alpha$ at [64, 64] with tanh, BNN-$\beta$ at **one** hidden layer of 64 with dropout 0.379
+  and learning rate 4.29e-3, and VBLL-$\beta$ at one hidden layer of 64 with dropout 0.357. The
+  paragraph is right about the two *base* networks and wrong about what the Bayesian variants
+  inherit. Once items 3, 4 and 5 settle what the tuning regime actually is, the fix here is one
+  clause — the base architectures in the text, the adopted settings in Additional file 1.
+- **Items 4 and 5 are why that is not just a wording problem.** NN-$\alpha$'s learning rate and
+  dropout are hard-coded and NN-$\beta$'s are read from the tuned file, so the two are tuned over
+  different parameter sets; and the MVE and heteroscedastic-VBLL variants run at the shared default
+  beside tuned siblings, which makes a BNN-versus-MVE comparison partly a tuned-versus-untuned one.
+- **Item 3**: the setting was ranked over five representations and shipped to six.
+- **Item 1**: QM9's heteroscedastic Gaussian process skips the median-distance lengthscale
+  initialisation that the paragraph presents as the reason the processes produce numbers at all. The
+  assay-side one does it. Once fixed, the draft's sentence becomes true of both.
+- **The count of collapsed Gaussian-process fits is a `TODO` in the draft.** Every literature pass
+  agreed a rule that changes what is reported needs its count; the number of molecules each fit saw
+  is already written onto every results row, so it is a read rather than a run.
+- **Additional file 1 contradicts this draft and nothing generates it** — `HANDOFF.md` item 9. The
+  draft's first sentence points at it.
+
+**Decided here.**
+
+- **`\citep{gauche}` moves to sit beside the Tanimoto kernel**, which is the only thing that comes
+  from that framework; both pipelines build a plain `gpytorch` exact process and the RBF kernel is
+  `gpytorch`'s own.
+
 
 ---
 
 ## M4. Noise Strategies → Label noise: full rebuild (replaces lines 312–362, including Table 1)
 
 **Why wholesale:** four of the six strategies in Table 1 exist in neither injector; the two that
-survive by name have different definitions; $\sigma$ no longer exists as a flag or as a concept; the
-level grid changed; and the sentence that validation is clean is now false. There is nothing here to
-patch.
+survive by name have different definitions; $\sigma$ no longer exists as a concept; the level grid
+changed; and the sentence that validation is clean is now false.
 
 > Our objective is to evaluate the robustness of QSAR models against label noise. To do so, we
-> ``inject'' artificial noise into the labels during training. Test labels are never modified.
-> Validation labels carry their own noise, drawn independently at the same amount, because a model
-> that early-stops against clean labels is deciding when to stop using information no practitioner
-> has.
+> ``inject'' artificial noise into the labels during training. Test labels are never modified, so
+> that degradation is measured against a fixed reference; this differs from \citet{Kolmar2021}, who
+> corrupt the evaluation labels as well. Validation labels carry their own noise, drawn
+> independently at the same amount, because a model that early-stops against clean labels is
+> deciding when to stop using information no practitioner has.
 >
 > Experimental noise is often modeled as homoscedastic Gaussian noise added evenly across all
 > labels. However, not all experimental noise is random. It may be heteroscedastic, where the
@@ -405,42 +605,45 @@ patch.
 > share a targeting and differ only in shape isolate the effect of the error distribution, and two
 > that share a shape and differ in targeting isolate the effect of where the error lands.
 >
-> The amount of noise is dose-matched across conditions. For each condition we compute the root mean
-> square perturbation its per-molecule scale map and its shape would deliver at unit scale, and then
-> solve for the internal scale that makes the delivered root mean square perturbation equal the
-> requested amount. Every dose-matched condition therefore delivers the same amount of corruption at
-> the same noise level, and a difference in outcome between two conditions is a difference of
-> pattern alone rather than of magnitude. The noise level is expressed as a fraction of the standard
-> deviation of the clean training labels, so that one level means the same relative corruption on
-> QM9 and on each assay dataset. We swept levels $\{0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5\}$. The amount
-> actually delivered is recorded for every run alongside the amount requested.
+> The amount of noise is dose-matched across conditions. A condition is defined by a per-molecule
+> scale $s_i$ and a shape $\mathcal{D}$ of unit variance, and the error applied to molecule $i$ is
+> \begin{equation}
+> \varepsilon_i = a\,s_i z_i, \qquad z_i \sim \mathcal{D}(0,1), \qquad
+> a = \tau \Big/ \sqrt{\tfrac{1}{n}\textstyle\sum_j s_j^2}, \qquad \tau = \ell\,\mathrm{sd}(y),
+> \end{equation}
+> so that the expected root mean square perturbation equals the requested amount $\tau$ whatever the
+> shape and whatever the scale map. The noise level $\ell$ is a fraction of the standard deviation of
+> the clean labels, which makes one level the same relative corruption on QM9 and on each assay
+> dataset. Every dose-matched condition therefore delivers the same expected amount of corruption at
+> the same level, and a difference in outcome between two conditions is a difference of pattern
+> rather than of magnitude. We swept levels $\ell \in \{0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5\}$. The
+> amount actually delivered is recorded for every run alongside the amount requested.
 >
 > Censoring sits outside this scheme, because recording a label at an assay limit is not a
 > perturbation of a chosen size. Its level is instead the fraction of labels clipped, swept over
-> $\{0, 0.10, 0.20, 0.25, 0.30, 0.40, 0.50\}$. The limit is a quantile of the clean training labels
-> and is applied unchanged to every split, as a fixed property of an assay would be.
+> $\{0, 0.10, 0.20, 0.25, 0.30, 0.40, 0.50\}$. The limit is a quantile of the clean labels, computed
+> once and applied unchanged to the training and validation labels, as a fixed property of an assay
+> would be; test labels are left uncensored with the rest.
 >
 > Which molecules a condition targets is drawn from a seed that does not depend on the noise level,
-> so the affected set is the same at every level, including zero. The clean-label run is therefore a
-> negative control on the same molecules rather than on a different draw, which is what makes a
-> level-zero baseline subtractable from the per-molecule results in the following section.
+> so the affected set is the same at every level and the clean-label run is a negative control on the
+> same molecules rather than on a different draw.
 >
 > The grouped conditions interact with the scaffold split in one way worth stating. Group membership
-> is the Bemis--Murcko scaffold, and the split holds out whole scaffold groups, so a held-out
-> molecule shares no scaffold with any affected training group. For those conditions the recorded
-> noise pattern on held-out molecules is flat, and questions about which individual molecules were
-> corrupted are answered on the training molecules by cross-fitting rather than on the test set.
+> is the Bemis--Murcko scaffold. On QM9 the affected groups are chosen within the training split and
+> whole groups are held out, so a held-out molecule shares no scaffold with any affected training
+> group and its recorded noise pattern is flat; questions about which individual molecules were
+> corrupted are therefore answered on the training molecules by cross-fitting rather than on the test
+> set. On the assay datasets the noise is drawn once over the whole label column, so a held-out
+> molecule can belong to an affected group.
 >
-> Gaussian and the two grouped conditions were run across the full grid of models and
-> representations. The Student-$t$, Laplace and outlier conditions were run on a reduced set of
-> model--representation pairings, since they probe the shape of the error and the size of the
-> contaminated fraction rather than the model ranking. Censoring was run on a named subset of five
-> pairings to measure the size of its effect, not to compare models or representations under it.
->
-> Although classification tasks were not explicitly tested in this study, NoiseInject also
-> implements six label-flipping strategies for classification: uniform, class-imbalance,
-> binary-asymmetric, instance, class-dependent, and confusion-directed flipping. These use a flip
-> probability $p$ in place of the noise level.
+> The conditions were not all run at the same breadth. Gaussian and the two grouped conditions were
+> run across the full grid of models and representations, on QM9 and on the three assay datasets. The
+> Student-$t$, Laplace and outlier conditions probe the shape of the error and the size of the
+> contaminated fraction rather than the model ranking, and were run on QM9 alone, on a reduced set of
+> model--representation pairings on which Gaussian and the two grouped conditions were re-run so that
+> the six are compared on the same pairings. Censoring was run on a named subset of five pairings, to
+> measure the size of its effect rather than to compare models or representations under it.
 
 **New Table 1.** This replaces `tab:regression_noise` entirely. Per-point scale formulas do not
 belong in it any more — the whole point of dose matching is that the delivered magnitude is equal
@@ -451,154 +654,264 @@ across rows and is set by the level, not by the row.
 | Gaussian | Gaussian | every molecule, same amount | Random measurement error |
 | Student-$t$ ($\nu = 5$) | Student-$t$, $\nu = 5$ | every molecule, same amount | Measurement error with heavier tails |
 | Laplace | Laplace | every molecule, same amount | Error distributions fitted to bioactivity data |
-| Grouped-wider | Gaussian | whole scaffold groups covering 20\% of molecules receive a $3\times$ wider error | Part of the chemical space measured less reliably |
-| Grouped-shifted | Gaussian | every scaffold group receives a constant offset plus a within-group term, with $\rho = 0.62$ of the variance carried by the offset | Between-laboratory bias \citep{Bentz2013} |
+| Grouped-wider | Gaussian | whole scaffold groups, added until they cover about 20\% of molecules, receive a $3\times$ wider error | Part of the chemical space measured less reliably |
+| Grouped-shifted | Gaussian | every molecule receives one offset shared by its scaffold group plus an independent draw of its own, with $\rho = 0.62$ of the variance in the offset | Between-laboratory bias \citep{Bentz2013} |
 | Outlier ($p = 0.10$) | Gaussian | a random 10\% of molecules receive a $3\times$ wider error | Transcription errors, sample mix-ups |
 | Censoring | — | labels beyond an upper assay limit are recorded as the limit; the level is the fraction clipped | Assay dynamic range |
 
 Suggested caption: *Noise conditions. Each condition is a shape (the distribution one error is drawn
 from) paired with a targeting (which molecules are affected, and by how much). Every condition
-except censoring is dose-matched, so at a given noise level each delivers the same root mean square
-perturbation and differs only in how that perturbation is distributed across molecules. $\rho$ is
-the share of total variance carried by the group-level offset.*
+except censoring is dose-matched, so at a given noise level each is solved to deliver the same
+expected root mean square perturbation and they differ in how that perturbation is distributed
+across molecules rather than in its size. $\rho$ is the share of total variance carried by the
+group-level offset.*
 
-**Four notes.**
+**Corrected against the code in this pass.**
 
+- **Grouped-shifted is not a group-level offset alone.** Every molecule gets a group offset *plus*
+  an independent draw of its own; $\rho = 0.62$ of the variance sits in the offset and 38% does not.
+  The earlier draft's table row and its M5 sentence both read as though the whole error were the
+  offset, which is what made grouped-shifted look like a flat condition. Table row rewritten.
+- **Dose matching equalises the *expected* root mean square, not the realised one.** What a draw
+  actually delivers varies, is recorded on the row, and is checked against a band computed from the
+  draw's own kurtosis and effective sample size — and that check warns rather than stopping the run.
+  "Delivers the same amount" is now "the same expected amount", in the prose and in the caption.
+- **The censoring limit reaches validation as well as training, and never reaches test.** The earlier
+  draft's "applied unchanged to every split" read literally as clipping the test labels, which
+  contradicted the paragraph above it. Both halves now say which splits.
+- **The level-zero negative control does not hold on QM9 for five of the seven conditions.** Only
+  Gaussian and censoring run level zero there; the other five have the Gaussian clean row copied in
+  afterwards, and get **no clean uncertainty row at all**. The accuracy row is bit-identical, so
+  AUC_norm is unaffected — but any per-molecule analysis that subtracts a level-zero baseline can
+  only do it under Gaussian on QM9. On the assay datasets every condition runs its own level zero.
+  **This is a Results constraint as much as a Methods sentence; see D22.**
+- **The grouped conditions behave oppositely on the two pipelines.** On QM9 held-out molecules are
+  unaffected by construction. On the assay datasets the affected families are chosen over the whole
+  column, so held-out molecules can sit in one. The earlier draft stated the QM9 behaviour flatly.
+- **The reduced-breadth conditions ran on QM9 only.** The nineteen submitted assay arrays all pass
+  `--conditions gaussian grouped_wider grouped_shifted`. Student-$t$, Laplace, outlier and censoring
+  are not in any assay script on disk. The earlier draft's "the same noise conditions and the same
+  noise levels as QM9" in M1 was wrong about the conditions and right about the levels.
+- **The deep run re-runs Gaussian and both grouped conditions on the reduced pairs**, which is what
+  makes the six comparable there. The earlier draft presented full-grid and reduced as a partition.
+- **The full grid is 109 model--representation pairs**, not 19 × 6 = 114, because the Tanimoto
+  process runs on ECFP4 alone.
+- **Censoring is five pairs in the robustness runs and full breadth in the uncertainty runs.** The
+  selection file says so in its own scope field, and the uncertainty generator does not read it.
+- **Grouped-wider's 20% is a closest approach**, not an exact fraction: whole groups are added until
+  the running molecule fraction is nearest the target, and the realised fraction is written to every
+  row.
+
+**Cut, on the literature's advice.**
+
+- **The classification-flipping paragraph.** Both passes that looked at it said cut, both "clear":
+  comparable Methods describe what was run. It also duplicates the M7 sentence, and listing six named
+  strategies nobody ran invites a reviewer to ask why not. The M7 sentence carries it.
+- **Two sentences of seed justification** collapse into the one above. Kolmar & Grulke's entire
+  treatment of replication is "repeated five times at each noise level to give 75 total datasets".
+
+**I got one of these wrong, and it is worth saying plainly.** I reported the missing level-zero runs
+on QM9 as a defect. They are not. `slurm_scripts_qm9_rerun/generate_scripts.py:468-503` carries your
+decision of 2026-08-28 and its reasoning: of the three conditions with a shape, `grouped_wider` is
+keyed to the scaffold group that the out-of-fold pass splits on and `outlier_p10` picks its victims
+at random, so both are structural nulls whatever is measured, and censoring is the only condition
+whose own clean level buys anything. The accuracy baseline is copied because at level zero the fit is
+bit-identical whichever condition labels it. Nothing to fix, and nothing for the Methods to say
+beyond what M5 already says about undefined questions.
+
+**Blocked on a fix.** `fig_methods_noise_strategies` needs regenerating for the seven conditions.
+`scripts/generate_paper_figures_v2.py:3365-3389` already builds its panels from
+`noise_conditions.json` intersected with the installed injector, so this is a re-run — but the v1
+script writes a file of the **same name** from the retired six at
+`scripts/generate_paper_figures.py:2969`, so check which one produced the copy in the paper.
+
+**Decided here.**
+
+- **The dose-matching solve is an equation and the prose around it is two sentences.** Kolmar &
+  Grulke give their far simpler construction as two numbered equations. The equation does the work
+  the three coined phrases were doing, and "per-molecule scale map" — which no reader outside the
+  code would parse — is gone. Check my notation against how you write the rest of the paper.
+- **"The amount actually delivered is recorded" stays.** One pass called it run provenance; the other
+  called it the only sentence in M4 that lets a reader tell a dosing failure from a model result,
+  and named Heid et al. (JCIM 2023) as the paper whose argument needed exactly that and did not have
+  it. One clause.
+- **The level anchor difference stays implicit**, as in M1: "a fraction of the standard deviation of
+  the clean labels" is true of both pipelines as written.
 - **Outlier selection is random, not by $z$-score.** The paper's $|z| > 2$ rule is gone; the premise
-  that measurement error tracks the measured value was tested and did not hold. If you keep any
-  sentence about outlier noise, this is the one thing it must say differently.
-- **$\rho = 0.62$ comes from Bentz et al. 2013, Table 7.** `Bentz2013` is in `citations.bib`
-  (line 2107) but **not** in `refs.bib`. Port it.
-- **The censoring sentence is deliberate wording**, carried from the settled condition file: it
-  keeps a reader from reading a five-pair result as a model comparison.
-- **`fig_methods_noise_strategies` is the one Methods figure and must be regenerated** for the seven
-  conditions. It should make dose matching visible, since equal delivered magnitude across
-  conditions is the point of the redesign.
+  that measurement error tracks the measured value was tested and did not hold. If any sentence about
+  outlier noise survives, this is the thing it must say differently.
+
+**Mechanical.** $\rho = 0.62$ is attributed to Bentz et al. 2013 Table 7 in both injectors' comments
+and in `noise_conditions.json`; nothing in the code reads that paper, so the attribution is yours to
+stand behind. `Bentz2013` is in `citations.bib` (line 2107) and **not** in `refs.bib`.
+
 
 ---
 
 ## M5. New: Uncertainty quantification (new subsection, absorbing lines 217–219)
 
 **Why it needs its own subsection:** the current text is one paragraph at the end of Models saying
-which models were *not* decomposed. That list is now wrong in both directions — the forests and
-NGBoost are decomposed, and two networks are the study's cleanest decomposition case — and the
-machinery that replaced it needs more room than a paragraph in Models can give it.
+which models were *not* decomposed. That list is wrong in both directions — the forests and NGBoost
+are decomposed, and the variance-head networks carry both halves per molecule — and the machinery
+that replaced it needs more room than a paragraph in Models can give it.
 
 > Several of the models produce a predictive distribution rather than a point estimate. We separate
 > that distribution's variance into an aleatoric component, which reflects noise in the labels, and
 > an epistemic component, which reflects the model's uncertainty about itself. Epistemic uncertainty
 > is model-driven and can be reduced by collecting either more or higher quality training data;
-> aleatoric is data-driven and reflects the intrinsic noise in the labels. The separation is
-> computed by a single shared routine used by both pipelines, in variance space throughout, with one
-> conversion to a standard deviation at the point of reporting.
+> aleatoric is data-driven and reflects the intrinsic noise in the labels.
 >
 > How the two components are obtained depends on the family. For the stochastic networks we use the
-> sampling decomposition of \citet{kendall2017}: the epistemic term is the variance across Monte
-> Carlo forward passes of the predicted mean, and the aleatoric term is the mean across those passes
-> of the variance the network itself predicted for that molecule. For the two forests we apply the
-> law of total variance across the fitted trees, so that the aleatoric term is the mean within-leaf
-> variance of the training labels in each molecule's leaf and the epistemic term is the variance of
-> the per-tree leaf means; this uses the trees already fitted and requires no retraining, and both
-> terms vary per molecule only because the minimum leaf size is five. For the Gaussian process the
-> epistemic term is the latent posterior variance and the aleatoric term is the likelihood noise
-> \citep{Rasmussen2005}; in the heteroscedastic variant the latter is predicted per molecule.
+> sampling decomposition of \citet{kendall2017}: over $T$ Monte Carlo forward passes returning a mean
+> $\hat\mu_t(x)$ and, where the network predicts one, a variance $\hat\sigma_t^2(x)$,
+> \begin{equation}
+> \sigma^2_{\mathrm{epi}}(x) = \mathrm{Var}_t\big[\hat\mu_t(x)\big], \qquad
+> \sigma^2_{\mathrm{ale}}(x) = \mathbb{E}_t\big[\hat\sigma^2_t(x)\big].
+> \end{equation}
+> For the two forests we apply the law of total variance across the $B$ fitted trees, using the trees
+> already fitted and requiring no retraining: with $\bar y_b(x)$ the mean and $s^2_b(x)$ the variance
+> of the labels tree $b$ was grown on that fall in $x$'s leaf,
+> \begin{equation}
+> \sigma^2_{\mathrm{ale}}(x) = \mathbb{E}_b\big[s^2_b(x)\big], \qquad
+> \sigma^2_{\mathrm{epi}}(x) = \mathrm{Var}_b\big[\bar y_b(x)\big].
+> \end{equation}
+> The aleatoric term here varies per molecule only because the minimum leaf size is five; at a leaf
+> of one it is identically zero and the whole predictive variance falls into the epistemic term. For
+> the Gaussian process the epistemic term is the latent posterior variance and the aleatoric term is
+> the likelihood noise \citep{Rasmussen2005}; in the heteroscedastic variant the latter is predicted
+> per molecule.
 >
-> Not every model supports both components, and the distinction matters when reading any per-molecule
-> result. NGBoost is a single fit, so it has an aleatoric term per molecule and no epistemic term at
-> all --- absent, rather than zero. The plain Bayesian networks predict a mean and nothing else, and
-> so have an epistemic term and no aleatoric one. The Gaussian process with a homoscedastic
-> likelihood, and the VBLL networks, each learn a single observation-noise value shared by every
-> molecule; that is the correct aleatoric term for those models, but it cannot rank molecules, and
-> its correlation with any per-molecule quantity is undefined rather than zero. Every reported
-> uncertainty is accompanied by a declaration of whether each component varies per molecule, is one
-> value per fit, or does not exist, and a check refuses to record a value that disagrees with that
-> declaration.
+> Not every model supports both components, and the distinction matters when reading any
+> per-molecule result. NGBoost is a single fit, so it has an aleatoric term per molecule and no
+> epistemic term at all --- absent, rather than zero. The plain Bayesian networks predict a mean and
+> nothing else, and so have an epistemic term and no aleatoric one. The Gaussian process with a
+> homoscedastic likelihood, and the VBLL networks, each learn a single observation-noise value shared
+> by every molecule: a homoscedastic aleatoric uncertainty, which is the correct aleatoric term for
+> those models but cannot rank molecules, so its correlation with any per-molecule quantity is
+> undefined rather than zero. Every reported uncertainty is accompanied by a declaration of whether
+> each component varies per molecule, is one value per fit, or does not exist, and every result is
+> read against that declaration (Additional file~[N]).
 >
 > Questions about individual molecules cannot be asked of the training set using a model that has
 > already fitted those labels. For the model--representation pairings where per-molecule uncertainty
-> is analysed, training molecules were therefore scored out of fold: the training block was divided
-> into five folds using \texttt{GroupKFold} on Murcko scaffolds, matching the outer split, and each
-> molecule was scored by a model fitted without it. Noise is injected once, before this division, so
-> a molecule carries the same corruption in whichever fold it falls. For NGBoost, three of the five
-> folds were scored for reasons of cost, and molecules in the remaining two carry no out-of-fold
-> score.
+> is analysed --- six models on three representations on QM9, and seven on the same three on the
+> assay datasets --- training molecules were therefore scored out of fold: the training block was
+> divided into five folds using \texttt{GroupKFold} on the same Murcko scaffolds as the outer split,
+> and each molecule was scored by a model fitted without it. Noise is injected once, before this
+> division, so a molecule carries the same corruption in whichever fold it falls. On QM9, three of
+> NGBoost's five folds were scored for reasons of cost, so roughly two fifths of its training
+> molecules carry no out-of-fold score; on the assay datasets all five are scored.
 >
-> Two of the conditions give every molecule the same amount of noise by construction --- the
-> uniform-targeting conditions, and grouped-shifted, whose offset applies to a whole group at once.
-> Under those conditions the question of which individual molecules are unreliable is undefined
-> rather than answered negatively, and we report it as such.
+> Under the conditions that give every molecule the same noise scale --- the three uniform-targeting
+> conditions and grouped-shifted --- the question of which individual molecules are unreliable is
+> undefined rather than answered negatively, and we report it as such. The correlation between a
+> model's stated uncertainty and the amount injected into a molecule's label is computed and reported
+> under those conditions regardless, as a check on the out-of-fold procedure rather than as a result:
+> a substantial correlation there would indicate that a molecule had been scored by a model that had
+> seen its own corrupted label.
 >
-> Uncertainties are reported without post-hoc calibration. A single temperature multiplier is also
-> fitted and recorded; because it is one positive number it cannot change the ordering of molecules,
-> and reporting coverage after fitting a multiplier that corrects coverage would be circular.
+> Under the grouped conditions the noise a molecule receives is partly a property of its scaffold
+> group, and the out-of-fold division holds out whole scaffold groups. A per-molecule result under
+> those conditions therefore distinguishes affected groups from unaffected ones; it does not
+> distinguish molecules within a group, and should not be read as doing so.
+>
+> Uncertainties are reported without post-hoc calibration. A single temperature multiplier is fitted
+> on the held-out validation split on QM9 and recorded alongside each prediction, but is not applied
+> to the reported values and cannot change the ordering of molecules.
 
-**Note.** Lines 217–219 of the current Methods are fully replaced by this. In particular, "We did
-not decompose the uncertainty from other models such as BNN variants … and NGBoost and QRF, in which
-there is no straightforward mechanism to separate the aleatoric and epistemic components" is now
-wrong about all three: both forests are decomposed by the law of total variance, NGBoost carries a
-per-molecule aleatoric term with an explicitly absent epistemic one, and the two mean-variance
-networks carry both halves per molecule.
+**Corrected against the code in this pass.**
 
----
+- **"Two networks are the study's cleanest decomposition case" is not supportable, and the only
+  written ranking says the opposite.** `uncertainty_pairs.json` records the Gaussian process
+  separating 11.2×/18.7×/11.9× — "an order of magnitude above everything else" — against network
+  medians of 1.6×, 1.6× and 1.7×. The framing has been removed from the draft; do not put it back
+  without a measurement.
+- **Four conditions spread the noise evenly, not two.** Gaussian, Student-$t$, Laplace and
+  grouped-shifted. The generator's own `FLAT_BY_DESIGN` list names all four.
+- **The forest aleatoric term is computed over each tree's in-bag rows**, reproduced by index, not
+  over all training labels. And leaf size affects only the aleatoric half — the per-tree leaf means
+  still differ at a leaf of one.
+- **"Matching the outer split" is not true of QM9**, whose outer split is a single 80/10/10 scaffold
+  division, not a `GroupKFold`. The draft now says "on the same Murcko scaffolds as the outer split",
+  which is true of both. The inner division also falls back to a deterministic random split when
+  fewer scaffold groups exist than folds, or when a molecule is missing from the group map.
+- **NGBoost's three-of-five folds is a QM9 restriction.** The assay pipeline scores all five.
+- **The out-of-fold pass is a named subset, not "the pairings where uncertainty is analysed" in
+  general** — six models on ECFP4, PDV and ChemBERTa on QM9, seven on the assay side. Two of the
+  three models whose aleatoric term varies per molecule on a kernel or variational route, the
+  heteroscedastic Gaussian process and the two heteroscedastic VBLL networks, are **not** on the QM9
+  list, so they get no out-of-fold rows there at all even though they are in the deep run. On the
+  assay side the heteroscedastic Gaussian process was added on 2026-09-07 and is on the list, so a
+  kernel model can be asked the per-molecule question there and cannot on QM9.
+- **The temperature is applied**, to the total predicted spread, and written to its own column beside
+  the uncalibrated one; the two decomposed components are never scaled by it. Only QM9 fits one. The
+  earlier draft implied it was fitted and left unused everywhere.
+- **The guard does not behave the same on the two pipelines.** The assay runner stops the task. On
+  QM9 a `DecompositionError` falls into a general handler, is logged, the loop continues to the next
+  pairing, and the task exits non-zero at the end. Both refuse to write the disagreeing row, which is
+  the part the paper would have claimed — but "a check refuses to record a value" is now cut from the
+  draft anyway on the literature's advice.
+- **`noise_size_constant` does not mark the flat conditions.** It is computed from the uniqueness of
+  the realised $|\varepsilon_i|$, so under Gaussian, Laplace and Student-$t$ the individual draws
+  differ and the flag is false; it is effectively true only at level zero. The M5a-i provenance note
+  named it as though it marked the condition. `rho_raw` is the column a Methods sentence should name;
+  the zero-level-subtracted version is degenerate and emitted as NaN.
+- **`q4_plain_correlation` is at `scripts/uncertainty_stats.py:1034`**, not 1040, which is inside its
+  docstring.
 
-## M5a. Three sentences M5 still needs (append to M5)
+**Folded in, and what happened to M5a.** The three M5a additions are now sentences inside M5 rather
+than a numbered appendix to it: the null-correlation check and the grouped-conditions caveat are in
+the draft above, both kept at the literature's recommendation — Hirschfeld et al. (2020) and
+Dutschmann et al. (2023) both carry a Methods sentence telling a reader how to read a correlation
+that will look disappointing. M5a-iii, the model-by-condition coverage, is the one both passes said
+to compress; see D30.
 
-Added 2026-09-07. Each of these was verified in the code this session, and M5 as written does
-not say it. They are short and they all belong in the uncertainty subsection, after the
-out-of-fold paragraph.
+**Cut, on the literature's advice.**
 
-### M5a-i. The null correlation is reported as a check, not as a result
+- **"The separation is computed by a single shared routine used by both pipelines, in variance space
+  throughout, with one conversion to a standard deviation at the point of reporting."** No comparable
+  Methods describes its own code path. Once the equations are in variance terms, that the code is in
+  variance terms is not a claim about the study.
+- **"and a check refuses to record a value that disagrees with that declaration."** Two passes called
+  it "clear" to cut: none of the ten audited papers describes its own test suite, and in a Methods it
+  reads as defensiveness rather than method. The declaration itself stays — it is an artefact a
+  reader can see.
+- **The circularity argument for not reporting calibrated coverage.** It is an argument, and under
+  this journal's combined format arguments go in Results and discussion. It is also only true if the
+  multiplier is fitted on the molecules the coverage is measured on, and yours is not — it is fitted
+  on validation, so a reviewer who spots that will ask for the calibrated numbers anyway.
 
-M5 already says that under the conditions giving every molecule the same amount of noise, the
-question of which molecules are unreliable is undefined. It does not say that the number is
-computed and reported anyway, or why — and a reader who finds a near-zero correlation in a
-table without that sentence will read it as a failed result.
+**Blocked on a fix.** The heteroscedastic Gaussian process and both heteroscedastic VBLL networks
+are in the deep run and absent from `uncertainty_pairs.json`, so three of the five configurations
+whose aleatoric term varies per molecule get no out-of-fold rows on QM9 — while the assay side added
+GP-Hetero on 2026-09-07 and can ask them. That is `HANDOFF.md` item 2, and it is the one thing in
+this subsection that changes what the paper can claim rather than how it is phrased. The draft above
+says "six models on three representations on QM9, and seven on the same three on the assay datasets",
+which is today's state; it becomes one number if the two lists are reconciled.
 
-> Under the conditions that give every molecule the same amount of noise, the correlation
-> between a model's stated uncertainty and the amount injected into that molecule's label is
-> null by construction: there is nothing in one label to distinguish it from another's. We
-> compute and report it regardless, as a check on the out-of-fold procedure rather than as a
-> result. A substantial correlation there would indicate that a molecule had been scored by a
-> model that had seen its own corrupted label.
+**Decided here.**
 
-Provenance: `q4_plain_correlation`, `scripts/uncertainty_stats.py:1040`, which says this in its
-own docstring and emits `noise_size_constant` per cell.
+- **The two decomposition equations go in.** This was the only place in the whole Methods where all
+  three literature passes said the draft was *under*-specified. Yang & Li (J Cheminform 2023) give it
+  as their equation 5, Busk et al. (2022) with the two terms under-braced, Scalia et al. (2020) as
+  their equation 4, Gruich et al. (2023) as two short equations — always the algebra *beside* the
+  Kendall & Gal citation, never instead of it. The forest version has no published precedent in the
+  comparison set, which is exactly why it is the one that most needs to be checkable.
+- **The model-by-condition coverage is one sentence, not a numbered sub-subsection.** Add it beside
+  the reduced-breadth sentence in M4: under the three shape conditions on QM9 the decomposition rests
+  on two of the four models, named in an Additional file.
+- **How many models emit no uncertainty is worth a clause.** XGBoost, LightGBM, the SVM and the two
+  deterministic networks are declared `none/none`, so "several of the models produce a predictive
+  distribution" is covering nearly half the roster. A reader counting nineteen configurations against
+  an uncertainty table will want the number.
+- **The full support table goes to an Additional file.** Nineteen QM9 declarations plus the assay
+  roster's; both are verified and ready.
 
-### M5a-ii. Under the grouped conditions the answer is about scaffold groups
+**Passed to the metrics pass, not decided here.** Busk et al. (2022) and Scalia et al. (2020) both
+turn the per-molecule-versus-constant distinction into a reported number rather than a declaration —
+the coefficient of variation of the predicted spread across test molecules, where zero means constant
+and therefore uninformative. One column per model and representation, no re-run.
 
-M4 says the recorded noise pattern is flat on held-out molecules for those conditions, and M5
-says training molecules are cross-fitted with `GroupKFold` on Murcko scaffolds. Put together
-those two facts mean something the paper never states: the inner division holds out whole
-scaffold groups as well, so a per-molecule result under a grouped condition separates groups,
-not molecules within a group.
-
-> Under the grouped conditions the amount of noise a molecule receives is a property of its
-> scaffold group rather than of the molecule, and the out-of-fold division holds out whole
-> scaffold groups. A per-molecule result under those conditions therefore distinguishes
-> affected groups from unaffected ones; it does not distinguish molecules within a group, and
-> should not be read as doing so.
-
-Provenance: `oof_predict` uses `GroupKFold` over the same Murcko groups as the outer split
-(`models/models.py:1584`); the grouped conditions key their noise on the group
-(`NOISE_DESIGN.md`).
-
-### M5a-iii. Which decomposed models the shape conditions cover on QM9
-
-M4 says the Student-$t$, Laplace and outlier conditions were run on a reduced set of pairings.
-It does not say which of the decomposed models fall inside that set, and on QM9 two of the four
-do not. The author settled on 2026-09-07 that this is the intended coverage and not a gap to
-fill, so the paper has to state it rather than the re-run closing it.
-
-> The Student-$t$, Laplace and outlier conditions were run on QM9 for a named subset of
-> model--representation pairings. Of the models whose uncertainty is decomposed, the Gaussian
-> process and one of the two mean-variance networks fall inside that subset; the variational
-> network and the second mean-variance network do not. QM9 decomposition results under those
-> three conditions therefore rest on two models rather than four. All four are decomposed under
-> the remaining conditions on QM9, and under every condition on the three assay datasets.
-
-Provenance: `deep_run_pairs.json`; the three conditions run at stage 2 only
-(`STAGE_DEFAULTS`, `slurm_scripts_qm9_rerun/generate_scripts.py`), and stage 2 is restricted by
-that file. `RERUN_PLAN.md` §13.27 D4l.
 
 ---
 
@@ -616,11 +929,24 @@ the code no longer computes at all:
 
 - **ECE is gone.** Expected Calibration Error is computed nowhere in the analysis path. Its
   definition (lines 234–238), its row in the metrics table (line 300) and its columns in the results
-  tables (lines 503, 508) cannot be regenerated.
+  tables (lines 503, 508) cannot be regenerated. Since the current paper defines, tabulates and
+  reports it, removing it silently will read as a result that went missing — Scalia et al. (2020)
+  drop the same metric and say why in a one-sentence footnote, which is the cheapest form.
 - **Mean prediction-interval width is not computed** by anything in the study, only by the
   standalone package. Lines 368 and 620 both list it.
 - **"Eleven noise levels"** (lines 240, 245) and $\sigma \in \{0, 0.1, \ldots, 1.0\}$ are wrong
   wherever they appear, including inside the metric definitions.
+
+**Two things to pass to whoever owns this subsection**, both from the literature pass rather than
+from the code:
+
+- **Coverage at 1$\sigma$ and 2$\sigma$ is thinner than any of the seven uncertainty benchmarks
+  read.** Hirschfeld et al. (2020) use miscalibration area; Scalia et al. (2020) use the area under
+  the calibration error curve plus the maximum; Yang & Li (2023), in this journal, use two calibration
+  errors; Busk et al. (2022) use negative log-likelihood plus calibration curves. Miscalibration area
+  is computed from the same curve the two coverage points already sit on, so it costs a line in the
+  figure script and no re-run, and it is the number a reviewer in this area looks for first.
+- **The coefficient of variation of the predicted spread** — see D32.
 
 ---
 
@@ -634,10 +960,18 @@ uses, and the text currently reads as though everything listed was benchmarked h
 - Line 352 says the classification strategies "mirror the regression set". They still exist, but the
   six regression strategies they mirrored no longer do, so the sentence needs rewriting rather than
   deleting. Suggested: *"NoiseInject also implements six label-flipping strategies for
-  classification tasks, which are not benchmarked here."*
+  classification tasks, which are not benchmarked here."* This sentence now carries the classification
+  material cut from M4.
 - Line 371's reference wrappers include split-conformal prediction. Conformal prediction is refused
   by name in this study's pipeline and appears in no result. Keep it as a stated package feature, or
   drop it; do not leave it ambiguous.
+
+**One more, found in this pass.** The assay runner still takes `--sigmas`, still calls its grid
+`sigma_levels`, and still writes a column literally named `sigma` into every assay results row, with
+a `level_units` column beside it saying whether that number is a fraction of the label spread or a
+fraction of labels clipped. QM9 refuses the flag by name. Nothing in the paper needs to say this, but
+anyone reading an assay results file will meet `sigma` and should not conclude the old parameter
+survived.
 
 ---
 
@@ -647,21 +981,23 @@ Every line number confirmed by searching for the quoted text in the current `pap
 
 | Line | What it says | What the code does | Fix |
 |---|---|---|---|
-| **193** | split "implemented by DeepChem" | A purpose-written scaffold splitter that gives each acyclic molecule its own group; DeepChem's was replaced because it put nearly all acyclic molecules in training | M1. Drop the `\citep{deepchem}` here |
+| **193** | split "implemented by DeepChem" | A purpose-written scaffold splitter that gives each distinct acyclic molecule its own group; DeepChem's was replaced because it put every acyclic molecule in training | M1. Drop the `\citep{deepchem}` here |
 | **193** | replicates split "from this fixed subset" | Each replicate draws its own 10,000 molecules | M1 |
-| **197** | "Tanimoto kernel was used for SVM" for binary representations | SVM is RBF on every representation, both pipelines. Lines 212 and 214 already say so | Delete the clause; the paper contradicts itself |
+| **193** | "Experiments that involved tracking uncertainty values were only run once" | On QM9 the out-of-fold pass runs inside the grid tasks and is replicated ten times; it is the assay side that has one fit per cell | Delete. See Part Two |
+| **197** | "Tanimoto kernel was used for SVM" for binary representations | SVM is RBF on every representation, both pipelines. Lines 212 and 214 already say so | Delete the clause; the paper contradicts itself. Also retires Additional file 12 |
 | **197** | hERG "N = 1,482" | 1,415 | M1. Also line 556 |
-| **197** | "all six noise injection strategies and eleven levels" | Seven conditions, seven levels on a different axis | M4 |
+| **197** | "all six noise injection strategies and eleven levels" | Seven conditions, seven levels on a different axis — and the assay datasets ran three of the seven | M4 |
 | **199** | targets "mean-centered and normalized" | True, but silent on the two things that were fixed: the statistics are the clean *training* ones, and noise is added before standardisation | M1 |
-| **203** | one-hot SMILES and mol2vec are study representations | Both refused by name; mol2vec is deleted from the pipeline | M2 |
+| **203** | one-hot SMILES and mol2vec are study representations | One-hot and randomized SMILES are refused by name; mol2vec has no code path at all | M2 |
 | **203** | Sort & Slice gives "a binary vector" | It carries substructure counts | M2 |
-| **205** | "Rust was used to perform … feature extraction" | Rust computes no representation; it does label processing, noise injection and serialization | M2 |
-| **214** | Tanimoto for fingerprints, RBF for PDV | An RBF GP on all six representations and a Tanimoto GP on ECFP4 alone, as two separately reported models | M3. Also line 418's "incompatible with PDV" |
+| **205** | "Rust was used to perform … feature extraction" | Rust computes no representation. It does label processing, noise injection and serialization, on QM9 only | M2 |
+| **214** | Tanimoto for fingerprints, RBF for PDV | An RBF process on all six representations and a Tanimoto process on ECFP4 alone, as two separately reported models | M3. Also line 418's "incompatible with PDV" |
 | **216** | VBLL is a posterior "over the last-layer weights" | Every layer is variational; the last-layer-only variant is excluded from the run | M3 |
-| **218** | forests, NGBoost and BNN variants were not decomposed | All three are, and the two mean-variance networks are the cleanest case | M5 |
-| **222, 240** | $\sigma$ is "the noise scaling factor shared by all strategies", swept 0 to 1.0 in elevens | No such flag or concept; the level is the delivered amount, seven values to 1.5 | M4, M6 |
+| **216** | three Bayesian transformations | Four: full-BNN, VBLL, heteroscedastic VBLL, MVE | M3 |
+| **218** | forests, NGBoost and BNN variants were not decomposed | The forests and NGBoost are. The plain Bayesian networks really do carry an epistemic term alone, which is the one part of this sentence that survives | M5 |
+| **222, 240** | $\sigma$ is "the noise scaling factor shared by all strategies", swept 0 to 1.0 in elevens | No such concept; the level is the delivered amount, seven values to 1.5 | M4, M6 |
 | **234–238, 300** | ECE defined and reported | Computed nowhere | M6 |
-| **313** | "Validation and test data remain free of noise" | Test yes, validation no | M4 |
+| **313** | "Validation and test data remain free of noise" | Test yes. Validation no on QM9; on the assay datasets only the neural models have a validation split, and it is noised | M4 |
 | **318–350** | Table 1, six strategies with per-point scales in $\sigma$ | Four of the six exist nowhere; the surviving two are defined differently | M4, new table |
 | **354** | outlier noise hits samples with $z > 2$; threshold acts on $|y| > 1$ "on normalized data" | Outlier selection is random; noise is applied to the raw label before standardisation, so no rule can be phrased in standardised units | M4 |
 | **368, 620** | interval width and ECE among computed metrics | Package features only | M7 |
@@ -672,40 +1008,76 @@ both are superseded by whatever the metrics pass settles.
 
 ---
 
-## Methods: flag before you write
+## What is still stopping Part One being finished
 
-Eight things I could not settle from the code. Each is phrased as what would settle it.
+Two kinds of thing, and only one of them is writing.
 
-1. **The 1,403 excluded QM9 molecules.** The pool is 129,428 because a pre-computed index file
-   removes 1,403 of PyG's 130,831, and no script in any of the three repositories writes that file.
-   Its only description is a comment saying they could not be processed by RDKit. The draft says
-   "could not be processed by \texttt{RDKit}" on that authority alone. **Settle by** regenerating the
-   list — parse every SMILES and compare the surviving set — or by dropping the clause and saying
-   only the count.
-2. **The two ChemBERTa collision percentages.** The counting code exists and has not been run.
-   **Settle by** running `scripts/crosscheck_chemberta.py` and reading gate 4's output.
-3. **Stereochemistry differs between the two pipelines.** QM9 canonicalises without stereochemistry;
-   the assay side keeps it. The four static representations are unaffected, but MHG-GNN is not — the
-   runner's own measurement puts the difference at several feature standard deviations, and about a
-   quarter of the LogD molecules carry stereochemistry. The code records this as an open decision,
-   not a defect. **Settle by** choosing one and changing one side, or by stating the difference in
-   Methods.
-4. **The dose anchor differs between the two pipelines.** QM9 doses against the clean *training*
-   label spread; the assay runner doses against the standard deviation of the whole clean label
-   column, deliberately, so that a molecule's corruption does not depend on which fold it lands in.
-   The draft in M1 quotes the assay spreads without saying which anchor produced them. **Settle by**
-   deciding whether one sentence in Methods covers it or whether the two should be aligned.
-5. **The tuning sweep.** Four Bayesian networks are marked for tuned settings in the files on disk;
-   every other model runs at the shared default. The draft leaves a `TODO` for the count. **Settle
-   by** confirming the sweep is final.
-6. **Two missing citations.** `avalon` is in neither bib file; `Bentz2013` is in `citations.bib`
-   only. `Chithrananda2020` is present in `refs.bib`. Also worth deciding which bib file is live —
-   `paper.tex` currently points at neither, it says `\bibliography{sn-bibliography}`.
-7. **Which models the paper says decompose.** The M5 draft describes the machinery for every family.
-   Whether the Results report all of them, or only the ones that pass the level-response check, is a
-   Results decision that changes one sentence here.
-8. **Abbreviations (lines 579–615).** **ECE** and **NDS** are both retired and must come out;
-   **MVE** needs adding. Mechanical, and doable at the same time as the Methods.
+**Nine are code or submission defects, and they are in `HANDOFF.md` as of 12 September 2026.** None
+is a choice; each is something the code or the queue is doing wrong, verified at a line number.
+Ordered there by what a wrong result costs:
+
+| | What | Where it lands in the Methods |
+|---|---|---|
+| 1 | QM9's heteroscedastic Gaussian process never initialises its RBF lengthscale from the data; KIRBy does it at both its sites | M3's lengthscale sentence is true of one pipeline until this is fixed |
+| 2 | `uncertainty_pairs.json` names six models, the assay uncertainty generator names seven | M5's out-of-fold coverage sentence |
+| 3 | The tuned setting was ranked over five representations and shipped to six | M3's tuning paragraph |
+| 4 | NN-$\alpha$'s learning rate and dropout are hard-coded; NN-$\beta$'s are tuned | M3's architecture and tuning paragraphs |
+| 5 | The MVE and heteroscedastic-VBLL variants train at defaults beside tuned siblings | M3's tuning paragraph |
+| 6 | ChemBERTa's collision count has never been produced | M2's two `TODO` percentages |
+| 7 | `data/valid_qm9_indices.pth` has no generator | M1's exclusion clause |
+| 8 | Nothing proves which filters produced the cached hERG file — **verify, do not re-fetch** | M1's hERG sentence |
+| 9 | Additional file 1 is hand-typed and contradicts `model_defaults.py` | M3's first sentence points at it |
+
+**Four numbers are waiting on a run or a read**, and are marked `TODO` in the drafts rather than
+guessed: the two ChemBERTa percentages, the count of collapsed Gaussian-process fits, and the tuned
+pairing count if the regime changes.
+
+**Three are mechanical**: `avalon` is in neither bib file, `Bentz2013` is in `citations.bib` only,
+and `paper.tex` points `\bibliography` at a file that does not exist.
+
+Everything else in Part One is written. Where I cut correct prose or chose between two defensible
+forms, the subsection says so and names the comparison paper behind it, so you can reverse any of
+them in one edit: the HOMO--LUMO paragraph, the Sort & Slice passage, MHG-GNN's track record, the
+NGBoost and Gaussian-process complexity passages, the classification-flipping paragraph, the
+internal-guard sentence, and the circularity argument about calibrated coverage.
+
+---
+
+## One thing to confirm, because it changes what runs
+
+All nineteen assay scripts pass `--conditions gaussian grouped_wider grouped_shifted`. The
+Student-$t$, Laplace and outlier conditions are opt-in on that generator and were not asked for.
+`noise_conditions.json` gives them no `applies_to` scope, so nothing declares they should run there.
+The assay datasets therefore carry three of the seven conditions and QM9 carries all seven, which is
+what M4 now says. **If that is not what you intended it is a submission, not a rewrite.**
+
+---
+
+## What the second pass changed, and how it was checked
+
+Eleven agents re-read the code in September 2026 against the previous draft of this Part One: seven
+reading one subsection each against the pipelines that implement it, three reading comparable
+published Methods sections for how much detail is normal, and the whole set instructed to default to
+"corrected" or "unverifiable" rather than to confirm. **302 claims were checked. 74 were corrected
+and 31 could not be established from code at all.** Nothing below came from `RERUN_PLAN.md`, from a
+code comment, or from memory.
+
+The single largest finding is **M0**: the previous draft repeatedly stated as a property of the study
+something that is a property of QM9 alone, or of the assay pipeline alone. Twenty-four of the
+seventy-four corrections are of that shape: the fix is the same in every case, to say which pipeline
+the sentence is about.
+
+The literature calibration read ten papers in full, four of them in this journal: Kolmar & Grulke
+(J Cheminform 2021), the closest published analogue; Yang & Li (J Cheminform 2023) and Dutschmann et
+al. (J Cheminform 2023) for uncertainty; Jiang et al. (J Cheminform 2021), *Count your bits*
+(J Cheminform 2026) and Dablander et al. (J Cheminform 2023) for multi-representation benchmarks;
+Heid et al. (JCIM 2023), Scalia et al. (JCIM 2020), Hirschfeld et al. (JCIM 2020) and Busk et al.
+(2022) for the uncertainty half; Landrum & Riniker (JCIM 2024) for ChEMBL provenance. Their Methods
+run 1,740 to 6,000 words. **Four things were cut on their evidence** — the NGBoost and Gaussian
+process complexity passages, the classification-flipping paragraph, the internal-guard sentence and
+the code-path sentence — **and three added**: the two decomposition equations, the dose-matching
+equation, and the clause distinguishing this study's clean test labels from Kolmar & Grulke's noised
+ones.
 
 ---
 
@@ -718,20 +1090,22 @@ in it is a property of the design rather than of the results.
 > we inject is imposed on a target that is otherwise clean; on the three assay datasets the injected
 > noise sits on top of real measurement error that we cannot separate from it, and the noise level
 > there should be read as an amount added rather than an amount present. Each configuration on the
-> assay datasets is fitted once rather than repeated under new seeds, so those results carry
-> variation across the five cross-validation folds --- which mixes sampling with scaffold difficulty
-> --- but no run-to-run error term, and no comparison between two models on those datasets should be
-> read as significant on the strength of the fold spread alone. Two questions are undefined by
+> assay datasets is fitted once rather than repeated under new seeds, and the noise there is drawn
+> once over the whole label column rather than per fold, so those results carry variation across the
+> five cross-validation folds --- which mixes sampling with scaffold difficulty --- but no
+> run-to-run error term of any kind, and no comparison between two models on those datasets should
+> be read as significant on the strength of the fold spread alone. Two questions are undefined by
 > construction rather than answered negatively: under the conditions that give every molecule the
-> same amount of noise, and for the models whose observation-noise term is a single learned value,
-> asking which individual molecules a model finds unreliable has no answer to give. The Gaussian
-> processes are fitted on a subsample of at most 5,000 training molecules where every other model
-> sees the full training split, so their comparison with the other families is not held at equal
-> training size. The ChemBERTa results are results for one checkpoint whose tokenizer operates
-> character by character, and should not be read as a statement about pretrained transformer
-> embeddings in general. Finally, hyperparameters are held fixed across the noise axis, which keeps
-> that axis clean but means we do not measure whether a model could be retuned to resist noise
-> better than it does at its default.
+> same noise scale, and for the models whose observation-noise term is a single learned value,
+> asking which individual molecules a model finds unreliable has no answer to give. On QM9 the
+> Gaussian processes are fitted on a subsample of at most 5,000 of the roughly 8,000 training
+> molecules where every other model sees the full training split, so their comparison with the other
+> families is not held at equal training size there. The ChemBERTa results are results for one
+> checkpoint whose tokenizer operates character by character, and should not be read as a statement
+> about pretrained transformer embeddings in general; no representation in the study encodes
+> stereochemistry. Finally, hyperparameters are held fixed across the noise axis, which keeps that
+> axis clean but means we do not measure whether a model could be retuned to resist noise better
+> than it does at its default.
 
 ## L2. The cells that were run twice (append to the Limitations paragraph)
 
@@ -771,6 +1145,16 @@ The 43 wide ones sit at the top of the noise ladder (39 of the 43 at levels 0.75
 small and a swing of 0.2 is a large share of a small number. AUC_norm integrates the whole ladder, so
 a cell like that moves the robustness score by much less than it moves the single R2 it came from --
 **unmeasured**, and worth one sentence of measurement before the Limitations text claims it.
+
+**Four corrections the second pass made to this paragraph.** The noise draw on the assay side is
+fixed across folds as well as the fit, which makes the no-error-term claim stronger than the first
+draft said. Four conditions give every molecule the same noise scale, not two — Gaussian, Student-*t*,
+Laplace and grouped-shifted — and "scale" is the right word, because under grouped-shifted every
+molecule still gets an independent draw of its own on top of its group's offset. The 5,000-molecule
+Gaussian-process cap binds on QM9 only; on the three assay datasets the training blocks are smaller
+than the cap. And the stereochemistry clause is new: the substructure fingerprints are generated
+without chirality and QM9's SMILES are canonicalised without it, so stereo-blindness is a property of
+the whole study rather than a ChemBERTa caveat.
 
 **One thing this paragraph deliberately does not say.** It does not call the uncertainty results
 single-seed. On QM9 the out-of-fold uncertainty pass runs inside the grid tasks and is therefore

@@ -1,9 +1,5 @@
 {
-  "caco2/dnn_bnn_full": {
-    "activation": "tanh",
-    "hidden_size1": 64,
-    "hidden_size2": 32
-  },
+  "caco2/dnn_bnn_full": null,
   "caco2/dnn_bnn_full_variational": {
     "activation": "relu",
     "hidden_size1": 64,

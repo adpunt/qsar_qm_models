@@ -143,6 +143,30 @@ DEPTH_ONLY = [c['name'] for c in _SETTLED['stage_2_depth_only']]
 DEEP_ONLY_SET = set(DEPTH_ONLY)
 RETIRED = [c['name'] for c in _SETTLED['not_run']]
 
+# WHICH DEPTH CONDITIONS THIS SIDE IS DECLARED TO RUN, read from the settled file.
+#
+# The author, 2026-08-28, asked whether logD, Caco-2 and hERG were seeing only
+# gaussian, grouped_wider and grouped_shifted while QM9 saw all seven: "It should
+# get all the same noise as qm9, update the documentation and wire it in."
+#
+# Until 2026-09-12 that ruling lived in this file's --include-depth-conditions help
+# text and nowhere else. noise_conditions.json gave the three depth-only conditions
+# no scope at all, so nothing in data said they belonged on this side, and the only
+# record that they had been asked for was the launch log. The scope blocks now carry
+# it, and this reads them rather than restating the ruling a second time.
+#
+# The mode is `pair_grid`, NOT `pair_subset`, and the difference is load-bearing.
+# Censoring is five pairs named outright in censoring_pairs.json and is capped at
+# about five by the guard below. The depth conditions are the deep run's model list
+# CROSSED with its representation list -- eight models on three representations in
+# deep_run_pairs.json today, twenty-four pairs -- so the five-pair cap must not
+# reach them. Every other reader of this file filters on `pair_subset` exactly, so
+# a distinct mode passes through them unchanged.
+DEPTH_ON_VALIDATION = [
+    c['name'] for c in _SETTLED['stage_2_depth_only']
+    if 'validation_robustness' in c.get('scope', {}).get('applies_to', [])]
+DEPTH_NOT_DECLARED = [c for c in DEPTH_ONLY if c not in DEPTH_ON_VALIDATION]
+
 # Conditions that run on a NAMED SUBSET of model-and-representation pairs rather
 # than the whole grid. Censoring is one, settled by the author 2026-08-27: the
 # question it answers is how big the effect is, not which model resists it best,
@@ -1059,19 +1083,39 @@ def main():
                          'work if its model and representation are not listed. '
                          'Read on the compute node, so make it absolute.')
     ap.add_argument('--include-depth-conditions', action='store_true',
-                    help=f'The DEEP RUN: also run the depth-only conditions '
-                         f'({", ".join(DEPTH_ONLY)}), on a named subset of pairs. Requires '
-                         f'--models and --reps, exactly as the QM9 deep run does -- the author '
-                         f'ruled on 2026-08-28 that the validation datasets get the same noise '
-                         f'as QM9, and QM9 runs these on a dozen pairs rather than the whole '
-                         f'grid. Which pairs comes from the screen (RERUN_PLAN.md 13.17 B).')
+                    help=f'The DEEP RUN: also run the depth-only conditions this side is '
+                         f'declared to run ({", ".join(DEPTH_ON_VALIDATION) or "none"}), on a '
+                         f'named subset of pairs. Requires --models and --reps, exactly as the '
+                         f'QM9 deep run does -- the author ruled on 2026-08-28 that the '
+                         f'validation datasets get the same noise as QM9, and QM9 runs these on '
+                         f'a couple of dozen pairs rather than the whole grid. Which pairs comes '
+                         f'from the screen (RERUN_PLAN.md 13.17 B). The list comes from the '
+                         f'applies_to scope in {NOISE_CONDITIONS_FILE.name}, not from here.')
     args = ap.parse_args()
 
     if args.conditions:
         conditions = list(args.conditions)
     else:
         conditions = list(BREADTH_GRID) + (
-            list(DEPTH_ONLY) if args.include_depth_conditions else [])
+            list(DEPTH_ON_VALIDATION) if args.include_depth_conditions else [])
+
+    # A DEPTH CONDITION THIS SIDE IS NOT DECLARED TO RUN IS REFUSED BY NAME.
+    #
+    # --include-depth-conditions takes DEPTH_ON_VALIDATION above, so the only way
+    # here is --conditions naming one outright. The refusal is the same shape as the
+    # censoring one: the decision lives in noise_conditions.json, and a job script is
+    # not the place to overrule it. Today all three are declared and nothing trips
+    # this; it exists so that removing a condition from this side is an edit to the
+    # settled file rather than a command line somebody types once.
+    undeclared = [c for c in conditions if c in DEPTH_NOT_DECLARED]
+    if undeclared:
+        ap.error(
+            f"{', '.join(undeclared)} is a depth-only condition that "
+            f"{NOISE_CONDITIONS_FILE.name} does not declare for this side: its scope's "
+            f"applies_to does not name 'validation_robustness'. The author ruled on "
+            f"2026-08-28 that logD, Caco-2 and hERG get the same noise as QM9, so if this "
+            f"has been narrowed on purpose the settled file has to say why first. Declared "
+            f"here: {', '.join(DEPTH_ON_VALIDATION) or 'none'}.")
 
     bad = [c for c in conditions if c in RETIRED]
     if bad:
@@ -1203,6 +1247,15 @@ def main():
         if not args.include_depth_conditions:
             print(f"  depth-only, NOT run: {', '.join(DEPTH_ONLY)}  "
                   f"(--include-depth-conditions)")
+            print(f"    of those, {NOISE_CONDITIONS_FILE.name} declares "
+                  f"{len(DEPTH_ON_VALIDATION)} of {len(DEPTH_ONLY)} for this side "
+                  f"(applies_to names validation_robustness): "
+                  f"{', '.join(DEPTH_ON_VALIDATION) or 'none'}. This is the BREADTH "
+                  f"grid, so they belong in the depth submission, not here.")
+    if [c for c in conditions if c in DEEP_ONLY_SET]:
+        print(f"  depth-only conditions ASKED FOR, declared for this side in "
+              f"{NOISE_CONDITIONS_FILE.name}: "
+              f"{', '.join(c for c in conditions if c in DEEP_ONLY_SET)}")
     print(f"  retired, never run:  {', '.join(RETIRED)}")
     print(f"  {len(models)} model(s) x {len(reps)} representation(s)")
 

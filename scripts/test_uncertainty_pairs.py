@@ -38,6 +38,7 @@ WHAT IT CHECKS
     python scripts/test_uncertainty_pairs.py
 """
 import ast
+import importlib.util
 import json
 import math
 import re
@@ -312,9 +313,22 @@ def check_qm9_matches(pairs, out_dir):
             # for are 1 + the folds it SCORES, so this must read the same
             # override the generator does or it demands a wall clock for work
             # the job does not do.
+            # READ THE GENERATOR'S OWN wall_hours, DO NOT RESTATE IT.
+            #
+            # Until 2026-09-13 this recomputed the wall here as the laptop hours
+            # in MODELS times the fits times 1.25. The generator stopped pricing
+            # walls that way when the ARC rates in model_hours.json arrived: it
+            # now grades the evidence per model and applies 2.0x to a measured
+            # rate, 3.0x to a lower bound and 2.5x to a laptop number. So this
+            # check failed on seven of seven models against a generator that was
+            # right -- for the heteroscedastic process, 174 laptop hours per 110
+            # training runs against ARC's 8.32. A second copy of a formula is
+            # the defect this whole file exists to stop, and this file was
+            # carrying one.
             scored = gen.OOF_FOLDS_SCORED.get(model, 0) or oof_folds
-            want_hours = math.ceil(gen.MODELS[model][2] * runs_per_task
-                                   * (1 + scored) / 110 * 1.25)
+            want_hours, _grade = gen.wall_hours(
+                model, gen.MODELS[model][2], runs_per_task, scored, oof_folds,
+                gen.slowest_observed_speedup(gen.MODELS))
             check(hours.get(model) == want_hours,
                   f"{model} runs the out-of-fold pass and asks for "
                   f"{hours.get(model)}h; the generator's own formula on "
@@ -336,9 +350,27 @@ def check_qm9_matches(pairs, out_dir):
 # 5 — the laboratory generator, read rather than imported or edited
 # ---------------------------------------------------------------------------
 def lab_roster():
-    """MODELS, REPS and MODEL_REPS out of the laboratory generator's source."""
+    """MODELS, REPS and MODEL_REPS out of the laboratory generator.
+
+    IMPORTED FIRST, from 2026-09-12. That generator used to hold its own copy of
+    the model list as a literal dict, which is how it came to run seven models
+    while this file named six; it now builds all three of these from
+    `uncertainty_pairs.json` at import time, and reading the source text for a
+    literal finds nothing at all. The literal reader is kept underneath for a
+    checkout that predates the change.
+    """
     if not LAB_GENERATOR.is_file():
         return None
+    try:
+        spec = importlib.util.spec_from_file_location('_lab_uncertainty_generator',
+                                                      LAB_GENERATOR)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {'MODELS': list(module.MODELS), 'REPS': list(module.REPS),
+                'MODEL_REPS': {k: list(v) for k, v in module.MODEL_REPS.items()}}
+    except Exception as exc:
+        print(f'  NOTE  the laboratory generator would not import ({exc}); '
+              f'reading its source instead')
     tree = ast.parse(LAB_GENERATOR.read_text())
     out = {}
     for node in ast.walk(tree):

@@ -88,7 +88,7 @@ from loss_functions import *
 # point of writing.
 from uncertainty_decomposition import (
     decompose_forest, decompose_gp, decompose_hetero_gp, decompose_sampling,
-    decompose_single_distribution)
+    decompose_seed_ensemble, decompose_single_distribution)
 
 # The shared parameter spec. models/ is on sys.path when process_and_train.py
 # runs from scripts/, but not when this module is imported from the repo root
@@ -1029,7 +1029,8 @@ def train_epochs_co_teaching(epochs, model, train_loader, val_loader, path, rati
 class DNNRegressionModel(nn.Module):
     """Densely-connected neural network for binding affinity prediction"""
 
-    def __init__(self, input_size, hidden_size1=32, hidden_size2=32):
+    def __init__(self, input_size, hidden_size1=32, hidden_size2=32,
+                 dropout_rate=None):
         """
         Fully-connected neural network
 
@@ -1041,13 +1042,26 @@ class DNNRegressionModel(nn.Module):
             Number of neurons in the first hidden layer
         hidden_size2 : int
             Number of neurons in the second hidden layer
+        dropout_rate : float or None
+            Fraction of units dropped after each hidden layer. None takes
+            NEURAL_DEFAULTS['dnn']['dropout_rate'].
+
+            THIS USED TO BE THE LITERAL 0.2, and it is why the two base networks
+            were tuned over different parameter sets: the MLP builder reads
+            `dropout_rate` and `lr` out of its tuned entry, this one could not
+            read either, so a sweep could move four numbers on one network and
+            two on the other. The spec's value is 0.2, the same number that was
+            written here, so nothing moves until a sweep writes a dnn entry
+            carrying the key.
         """
         super(DNNRegressionModel, self).__init__()
+        if dropout_rate is None:
+            dropout_rate = NEURAL_DEFAULTS['dnn']['dropout_rate']
         self.fc1 = nn.Linear(input_size, hidden_size1)
         self.fc2 = nn.Linear(hidden_size1, hidden_size2)
         self.fc3 = nn.Linear(hidden_size2, 1)
         self.activation = nn.ReLU()  # Default activation (will be tuned)
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
     def forward(self, x):
         x = self.activation(self.fc1(x))
@@ -3283,6 +3297,29 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             params['activation'] = NEURAL_DEFAULTS['dnn']['activation']
             params_source = 'default'
 
+    # THE SAME FOUR KEYS AS THE MLP BUILDER, FROM THE SAME PLACE.
+    #
+    # train_mlp_variant_model reads hidden_size, num_hidden_layers,
+    # dropout_rate and lr from its tuned entry. This builder read width,
+    # depth and activation only: the learning rate came from the shared spec
+    # unconditionally and the dropout was the literal 0.2 inside
+    # DNNRegressionModel. So the two base networks -- and the four Bayesian
+    # and variational transformations of each, which read this same dict --
+    # were tuned over different parameter sets, and a dnn entry carrying
+    # `lr` or `dropout_rate` would have been written and never applied.
+    #
+    # The fallback is the spec, and the spec's values are 1e-3 and 0.2, which
+    # are exactly what the two lines below used to hard-code. Nothing moves on
+    # today's tuned file: results/master_tuned_hyperparameters.json holds
+    # activation, hidden_size1 and hidden_size2 for the dnn keys and neither of
+    # these. It moves when a sweep writes one.
+    _dnn_h1, _dnn_h2 = NEURAL_DEFAULTS['dnn']['hidden_sizes']
+    params.setdefault('hidden_size1', _dnn_h1)
+    params.setdefault('hidden_size2', _dnn_h2)
+    params.setdefault('activation', NEURAL_DEFAULTS['dnn']['activation'])
+    params.setdefault('lr', NEURAL_DEFAULTS['training']['lr'])
+    params.setdefault('dropout_rate', NEURAL_DEFAULTS['dnn']['dropout_rate'])
+
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh(), 'softmax': nn.Softmax(dim=1)}
     activation = activation_map[params['activation']]
 
@@ -3402,7 +3439,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model = DNNRegressionModel(
             input_size=x_train.shape[1], 
             hidden_size1=params['hidden_size1'], 
-            hidden_size2=params['hidden_size2']
+            hidden_size2=params['hidden_size2'],
+            dropout_rate=params['dropout_rate']
         )
         # Modify final layer to output 2 values
         model.fc3 = nn.Linear(params['hidden_size2'], 2)
@@ -3414,7 +3452,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model = DNNRegressionModel(
             input_size=x_train.shape[1], 
             hidden_size1=params['hidden_size1'], 
-            hidden_size2=params['hidden_size2']
+            hidden_size2=params['hidden_size2'],
+            dropout_rate=params['dropout_rate']
         )
         model.activation = activation
         model.to(device)
@@ -3455,7 +3494,12 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     # spec_hash on every QM9 row certifying a change that did not happen
     # (RERUN_PLAN.md 2.13). Nothing moves today: the spec says 0.0. The matching
     # `optimizer` key is checked once, in train_nn.
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+    #
+    # `params['lr']` rather than the spec key directly: the MLP builder has
+    # always read the learning rate out of its tuned entry and this one never
+    # could. The fill above puts the spec's value in when no tuned entry carries
+    # one, so this line is the spec until a sweep says otherwise.
+    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'],
                                  weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
 
     # STEP 5: Train with appropriate domain labels
@@ -3554,7 +3598,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         if loss_name == 'heteroscedastic':
             m = DNNRegressionModel(input_size=n_features,
                                    hidden_size1=params['hidden_size1'],
-                                   hidden_size2=params['hidden_size2'])
+                                   hidden_size2=params['hidden_size2'],
+                                   dropout_rate=params['dropout_rate'])
             m.fc3 = nn.Linear(params['hidden_size2'], 2)
             m.activation = activation
             m.to(device)
@@ -3562,7 +3607,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         else:
             m = DNNRegressionModel(input_size=n_features,
                                    hidden_size1=params['hidden_size1'],
-                                   hidden_size2=params['hidden_size2'])
+                                   hidden_size2=params['hidden_size2'],
+                                   dropout_rate=params['dropout_rate'])
             m.activation = activation
             m.to(device)
             crit = get_loss_function(loss_name, **loss_kwargs)
@@ -3592,7 +3638,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
         loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
         es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
-        opt = torch.optim.Adam(m.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+        # The same learning rate the reported fit used. See the main path.
+        opt = torch.optim.Adam(m.parameters(), lr=params['lr'],
                                weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
         train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
                  file_no, 'oof_inner', rep)
@@ -4063,6 +4110,17 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             params['dropout_rate'] = NEURAL_DEFAULTS['mlp']['dropout_rate']
             params['lr'] = NEURAL_DEFAULTS['training']['lr']
             params_source = 'default'
+
+    # The same fill the DNN builder does, for the same reason: a tuned entry
+    # that carries the width but not the learning rate used to raise KeyError
+    # here rather than falling back to the spec. Both builders now read the same
+    # four keys from the same place, so a sweep can move the same numbers on
+    # either base network.
+    params.setdefault('hidden_size', NEURAL_DEFAULTS['mlp']['hidden_size'])
+    params.setdefault('num_hidden_layers',
+                      NEURAL_DEFAULTS['mlp']['num_hidden_layers'])
+    params.setdefault('dropout_rate', NEURAL_DEFAULTS['mlp']['dropout_rate'])
+    params.setdefault('lr', NEURAL_DEFAULTS['training']['lr'])
 
     # Loss function setup
     loss_name = args.loss if hasattr(args, 'loss') else 'mse'
@@ -8457,6 +8515,48 @@ def train_heteroscedastic_gp(
 
         lik = GaussianLikelihood().to(device)
         gp = HeteroscedasticGPModel(xf, yf, lik, kernel_type).to(device)
+        # THE SAME START AS EVERY OTHER GAUSSIAN PROCESS IN THE STUDY.
+        #
+        # `init_rbf_lengthscale` was written on 2026-08-26 and wired into
+        # `fit_gp_with_fallback`, which is the ONLY place it was called. This
+        # model does not go through that function -- it builds its own model,
+        # its own likelihood and its own joint Adam loop -- so it kept starting
+        # at gpytorch's softplus(0) ~ 0.69 while real distances on these
+        # representations run from 17 on the PDV to 1,100 on the learned
+        # embeddings. That is the condition that makes a Gaussian process
+        # return its prior and predict one flat number; on the PLAIN process it
+        # produced R2 = -0.0158 for MHG-GNN (results/gp_kernel_harvest/qm9/
+        # anova_valprop_mhggnn_gauche_rbf.csv, model gauche_rbf, not this one).
+        # Measured on this path on 2026-09-12, 300 real QM9 molecules on the
+        # PDV at the 100 epochs the cluster runs: R2 0.936 started from the
+        # data against 0.892 started at 0.69. It does not collapse here: the 28
+        # QM9 het_gp_rbf combinations of representation and noise condition
+        # already on disk hold 1,717 rows and every one records gp_collapsed = 0
+        # (results/decisions_arc/d0_coverage.csv), with clean R2 from 0.8345 on
+        # ECFP4 to 0.8914 on Sort & Slice. Nothing is being rescued. All 1,717
+        # are a different fit from this one, so all 1,717 are a resubmission.
+        #
+        # The laboratory runner has initialised at BOTH its Gaussian-process
+        # sites since 2026-09-07 (KIRBy tests/alternative_data_noise_robustness
+        # .py, _init_rbf_lengthscale called at :1614 and :1774 as of
+        # 2026-09-12), so until now a GP-Hetero row from one pipeline and one
+        # from the other were different fits under one name.
+        #
+        # Inside `_fit_het_gp` rather than beside the outer call, so every inner
+        # out-of-fold fold gets it too -- that is what this function being one
+        # function is for.
+        # The outputscale first, for the same reason: GP_DEFAULTS
+        # ['apply_outputscale'] says both sides apply it, the ordinary process
+        # here does (the `Gauche` branch above) and the laboratory runner does at
+        # both of its sites, and this one was the remaining place that did not.
+        # Left at gpytorch's softplus(0) its ScaleKernel starts at 0.693 rather
+        # than the spec's 1.0. It is set BEFORE the lengthscale so that a check
+        # hooked onto init_rbf_lengthscale sees both, which is what
+        # scripts/test_het_gp_lengthscale.py does; the two touch different
+        # parameters, so the order between them changes nothing else.
+        if GP_DEFAULTS['apply_outputscale']:
+            gp.covar_module.outputscale = GP_DEFAULTS['outputscale']
+        init_rbf_lengthscale(gp, xf)
         noise_net = NoiseModel(np.asarray(x_fit).shape[1]).to(device)
 
         gp.train()

@@ -1,4 +1,281 @@
-# Handoff — five chats, one thing each
+# Handoff — the code defects found 2026-09-12
+
+Read `CLAUDE.md` first. Branch `additional_reps`. Code reaches the cluster only when the author
+runs `bash scripts/pull_safely.sh` against a commit that is already pushed. Write answers into
+`RERUN_PLAN.md` §13.27.
+
+These nine came out of a second code pass over the paper's Methods on 2026-09-12, which re-checked
+302 claims against the pipelines and corrected 74. Most of the 74 were writing problems and are
+handled in `PAPER_REVISION_GUIDE_FINAL.md`. **These nine are not. They are things the code or the
+run configuration is doing wrong** — not results that have failed to arrive — and every one is
+verified at the line numbers given.
+
+They are ordered by what a wrong result costs. **1 and 2 change numbers. 3, 4 and 5 change which
+model was fitted. 6 to 9 are provenance — nothing is wrong with the runs, but a claim in the paper
+cannot be backed.**
+
+Three things to be clear about before starting.
+
+**None of these nine is a claim that a result is missing. Work is in the queue right now.** The
+author's `squeue` on 2026-09-12:
+
+```
+             JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST(REASON)
+ 13043774_[2-26%6]      long unc_gp_h scat9264 PD       0:00      1 (Priority)
+ 13043781_[0-35%6]      long unc_gp_h scat9264 PD       0:00      1 (Priority)
+ 13043780_[0-35%6]      long unc_mlp_ scat9264 PD       0:00      1 (Priority)
+ 13043778_[0-35%6]      long unc_vbll scat9264 PD       0:00      1 (Priority)
+ 13043776_[0-35%6]      long unc_ngbo scat9264 PD       0:00      1 (Priority)
+13099373_[0-1,4,6-      long qm92_mlp scat9264 PD       0:00      1 (Priority)
+ 13111529_[0-17%4]      long val_mlp- scat9264 PD       0:00      1 (Priority)
+       12986318_34      long qm92_ngb scat9264  R   22:48:00      1 arc-c149
+       12986318_28      long qm92_ngb scat9264  R 1-12:23:40      1 arc-c244
+       12986318_22      long qm92_ngb scat9264  R 2-02:57:57      1 arc-c049
+12971614_[14-17%4]    medium qm90_mlp scat9264 PD       0:00      1 (Priority)
+```
+
+Every pending array says `(Priority)`, which is queue position and nothing else — not a bad resource
+request, not an unmet dependency. Six arrays and three running tasks were outstanding when this list
+was written, so **`check_runs_landed.py` reporting MISSING for any of them means "has not run yet",
+not "was never submitted".** Run `squeue` before you resubmit anything, every time.
+
+The job names decode from the three generators — `slurm_scripts_uncertainty_rerun` writes
+`--job-name=unc_{slug}` (`:390`), `slurm_scripts_validation_rerun` writes `val_{name}` (`:546`), and
+`slurm_scripts_qm9_rerun` writes `qm9{stage}_{slug}` (`:798`):
+
+| Prefix | What it is | Where it writes |
+|---|---|---|
+| `unc_*` | the uncertainty runs | `<KIRBy>/tests/results/uncertainty_rerun/` |
+| `val_*` | the assay robustness grid | `<KIRBy>/results/validation_rerun/` |
+| `qm90_*` | the QM9 screen | `results/` in this checkout |
+| `qm92_*` | the QM9 deep run | `results/` in this checkout |
+
+**Not on this list, because it is correct.** Five of the seven QM9 conditions never run noise level
+zero, and `copy_zero_rows.py` refuses to copy a clean *uncertainty* row into them. That is the
+author's decision of 2026-08-28, with the reasoning written out at
+`slurm_scripts_qm9_rerun/generate_scripts.py:468-503`: of the three conditions with a shape,
+`grouped_wider` is keyed to the scaffold group that the out-of-fold pass splits on and
+`outlier_p10` picks at random, so both are structural nulls, and censoring is the only condition
+whose clean level buys anything. **Do not "fix" it.**
+
+**Do not re-fetch hERG.** See item 8.
+
+---
+
+## 1. QM9's heteroscedastic Gaussian process never gets its lengthscale from the data
+
+**What is wrong.** `init_rbf_lengthscale` is defined at `models/models.py:2672` and called at
+exactly one place, `:2744`, inside `fit_gp_with_fallback`. The heteroscedastic Gaussian process
+does not go through that function: `_fit_het_gp`, from `models/models.py:8449`, builds its own
+`HeteroscedasticGPModel`, its own `GaussianLikelihood` and its own Adam optimiser, and never calls
+it. So on QM9 that model starts at gpytorch's default lengthscale.
+
+KIRBy does it at both sites — `alternative_data_noise_robustness.py:1602` for the plain process and
+`:1762` for the heteroscedastic one — so the two pipelines differ on the one model where it matters
+most.
+
+**Why it costs numbers.** The default lengthscale sits near 1 while real pairwise distances on these
+representations run far above that, which is the condition that makes a process return its prior and
+predict one flat value for every molecule. That is the defect fixed in `574a3f0` on 2026-08-26 and
+it is still live on this path. `GP-Hetero` is the model
+`slurm_scripts_uncertainty_rerun/generate_scripts.py:186` calls "the cleanest separation measured in
+the roster" and "the only kernel model that can be asked the per-molecule question".
+
+**Do.** Call `init_rbf_lengthscale` inside `_fit_het_gp` on `x_fit`, before the optimisation loop,
+so the inner out-of-fold folds get it too — `_fit_het_gp` is deliberately one function for exactly
+that reason.
+
+Then ask which of three states the QM9 `heteroscedastic_gp` tasks are in, because the work differs:
+**not yet submitted** — fix, push, `pull_safely.sh`, then submit, and nothing is wasted;
+**queued** — the same, and get the fix onto the cluster before those tasks dispatch, because a
+pending task picks up whatever the code says when it starts; **already completed** — those rows were
+fitted at gpytorch's default lengthscale, so check `gp_collapsed` and the spread of the predictions
+on each and resubmit what collapsed. Say how many rows each state holds.
+
+Note that the `unc_*` arrays in the queue above are the uncertainty runs, which go through KIRBy, and
+KIRBy already initialises at both its sites. This defect is QM9's `heteroscedastic_gp` alone.
+
+## 2. Two different lists of which models the uncertainty work runs
+
+**What is wrong.** `uncertainty_pairs.json` names six models. `MODELS` in
+`slurm_scripts_uncertainty_rerun/generate_scripts.py:116-186` names seven — the extra one is
+`GP-Hetero`, added there on 2026-09-07. Nothing in that generator reads `uncertainty_pairs.json`;
+grep it and you get no hits.
+
+**Why it matters, in the file's own words.** `uncertainty_pairs.json` exists because
+"Both pipelines answer the same uncertainty questions on the same pairs, so a table can put QM9
+beside logD, Caco-2 and hERG row for row. A second list anywhere means the two halves stop being
+comparable, which is what happened between 2026-08-28 and 2026-08-29." There is a second list now.
+The effect is that the assay datasets can ask GP-Hetero the per-molecule question and QM9 cannot,
+because QM9's out-of-fold pass only fires on pairs from that file.
+
+**This is live, not hypothetical.** Two `unc_gp_h` arrays are queued right now — 13043774 and
+13043781 — so the assay side is about to produce GP-Hetero uncertainty rows that QM9 has no
+counterpart for. Do not read their absence on the QM9 side as a missing run: QM9 has no uncertainty
+submission of its own, its uncertainty rows fall out of the main grid, and the out-of-fold pass only
+fires on pairs named in `uncertainty_pairs.json`.
+
+**Do.** Put the question to the author: does `GP-Hetero` join the QM9 out-of-fold list, or come out
+of the assay one? Then make the assay generator READ `uncertainty_pairs.json` instead of holding its
+own copy, so this cannot recur. If GP-Hetero goes in, that is a resubmission of those QM9 tasks —
+size it before submitting.
+
+## 3. The tuned setting was ranked without Avalon and then shipped to Avalon
+
+**What is wrong.** `scripts/write_chosen_settings.py:71` ranks over
+`REPS = ['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'sns']`, under a comment at `:69-70` reading
+"AVALON IS OUT OF THIS STUDY (author, 2026-09-01). Its columns are not shown and no run collects
+it." `scripts/ship_tuned_settings.py:58` then uses
+`REPS = ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']` and writes
+`master[key] = {rep: setting for rep in REPS}` at `:84`.
+
+**The comment is false about the study.** `ALL_REPS` at
+`slurm_scripts_qm9_rerun/generate_scripts.py:112` and at
+`slurm_scripts_validation_rerun/generate_scripts.py:49` both contain Avalon, and `CLAUDE.md` lists
+it as one of the six. Every run collects it.
+
+**Consequence.** `results/master_tuned_hyperparameters.json` carries an `avalon` entry for all four
+Bayesian networks, holding a setting chosen by a ranking Avalon never entered.
+
+**Do.** Ask the author what the 2026-09-01 decision actually was. Then either re-rank including
+Avalon, or stop shipping to Avalon and let it run at the shared default. Correct the comment either
+way — it is the only record of that decision and it currently contradicts both generators.
+
+## 4. The two base networks are tuned over different parameter sets
+
+**What is wrong.** `models/models.py:3458` builds NN-$\alpha$'s optimiser with
+`lr=NEURAL_DEFAULTS['training']['lr']` — the shared default, unconditionally.
+`models/models.py:4193` builds NN-$\beta$'s with `lr=params['lr']`, which comes from the tuned
+dictionary. Dropout is the same story: `models.py:1050` hard-codes `p=0.2` on the $\alpha$ path
+while `models.py:4066` reads it from the tuned dictionary on the $\beta$ path.
+
+**Consequence.** The shipped settings run BNN-$\beta$ at learning rate 4.29e-3 and dropout 0.379 and
+VBLL-$\beta$ at 1.19e-3 and 0.357, while BNN-$\alpha$ and VBLL-$\alpha$ cannot leave 1e-3 and 0.2
+whatever the sweep found for them. An $\alpha$-versus-$\beta$ comparison is then partly a comparison
+of how much tuning each was allowed.
+
+**Do.** Make both paths read the same keys from the same place. Then check whether the $\alpha$
+models' tuned entries hold a learning rate or dropout that was never being applied — if they do,
+those runs were not at the setting the file says.
+
+## 5. The variance-head and heteroscedastic networks train at defaults beside tuned siblings
+
+**What is wrong.** Nothing hidden — `models/tuning_rosters.py:161-166` states it: the two
+variance-head networks "have their own keys, so they read their own entry or none — and no sweep has
+ever scored them, so as things stand they train at their defaults. That is a fact about what has
+been measured, not a decision to leave them untuned; tuning them needs a sweep that includes
+`--loss heteroscedastic`." The same applies to the two heteroscedastic VBLL networks, and
+`:170-172` says the heteroscedastic Gaussian process has no tuned path at all.
+
+**Consequence.** Four transformations sit on each base network. Two of them run tuned and two run at
+the shared default, so a BNN-versus-MVE comparison on one base network is partly
+tuned-versus-untuned.
+
+**Do.** Either run the sweep with `--loss heteroscedastic` so all four are on the same footing, or
+get the author's word that the asymmetry stands and it goes in the Methods. Cost the sweep before
+proposing it.
+
+## 6. ChemBERTa's collision count has never been produced
+
+`scripts/crosscheck_chemberta.py` gate 4 counts how often two molecules collapse to one embedding.
+It has never been run, and the Methods needs the two percentages — QM9 and hERG. Run it, and put the
+output where a figure script can read it rather than quoting it into a document.
+
+## 7. The QM9 pool has no generator
+
+`data/valid_qm9_indices.pth` holds 129,428 indices with a maximum of 130,830. Five scripts read it
+(`scripts/process_and_train.py:73` and `:1136`, plus `clean_noise.py`, `domain_clustering.py`,
+`run_qm_qsar_models.py`, `noise_mitigation.py`). Nothing writes it. It is a binary dated
+12 November 2024, and the only account of what the 1,403 missing molecules are is a comment.
+
+The Methods currently says they are the uncharacterised ones plus a set RDKit could not process.
+**Do.** Write the script that regenerates the index from PyG's QM9 and prove it returns the same
+129,428, or establish that it does not and say what the difference is. Until then that sentence
+cannot be written.
+
+## 8. hERG provenance — verify, do NOT regenerate
+
+`fetch_chembl_herg_ki` at `alternative_data_noise_robustness.py:952` returns the cached
+`data_cache/chembl_herg_ki.csv` — two columns, SMILES and pChEMBL, 1,415 rows — before reaching the
+binding-assay filter at `:1036`, the median collapse at `:1042` or the inter-assay
+standard-deviation filter at `:1045`. A live fetch is refused unless `KIRBY_ALLOW_CHEMBL_FETCH=1`.
+
+**The cache-first behaviour is correct and deliberate**, and the refusal message says why: fetching
+live pulls whatever release is current today, which is not the dataset any existing result came
+from. **A re-fetch would silently change N and invalidate every assay result in the study. Do not
+do it on the working path.**
+
+The problem is only that nothing proves which filters produced that file.
+`data_cache/chembl_herg_ki.provenance.json` states release 36 and a re-check against 37, and says in
+its own text that it was reconstructed on 2026-09-04 rather than written by the fetch.
+
+**Do.** Fetch into a SEPARATE file, with the environment variable set and the output path changed,
+and compare it against the cache: how many of the 1,415 survive, what the release actually is, and
+whether the standard-deviation filter reproduces the same set. Report the comparison. Do not
+overwrite the cache whatever it shows — the answer goes into the Methods sentence, not into the
+data.
+
+## 9. Additional file 1 is hand-typed and contradicts the code
+
+`additional_files.tex:38-122` lists hyperparameters for eleven models. The roster is nineteen
+configurations. It gives both forests `min_samples_leaf` 1 where `models/model_defaults.py` pins 5
+and `max_features` sqrt where it pins 0.3, gives the Gaussian process a Tanimoto kernel and nothing
+else, and has no rows at all for any BNN, VBLL or MVE variant, the heteroscedastic Gaussian process,
+the epoch cap, the patience or the 100 Monte Carlo passes. `scripts/generate_supp_tables.py` writes
+Additional files 2 to 5 and not this one.
+
+The Methods' first sentence points at it.
+
+**Do.** Write the generator, reading `models/model_defaults.py` (SPEC_VERSION 1.7.0) and the tuned
+files, and emit the LaTeX. Do not hand-edit the table — that is how it got here. Additional file 12
+is the representation-specific SVM kernel table that `paper.tex:197` cites; the claim it supports is
+being deleted, so it goes too.
+
+---
+
+## One thing to confirm with the author, because it changes what runs
+
+All nineteen assay scripts pass `--conditions gaussian grouped_wider grouped_shifted`. The
+Student-$t$, Laplace and outlier conditions are opt-in on that generator via
+`--include-depth-conditions` (`slurm_scripts_validation_rerun/generate_scripts.py:1203-1205`) and
+were not asked for, and censoring needs its pairs named. `noise_conditions.json` gives the three
+depth-only conditions no `applies_to` scope, so nothing declares that they should run there.
+
+So the assay datasets carry three of the seven conditions, and QM9 carries all seven. **Confirm that
+is intended before the Methods says it.** If it is not, it is a submission, not a code fix.
+
+This is about which conditions were *asked for*, not about which have finished: `val_mlp-`
+(13111529) was still queued on 2026-09-12, so the assay grid is incomplete on disk for reasons that
+have nothing to do with this question. Read the `--conditions` line in the generated `val_*.sh`
+scripts, not the results directory.
+
+---
+
+## Every chat owes the same two round trips as before
+
+The rules at the bottom of this file still hold: prove the change took, and prove nothing is
+missing. `python scripts/check_runs_landed.py --stage N --verbose`, pointed at the KIRBy checkout for
+the laboratory and uncertainty results. No item is finished while its part of that output is not
+clean.
+
+**With one addition, from the queue above.** `check_runs_landed.py` compares what is on disk against
+what the generators asked for. It cannot see the queue, so anything still pending reads as MISSING.
+Pair every run of it with `squeue -u $USER` and separate the two before reporting:
+
+```bash
+squeue -u $USER -o "%.20i %.12P %.14j %.2t %.11M %R"
+python scripts/check_runs_landed.py --stage 2 --verbose
+```
+
+A task that is MISSING **and** in `squeue` is waiting. A task that is MISSING and **not** in `squeue`
+needs resubmitting. Saying "34 missing" without that split sends the author to resubmit work that is
+already queued, which is worse than saying nothing — it doubles the queue and the second copy wins
+the race unpredictably.
+
+---
+---
+
+# Handoff — five chats, one thing each (2026-09-07, state in `RERUN_PLAN.md` §13.27)
 
 Read `CLAUDE.md` first.
 

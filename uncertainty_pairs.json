@@ -5,7 +5,11 @@
 
   "why_it_had_to_be_written_down": "The screen's cut was applied to the laboratory job generator and to nothing else. QM9 has no uncertainty run of its own -- its uncertainty rows fall out of the main grid -- so every model that emits one was cross-fitted on every representation, 11 models by 6 representations against the laboratory's 10 pairs. The two halves could not be compared pair for pair, which is exactly what the decision asked for.",
 
-  "settled": "2026-08-29. RERUN_PLAN.md section 3.4e.",
+  "settled": "2026-08-29. RERUN_PLAN.md section 3.4e. Two variance-head networks added 2026-09-01, and GP-Hetero added 2026-09-12 -- see `the_seventh_model` below.",
+
+  "the_seventh_model": "GP-Hetero (canonical `het_gp_rbf`, QM9 label `heteroscedastic_gp`) joined on 2026-09-12. The author added it to the ASSAY uncertainty runs on 2026-09-07, where it went into the generator's own model table and not into this file, so for five days there were two lists and QM9's out-of-fold pass did not fire on it. Adding it here is the side that ADDS rather than removes: the assay side already has the model queued, and taking it off that side to make the two agree would be cutting an axis for compute. From this date `slurm_scripts_uncertainty_rerun/generate_scripts.py` reads its membership out of this file rather than holding a second copy, and `scripts/test_uncertainty_rosters_agree.py` fails if a second list appears again.",
+
+  "what_this_costs_on_qm9": "The QM9 arrays for `heteroscedastic_gp` now run the out-of-fold pass on ECFP4, PDV and ChemBERTa, which is 6 fits per training run instead of 1, so their wall clock rises, read off scripts generated on this laptop on 2026-09-12: the screen 2:59 to 7:59, the main grid 10:59 to 58:59, the deep run 11:59 to 64:59 and censoring 11:59 to 64:59. Memory is unchanged at 64G on all four. The assay side changes by nothing at all -- its two GP-Hetero arrays were generated from the same seven-model roster this file now carries.",
 
   "models": [
     {"canonical": "qrf",        "qm9": "qrf",                      "validation": "QRF",
@@ -19,7 +23,9 @@
     {"canonical": "dnn_bnn_full_mve", "qm9": "dnn_bnn_full_mve", "validation": "BNN-Full-MVE",
      "why": "a Bayesian network with a VARIANCE OUTPUT HEAD -- Kendall & Gal eq. 6, the case the uncertainty literature actually holds up. The only route on either pipeline to a NETWORK whose aleatoric term varies per molecule. Added 2026-09-01"},
     {"canonical": "mlp_bnn_full_mve", "qm9": "mlp_bnn_full_mve", "validation": "MLP-BNN-Full-MVE",
-     "why": "the same variance head on the NN-beta base, so the finding does not rest on one architecture"}
+     "why": "the same variance head on the NN-beta base, so the finding does not rest on one architecture"},
+    {"canonical": "het_gp_rbf", "qm9": "heteroscedastic_gp", "validation": "GP-Hetero",
+     "why": "the same exact Gaussian process as `gauche_rbf` with a small network predicting the observation noise for each molecule, so its data-noise half varies per molecule instead of being one number broadcast onto every row. The author added it to the assay uncertainty runs on 2026-09-07 ('yes help me add these'); it was in this file on NEITHER side, so the assay half was about to write GP-Hetero uncertainty rows that QM9 had no counterpart for. Added here 2026-09-12 so the QM9 out-of-fold pass fires on it too. It is the only kernel model that can be asked the per-molecule question at all -- without it that question is answered by a forest and two networks and by no kernel model"}
   ],
 
   "representations": [
@@ -58,6 +64,7 @@
   "notes": {
     "what_this_does_NOT_restrict": "The main QM9 grid still trains every model on every representation -- the accuracy results, the retention curves and the variance decomposition all need the full grid, and none of them reads an uncertainty column. This file decides only which pairs get the out-of-fold uncertainty pass and write per-molecule uncertainty rows.",
     "cost": "The out-of-fold pass costs `--oof-folds` extra fits on top of each training run, so restricting it is a saving on QM9 rather than an expense.",
-    "the_decomposition_models": "heteroscedastic_gp, dnn_bnn_full_variational_hetero and mlp_bnn_full_variational_hetero are NOT in this list, because they are not in the laboratory run either. They are the only models that report a data-noise term that varies per molecule (RERUN_PLAN.md 5.5e, 5.5f), so the aleatoric/epistemic split cannot be measured per molecule on the pairs listed here. Raised with the author rather than resolved by this file."
+    "the_decomposition_models": "Of the three models whose data-noise term varies per molecule and which were absent here (RERUN_PLAN.md 5.5e, 5.5f), heteroscedastic_gp is now IN the `models` list above, added 2026-09-12 after the author put it into the assay uncertainty runs on 2026-09-07. dnn_bnn_full_variational_hetero and mlp_bnn_full_variational_hetero are still out on both sides: they are in the deep run and in no uncertainty submission, so the per-molecule split cannot be measured on them. That is the remaining half of this note and it is for the author, not for this file.",
+    "not_the_same_list_as_decomposition": "Being in `models` is not being in `decomposition`. `decomposition` names the models whose split is REPORTED as a split, and GP-Hetero has not been added to it here -- what it is on the uncertainty list for is the per-molecule question, and whether its population-level split is reported beside the ordinary Gaussian process is a separate call the author has not been asked."
   }
 }

@@ -61,6 +61,49 @@ HEADROOM = 3.0
 # on top.
 QRF_FROM_RF = 3.5
 
+# FIVE MORE PAIRINGS WITH NO MEASURED ROW, AND WHAT EACH IS SIZED FROM.
+#
+# The timing pass of 2026-08-27 ran the models that existed then. These five were
+# added to the roster afterwards, so every one of them stops this generator by
+# name -- which is correct, and is why the sweep for the two variance-head
+# networks could not be built at all.
+#
+# Each is one flag away from a model that WAS timed, and the QM9 job generator
+# has already sized every one of them against that same sibling: its cost field
+# says 45 against dnn_bnn_full's 30, 69 against mlp_bnn_full's 46, 122 against
+# dnn_bnn_full_variational's 81, 119 against mlp_bnn_full_variational's 79, and
+# 174 against gauche_rbf's 87. So the ratio is READ out of the roster below
+# rather than retyped here, and if that generator's sizing changes this follows
+# it.
+#
+# DERIVED IS NOT MEASURED. The generator prints every derived pairing by name
+# with the sibling and the ratio, the same way it prints the quantile forest, and
+# the HEADROOM factor still applies on top. Replacing these with real rows is
+# `scripts/tune_hyperparameters.py --time --models <label>`.
+DERIVED_FROM_SIBLING = {
+    'dnn_bnn_full_mve':                'dnn_bnn_full',
+    'mlp_bnn_full_mve':                'mlp_bnn_full',
+    'dnn_bnn_full_variational_hetero': 'dnn_bnn_full_variational',
+    'mlp_bnn_full_variational_hetero': 'mlp_bnn_full_variational',
+    'heteroscedastic_gp':              'gauche_rbf',
+}
+
+
+def sibling_ratio(rosters, model, sibling):
+    """How much more one fit of `model` costs than one fit of `sibling`.
+
+    The third field of a MODELS entry is that model's hours per 110 runs, set by
+    the QM9 job generator from the same two timing files this generator reads.
+    Taking the ratio from there keeps one number in one place; the alternative is
+    a second constant that drifts away from it silently.
+    """
+    mine = float(rosters.MODELS[model][2])
+    theirs = float(rosters.MODELS[sibling][2])
+    if theirs <= 0:
+        raise SystemExit(f'{sibling} has no cost in the roster, so {model} '
+                         f'cannot be sized from it.')
+    return mine / theirs
+
 # Which partition a script names. The author confirmed 2026-08-28 that a 60-hour
 # request is fine on `long`, so NGBoost is left as one array rather than split by
 # representation to dodge its wall clock.
@@ -250,15 +293,21 @@ def main():
 
     out_dir = Path(args.out_dir)
     written, total_core_hours, unmeasured = [], 0.0, []
+    derived = []
 
     for model in chosen:
         reps = rosters.MODELS[model][4]
+        sibling = DERIVED_FROM_SIBLING.get(model)
+        ratio = sibling_ratio(rosters, model, sibling) if sibling else None
         seconds = {}
         for rep in reps:
             if (model, rep) in measured:
                 seconds[rep] = measured[(model, rep)]
             elif model == 'qrf' and ('rf', rep) in measured:
                 seconds[rep] = measured[('rf', rep)] * QRF_FROM_RF
+            elif sibling and (sibling, rep) in measured:
+                seconds[rep] = measured[(sibling, rep)] * ratio
+                derived.append((model, rep, sibling, ratio))
             else:
                 unmeasured.append((model, rep))
         if len(seconds) != len(reps):
@@ -307,6 +356,17 @@ def main():
             'Sizing these by hand is exactly what the timing pass exists to '
             'prevent, and a task that runs out of wall clock leaves a partial '
             'trials file that --merge would read as a finished one.')
+
+    if derived:
+        # Named, not silent. A derived wall clock is a floor with headroom on
+        # it, not a measurement, and the reader has to be able to tell which is
+        # which before a task runs out of time and leaves a partial trials file.
+        print(f'\n  {len(derived)} pairing(s) SIZED FROM A SIBLING, not measured:')
+        for model, rep, sib, ratio in derived:
+            print(f'      {model} x {rep}  =  {ratio:.2f} x {sib} x {rep}')
+        print(f'    Replace with measurements: '
+              f'python scripts/tune_hyperparameters.py --time --models '
+              f'{" ".join(sorted({m for m, _, _, _ in derived}))}\n')
 
     print(f'{len(written)} script(s) in {out_dir}')
     print(f'  {args.settings} settings + 1 default = {n_fits} fits per pairing')

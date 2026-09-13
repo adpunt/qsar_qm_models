@@ -1,0 +1,36 @@
+{
+  "dropped": 1403,
+  "dropped_also_uncharacterised": 0,
+  "dropped_by_heavy_atom_count": {
+    "5": 1,
+    "6": 5,
+    "7": 30,
+    "8": 179,
+    "9": 1188
+  },
+  "dropped_by_ring_count": {
+    "2": 6,
+    "3": 454,
+    "4": 723,
+    "5": 211,
+    "6": 9
+  },
+  "dropped_over_valent_carbon_in_sdf": 1403,
+  "dropped_over_valent_in_sdf": 1403,
+  "filter": "Chem.MolFromSmiles(data.smiles) is not None",
+  "kept": 129428,
+  "kept_molecules_scanned_as_a_control": 2023,
+  "kept_over_valent_carbon_in_sdf": 0,
+  "kept_over_valent_in_sdf": 3,
+  "matches_reference": true,
+  "over_valent_atoms_by_element": {
+    "C": 2795
+  },
+  "pyg_qm9_positions": 130831,
+  "qm9_root": "/Users/apunt/repos/qsar_qm_models/data/QM9",
+  "rdkit_version": "2022.09.5",
+  "torch_geometric_version": "2.4.0",
+  "torch_version": "2.2.2",
+  "uncharacterised_rows_in_release": 3054,
+  "written_by": "scripts/regenerate_qm9_valid_indices.py"
+}

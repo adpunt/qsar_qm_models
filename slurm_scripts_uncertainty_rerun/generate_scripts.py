@@ -111,9 +111,24 @@ import json
 import math
 from pathlib import Path
 
-# Models that emit a per-molecule uncertainty. Must match UNCERTAINTY_MODELS in
-# KIRBy/tests/alternative_data_noise_robustness.py.
-MODELS = {
+# WHICH MODELS RUN IS NOT DECIDED HERE ANY MORE, FROM 2026-09-12.
+#
+# It is decided in uncertainty_pairs.json, which the QM9 generator already read
+# and this one did not. For five days the two halves of the study ran different
+# rosters: GP-Hetero was added to the dict below on 2026-09-07 and to nothing
+# else, so the assay side was about to write GP-Hetero uncertainty rows that QM9
+# had no counterpart for -- the exact failure that file was written to stop.
+#
+# What is below is the per-model SPEC: the tier, the core count and the note
+# saying why that model is worth running. Membership is read off the settled
+# file and every name it lists must appear here, or the generator refuses to
+# write anything. Adding a model is now one edit in the JSON plus a spec entry,
+# and the JSON is the half that decides.
+#
+# Every model here emits a per-molecule uncertainty, and the ORDER is
+# UNCERTAINTY_MODELS in KIRBy/tests/alternative_data_noise_robustness.py --
+# checked by scripts/test_uncertainty_job_scripts.py, which reads both.
+MODEL_SPEC = {
     # name          : (tier, cpus, note)   -- memory is in model_memory.json,
     #                                        the wall clock is COMPUTED (wall_clock below)
     #
@@ -185,6 +200,33 @@ MODELS = {
     # ('GP-')`, so it inherits --gp-reps and the RBF kernel without a change.
     'GP-Hetero':      (1, 8, 'the same exact Gaussian process with a network predicting the observation noise per molecule, so its data-noise and model-uncertainty halves come apart. The cleanest separation measured in the roster (5.5i), and the only kernel model that can be asked the per-molecule question'),
 }
+
+# ---------------------------------------------------------------------------
+# THE SETTLED PAIRS -- read, never restated
+# ---------------------------------------------------------------------------
+# uncertainty_pairs.json holds which models and which representations the
+# uncertainty work runs on, on BOTH pipelines, so a table can put QM9 beside
+# logD, Caco-2 and hERG row for row. slurm_scripts_qm9_rerun/generate_scripts.py
+# has read it since 2026-08-29; this file did not until 2026-09-12.
+UNCERTAINTY_PAIRS_FILE = Path(__file__).resolve().parent.parent / 'uncertainty_pairs.json'
+_PAIRS = json.loads(UNCERTAINTY_PAIRS_FILE.read_text())
+
+# The settled file names every model three ways -- a canonical name, the QM9
+# job label and the laboratory one. This pipeline runs under the laboratory
+# spelling, which is also KIRBy's.
+_SETTLED_MODELS = [m['validation'] for m in _PAIRS['models']]
+_missing_spec = [m for m in _SETTLED_MODELS if m not in MODEL_SPEC]
+if _missing_spec:
+    raise SystemExit(
+        f"{UNCERTAINTY_PAIRS_FILE.name} names {_missing_spec}, which MODEL_SPEC in "
+        f"{Path(__file__).name} has no entry for. A model on the settled list needs a "
+        f"tier, a core count and a note saying why it is worth running, and it needs a "
+        f"per-fit rate in the laboratory generator's SECONDS_PER_FIT_PER_1K or the wall "
+        f"clock cannot be priced. Add the spec entry rather than dropping the name.")
+# Order is the settled file's order, which is the KIRBy runner's order.
+MODELS = {m: MODEL_SPEC[m] for m in _SETTLED_MODELS}
+_UNRUN_SPEC = [m for m in MODEL_SPEC if m not in MODELS]
+
 # MEMORY COMES FROM model_memory.json, WITH THIS PIPELINE'S OWN FLOOR ON TOP.
 #
 # The grid generators put the trees on a 64G tier, on the evidence that every row
@@ -226,18 +268,29 @@ DATASETS = ['logd', 'caco2', 'herg_ki']
 # ChemBERTa is IN, and it was in neither list before: it is where the Bayesian
 # networks show what little they have, and the tree models do as well on it as
 # anywhere.
-REPS = ['ECFP4', 'PDV', 'ChemBERTa']
+#
+# READ FROM uncertainty_pairs.json FROM 2026-09-12, in the file's order, for the
+# same reason the model list is: a task index is (dataset, representation,
+# condition), so a representation list that differs between the two halves of the
+# study changes what a queued task index MEANS as well as which pairs exist. The
+# file's order is ECFP4, PDV, ChemBERTa, which is the order this list was typed
+# in, so nothing already queued changes meaning.
+REPS = [r['validation'] for r in _PAIRS['representations']]
 
-# Representations for ONE model, where the full list would buy nothing. VBLL
-# tracks its error at 0.25 on ChemBERTa and at 0.011 on ECFP4 and 0.152 on PDV,
-# so two of its three representations would produce rows nobody can use.
+# Representations for ONE model, where the full list would buy nothing.
+#
+# ALSO READ FROM THE SETTLED FILE, from 2026-09-12. It is EMPTY there since
+# 2026-09-01: the variational network was restricted to ChemBERTa on a roster
+# screen that measured it tracking its own error at 0.25 there against 0.01 to
+# 0.15 elsewhere, but that screen's neural numbers predate the label-scale defect
+# (RERUN_PLAN.md 2.31) and a restriction resting on them is not safe. The author
+# lifted it. Every model runs on every representation in REPS.
+_CANON_TO_VAL_REP = {r['canonical']: r['validation'] for r in _PAIRS['representations']}
+_CANON_TO_VAL_MODEL = {m['canonical']: m['validation'] for m in _PAIRS['models']}
 MODEL_REPS = {
-    # EMPTY from 2026-09-01. The variational network was restricted to ChemBERTa
-    # on a roster screen that measured it tracking its own error at 0.25 there
-    # against 0.01 to 0.15 elsewhere -- but that screen's neural numbers predate
-    # the label-scale defect (RERUN_PLAN.md 2.31), and a restriction resting on
-    # them is not safe. The author lifted it. Every model runs on every
-    # representation in REPS.
+    _CANON_TO_VAL_MODEL[_m]: [_CANON_TO_VAL_REP[_r] for _r in _only]
+    for _m, _only in _PAIRS.get('model_representations', {}).items()
+    if not _m.startswith('_')
 }
 
 # ---------------------------------------------------------------------------
@@ -734,6 +787,11 @@ def main():
 
     n_tasks = len(DATASETS) * len(reps) * len(conditions)
 
+    print(f"Models: {len(MODELS)}, read from {UNCERTAINTY_PAIRS_FILE.name} — "
+          f"{', '.join(MODELS)}")
+    if _UNRUN_SPEC:
+        print(f"  not run: {', '.join(_UNRUN_SPEC)} — a spec is held for each, and "
+              f"{UNCERTAINTY_PAIRS_FILE.name} does not name it")
     print(f"Conditions: {source}")
     for c in conditions:
         role = ('no per-molecule pattern — question A and the leakage check'

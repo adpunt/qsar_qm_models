@@ -1220,9 +1220,13 @@ def warn_selection_against_uncertainty_pairs(pairs, path):
     none of the uncertainty questions. Nothing downstream can tell that apart from a
     real one.
 
-    `heteroscedastic_gp` is the live case: it is in `deep_run_pairs.json` and in
-    `censoring_pairs.json`, on neither pipeline's uncertainty list, and it is the model
-    RERUN_PLAN.md 5.5i names as one of only two that separate the two halves.
+    `heteroscedastic_gp` WAS the live case -- in `deep_run_pairs.json` and in
+    `censoring_pairs.json` and on neither pipeline's uncertainty list -- and it was
+    fixed on 2026-09-12 by adding it to `uncertainty_pairs.json`, so this no longer
+    fires for it. What still fires for are the two variational networks with a
+    per-molecule noise term, `dnn_bnn_full_variational_hetero` and
+    `mlp_bnn_full_variational_hetero`: both are in the deep run and in no uncertainty
+    submission on either pipeline.
     """
     emits = {m for m, _ in pairs if '-u True' in MODELS.get(m, ("",))[0]}
     absent = sorted(m for m in emits if m not in UNCERTAINTY_PAIRS)
@@ -1236,12 +1240,13 @@ def warn_selection_against_uncertainty_pairs(pairs, path):
           f"the TEST split only, where the injected noise is zero.")
     print(f"    Drop them from {Path(path).name} -- a JSON edit the queued tasks pick "
           f"up when they start.")
-    print(f"    ADDING one to the uncertainty runs is NOT a JSON edit. "
-          f"slurm_scripts_uncertainty_rerun/generate_scripts.py reads no pairs file at "
-          f"all: its models are the MODELS dict in that file and its representations "
-          f"are REPS. Adding one means an entry in that dict plus one in "
-          f"model_memory.json, and regenerating. This message used to say 'both "
-          f"pipelines read it', which was never true.")
+    print(f"    ADDING one to the uncertainty runs starts with a JSON edit, from "
+          f"2026-09-12: slurm_scripts_uncertainty_rerun/generate_scripts.py now reads "
+          f"its model list out of {UNCERTAINTY_PAIRS_FILE.name} instead of holding a "
+          f"second copy. It also needs a MODEL_SPEC entry there, a per-fit rate in the "
+          f"laboratory generator, an entry in model_memory.json, and both sides "
+          f"regenerated and resubmitted -- the JSON alone is not picked up by a queued "
+          f"task on either pipeline.")
 
 
 def selection_pairs(spec, pairs_key, models_key):

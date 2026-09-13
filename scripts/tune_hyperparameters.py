@@ -237,10 +237,34 @@ SEARCH_SPACES = {
         'outputscale':      lambda r: _log_uniform(r, 0.1, 10.0),
         'likelihood_noise': lambda r: _log_uniform(r, 1e-4, 0.1),
     },
+    # THE TWO BASE NETWORKS ARE SEARCHED OVER THE SAME NUMBERS.
+    #
+    # 'dnn' held width1, width2 and activation and nothing else, while 'mlp'
+    # below held width, depth, dropout and the learning rate. So a sweep moved
+    # three numbers on one base network and four on the other, and the shipped
+    # file shows it: results/master_tuned_hyperparameters.json gives every
+    # mlp_bnn_full entry an `lr` and a `dropout_rate` (avalon: 0.004286 and
+    # 0.379) and every dnn_bnn_full entry neither, on all six representations.
+    # A BNN-versus-BNN comparison across the two base networks was then partly
+    # a comparison of how much tuning each was allowed.
+    #
+    # `dropout_rate` and `lr` take the MLP's ranges deliberately: the point is
+    # that the two are searched over the same numbers, and both builders now
+    # read both keys from the same place with the shared spec as the fallback
+    # (models/models.py, train_dnn_model and train_mlp_variant_model). Widths
+    # stay as they are -- the two architectures take different width keys and
+    # always did, which is not the asymmetry.
+    #
+    # Adding these two keys means a re-sweep of the dnn family: the settings
+    # already in the file were drawn from the three-key space and cannot be
+    # compared with draws from the five-key one. Guard:
+    # scripts/test_neural_tuned_keys.py.
     'dnn': {
         'hidden_size1': lambda r: r.choice([64, 128, 256, 512, 1024]),
         'hidden_size2': lambda r: r.choice([32, 64, 128, 256, 512]),
         'activation':   lambda r: r.choice(['relu', 'tanh']),
+        'dropout_rate': lambda r: round(r.uniform(0.05, 0.5), 3),
+        'lr':           lambda r: _log_uniform(r, 1e-4, 1e-2),
     },
     'mlp': {
         'hidden_size':       lambda r: r.choice([64, 128, 256, 512]),
@@ -282,8 +306,18 @@ def search_family(model_label, rosters=None):
             return key
     if model_label in SEARCH_SPACES:
         return model_label
+    # Longest first: 'dnn_bnn_full_variational_hetero' ends with
+    # '_bnn_full_variational' too, and stripping the shorter one leaves
+    # 'dnn_bnn' which is in no search space.
+    #
+    # '_bnn_full_mve' was missing until 2026-09-12, so `dnn_bnn_full_mve` and
+    # `mlp_bnn_full_mve` -- the two variance-head networks -- resolved to None
+    # and were recorded 'blocked' instead of being fitted. They are the two
+    # models that have never been scored by any sweep, and that is why. The
+    # sweep that scores them is run with `--loss heteroscedastic`; `roster_label`
+    # resolves such a run to these two names.
     for suffix in ('_bnn_full_variational_hetero', '_bnn_full_variational',
-                   '_bnn_full'):
+                   '_bnn_full_mve', '_bnn_full'):
         if model_label.endswith(suffix):
             base = model_label[:-len(suffix)]
             if base in SEARCH_SPACES:
