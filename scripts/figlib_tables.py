@@ -313,6 +313,52 @@ def t6_uncertainty(support, q4, q6, slopes, output_dir):
 # T7 -- rank transfer
 # ---------------------------------------------------------------------------
 
+def t8_pairs_across_datasets(pairs, output_dir, top_n=12):
+    """The model-and-representation pairs, on every dataset, ranked.
+
+    One row per pair, one pair of columns per dataset: clean R2 and AUC_norm.
+    **No score column** -- the ranking mechanism is described in the caption and
+    the number itself says nothing to a reader (the author, 2026-09-14).
+
+    Only pairs that ran on every dataset are shown, because a pair that ran on
+    one cannot be ranked against one that ran on four.
+    """
+    if pairs is None or not len(pairs):
+        return None
+    frame = pairs[pairs.get('comparable', True)].copy()
+    frame = frame[~frame['any_auc_norm_above_one'].astype(bool)]
+    if not len(frame):
+        return None
+    frame = frame.sort_values('combined_scaled', ascending=False).head(top_n)
+    datasets = [d for d in C.DATASET_ORDER
+                if f'{d}_auc_norm' in frame.columns]
+    table = pd.DataFrame({
+        'Model': [C.model_label(m) for m in frame['model']],
+        'Representation': [C.rep_label(r) for r in frame['rep']],
+    })
+    for dataset in datasets:
+        table[f'{C.dataset_label(dataset)} clean R²'] = \
+            frame[f'{dataset}_clean_r2'].to_numpy()
+        table[f'{C.dataset_label(dataset)} AUC_norm'] = \
+            frame[f'{dataset}_auc_norm'].to_numpy()
+    return write(table, output_dir, 'T8_pairs_across_datasets',
+                 f'The {top_n} best model-and-representation pairings across all '
+                 f'{len(datasets)} datasets. For each dataset, clean R² is the '
+                 f'accuracy with no noise added and AUC_norm is the share of it '
+                 f'retained as noise rises. Rows are ordered by accuracy and '
+                 f'robustness together: within each dataset both quantities are '
+                 f'rescaled to run from 0 at that dataset\'s worst pairing to 1 '
+                 f'at its best, the two are averaged, and the result is averaged '
+                 f'over the datasets — so a clean R² of 0.40, which is near the '
+                 f'top on Caco-2 and near the bottom on QM9, counts for what it '
+                 f'is worth on each. Pairings whose AUC_norm exceeds 1 on any '
+                 f'dataset are excluded: that happens when the clean accuracy a '
+                 f'pairing is measured against is itself small, and the ratio '
+                 f'then reports the small denominator rather than any real '
+                 f'tolerance to noise. Only pairings that ran on every dataset '
+                 f'appear.')
+
+
 def t7_rank_transfer(transfer, output_dir, rep=None, condition='gaussian'):
     """Each model's robustness rank on QM9 beside its rank on each assay set.
 

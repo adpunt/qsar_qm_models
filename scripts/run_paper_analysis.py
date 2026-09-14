@@ -617,6 +617,8 @@ def build_tables(args, tables, verdicts):
             tables.get('d8_component_slopes'), out))
     if tables.get('d9_rank_transfer') is not None:
         built.append(TAB.t7_rank_transfer(tables['d9_rank_transfer'], out))
+    if tables.get('standout_pairs') is not None:
+        built.append(TAB.t8_pairs_across_datasets(tables['standout_pairs'], out))
 
     built = [b for b in built if b is not None]
     missing = [n for n, k in (('T6', 'd8_support'), ('T7', 'd9_rank_transfer'))

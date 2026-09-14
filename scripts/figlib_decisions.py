@@ -261,9 +261,19 @@ def what_is_missing(tables, verdicts, rep):
     said = {v['id']: v for v in verdicts}
     rows = []
 
-    def gap(slot, wants, why, fix=''):
+    def gap(slot, wants, why, fix='', dataset='', condition='', models='',
+            reps='', runnable=''):
+        """`runnable` says whether submitting more tasks would close it.
+
+        The file is handed to whoever submits jobs, so a row that cannot be
+        closed by running anything has to say so -- otherwise a deep-run
+        condition that covers a named subset BY DESIGN reads as a queue to
+        clear (the author, 2026-09-14).
+        """
         rows.append({'slot': slot, 'missing': wants, 'consequence': why,
-                     'what_would_fill_it': fix})
+                     'what_would_fill_it': fix, 'dataset': dataset,
+                     'condition': condition, 'models': models, 'reps': reps,
+                     'runnable': runnable})
 
     qm9 = tables.get('auc_norm_qm9')
     assay = tables.get('auc_norm_assay')
@@ -274,33 +284,72 @@ def what_is_missing(tables, verdicts, rep):
     if coverage is not None and len(coverage):
         thin = coverage[coverage['status'] != 'OK']
         for dataset, group in thin.groupby('dataset', dropna=False):
-            gap(f'every figure on {dataset}',
-                f'{len(group)} of {len(coverage[coverage["dataset"] == dataset])} '
-                f'model-and-representation-and-condition combinations are not '
-                f'complete',
-                'no headline may be quoted across the whole grid',
-                'the tasks named in d0_coverage.csv with status other than OK')
+            for condition, byc in group.groupby('condition', dropna=False):
+                gap(f'every figure on {dataset}',
+                    f'{len(byc)} combination(s) incomplete',
+                    'no headline may be quoted across the whole grid',
+                    'resubmit these model-and-representation pairs',
+                    dataset=str(dataset), condition=str(condition),
+                    models=';'.join(sorted(set(byc['model'].astype(str)))),
+                    reps=';'.join(sorted(set(byc['rep'].astype(str)))),
+                    runnable='yes')
 
     # -- cells that ran and were dropped ------------------------------------
     if excluded is not None and len(excluded) and 'reason' in excluded.columns:
         for reason, group in excluded.groupby('reason', dropna=False):
             conditions = sorted(set(group.get('condition', pd.Series(dtype=str))
                                     .dropna().astype(str)))
+            runnable = ('no' if 'clean R2' in str(reason)
+                        else 'yes' if 'level' in str(reason) else 'unknown')
             gap('F4c, F8, T4',
                 f'{len(group)} cell(s) dropped: {reason}',
                 'they print as "excluded" rather than as a number, and they are '
                 'why a condition can look empty in one panel and full in another',
-                f'conditions affected: {", ".join(conditions) or "unrecorded"}')
+                ('adding the missing noise levels would fill these'
+                 if runnable == 'yes' else
+                 'a clean accuracy under the gate is a property of the fit, '
+                 'not a missing task'),
+                condition=';'.join(conditions),
+                models=';'.join(sorted(set(group.get('model', pd.Series(dtype=str))
+                                           .astype(str)))[:12]),
+                runnable=runnable)
+
+    # -- the clean level, which is the cheapest gap in the study -------------
+    # A cell with no level-0 run has no denominator, so AUC_norm cannot be
+    # computed for it at all and the whole cell is dropped. On the 2026-09-13
+    # run that is 15 of 21 combinations for each of the three deep-run
+    # conditions. It is ONE extra task per cell and it converts an excluded
+    # cell into a usable one, which is why it is called out separately from
+    # "the deep run covers a subset by design".
+    if coverage is not None and len(coverage) and 'has_clean_level' in coverage:
+        blind = coverage[~coverage['has_clean_level'].astype(bool)]
+        for (dataset, condition), group in blind.groupby(
+                ['dataset', 'condition'], dropna=False):
+            gap('F4c, F8, T4, R15, R19, D2',
+                f'{len(group)} combination(s) have no clean (level 0) run',
+                'AUC_norm is a ratio to the clean score, so a cell without one '
+                'is dropped entirely rather than drawn -- this is the reason '
+                'these conditions look thin, and it is not the deep-run pair '
+                'list',
+                'ONE extra task per cell: the same model, representation and '
+                'condition at noise level 0',
+                dataset=str(dataset), condition=str(condition),
+                models=';'.join(sorted(set(group['model'].astype(str)))),
+                reps=';'.join(sorted(set(group['rep'].astype(str)))),
+                runnable='yes')
 
     # -- conditions too thin for the comparisons ----------------------------
     not_judged = said.get('D2', {}).get('not_judged') or []
     if not_judged:
-        gap('F3, D2',
+        gap('F3, D2, R19',
             f'{len(not_judged)} noise condition(s) share too few cells with the '
-            f'rest of the grid to compare: {", ".join(not_judged)}',
+            f'rest of the grid to compare',
             'they are neither a main-text panel nor an additional file, because '
             'nothing can be said about whether their picture repeats another',
-            'the remaining deep-run array elements for those conditions')
+            'widening these conditions beyond the deep-run pair list would '
+            'close it; the deep run covers a named subset BY DESIGN, so this '
+            'is a decision to widen the study and not a queue to clear',
+            condition=';'.join(not_judged), runnable='decision')
 
     # -- the deep run, condition by condition -------------------------------
     if qm9 is not None and len(qm9):
@@ -308,11 +357,18 @@ def what_is_missing(tables, verdicts, rep):
         full = int(widest.max()) if len(widest) else 0
         for condition, n_models in widest.items():
             if full and n_models < full:
-                gap('F4c, R15, T4',
-                    f'{condition}: {n_models} of {full} models have a robustness '
-                    f'number',
-                    'the column is mostly grey and cannot rank the roster',
-                    'the deep-run tasks for that condition')
+                ran = sorted(set(qm9[qm9['condition'] == condition]['model']
+                                 .astype(str)))
+                absent = sorted(set(qm9['model'].astype(str)) - set(ran))
+                gap('F4c, R15, T4, R19',
+                    f'{n_models} of {full} models have a robustness number',
+                    'the column cannot rank the roster, so the condition is '
+                    'shown in R19 over the pairs that ran rather than in the '
+                    'main grid',
+                    'submitting the absent models for this condition would '
+                    'let it rejoin the main grid',
+                    dataset='qm9', condition=str(condition),
+                    models=';'.join(absent[:12]), runnable='decision')
 
     # -- the uncertainty side -----------------------------------------------
     for name, key, why in (
@@ -338,8 +394,16 @@ def what_is_missing(tables, verdicts, rep):
             'the transfer question cannot be asked',
             'the KIRBy validation runs')
 
-    table = pd.DataFrame(rows, columns=['slot', 'missing', 'consequence',
-                                        'what_would_fill_it'])
+    table = pd.DataFrame(rows, columns=[
+        'slot', 'missing', 'consequence', 'what_would_fill_it', 'dataset',
+        'condition', 'models', 'reps', 'runnable'])
+    # Rows that a submission can close come first; 'no' rows are properties of
+    # the fits and 'decision' rows need the author to widen the study.
+    order = {'yes': 0, 'decision': 1, 'unknown': 2, 'no': 3, '': 4}
+    if len(table):
+        table = table.assign(
+            _o=table['runnable'].map(lambda v: order.get(str(v), 4))
+        ).sort_values('_o').drop(columns='_o').reset_index(drop=True)
     return table
 
 
@@ -430,6 +494,20 @@ def standout_pairs(qm9_summary, assay_summary, condition='gaussian',
         return {}, _verdict('P', 'Which pairs are robust on more than one '
                             'dataset?', False, f'nothing under {condition}')
     d = d.copy()
+    # ACCURACY AND ROBUSTNESS COUNT EQUALLY, and the two are put on a common
+    # footing by scaling each to 0-1 WITHIN its own dataset -- a clean R2 of
+    # 0.40 is near the top on Caco-2 and near the bottom on QM9, so a raw
+    # average across datasets would just rank the datasets. The author's shape,
+    # 2026-09-14. This changes the answer: ranking on AUC_norm alone puts the
+    # forests on ChemBERTa first, and once accuracy counts they fall to the
+    # middle because ChemBERTa is not accurate on the assay sets.
+    for column in ('baseline_r2', 'auc_norm'):
+        low = d.groupby('dataset')[column].transform('min')
+        high = d.groupby('dataset')[column].transform('max')
+        span = (high - low).replace(0, np.nan)
+        d[f'{column}_scaled'] = (d[column] - low) / span
+    d['combined_scaled'] = (d['baseline_r2_scaled']
+                            + d['auc_norm_scaled']) / 2
     d['rank_in_dataset'] = d.groupby('dataset')['auc_norm'].rank(
         ascending=False)
     d['in_top'] = d['rank_in_dataset'] <= top_n
@@ -438,6 +516,7 @@ def standout_pairs(qm9_summary, assay_summary, condition='gaussian',
     rows = []
     for (model, rep), group in d.groupby(['model', 'rep'], dropna=False):
         rec = {'model': model, 'rep': rep, 'condition': condition,
+               'combined_scaled': float(group['combined_scaled'].mean()),
                'datasets_run': int(group['dataset'].nunique()),
                'datasets_in_top': int(group['in_top'].sum()),
                'lowest_auc_norm': float(group['auc_norm'].min()),
@@ -447,24 +526,34 @@ def standout_pairs(qm9_summary, assay_summary, condition='gaussian',
             rec[f'{r["dataset"]}_clean_r2'] = float(r['baseline_r2'])
             rec[f'{r["dataset"]}_auc_norm'] = float(r['auc_norm'])
         rows.append(rec)
-    table = pd.DataFrame(rows).sort_values(
-        ['datasets_in_top', 'lowest_auc_norm'], ascending=False)
+    table = pd.DataFrame(rows)
+    # Ranked by the combined score over the datasets a pair ran on ALL of --
+    # a pair that ran on one dataset cannot be compared with one that ran on
+    # four, so the ranking column is only filled where the coverage is equal.
+    widest = int(table['datasets_run'].max()) if len(table) else 0
+    table['comparable'] = table['datasets_run'] == widest
+    table = table.sort_values(['comparable', 'combined_scaled'],
+                              ascending=False).reset_index(drop=True)
 
-    best = table[(table['datasets_in_top'] >= table['datasets_run'])
-                 & (table['datasets_run'] >= 2)
-                 & (~table['any_auc_norm_above_one'])]
-    if len(best):
+    comparable = table[table['comparable'] & (~table['any_auc_norm_above_one'])]
+    if len(comparable):
         named = '; '.join(
             f'{C.model_label(r.model)} on {C.rep_label(r.rep)} '
-            f'(top {top_n} on all {int(r.datasets_run)} datasets it ran, '
-            f'lowest AUC_norm {r.lowest_auc_norm:.3f})'
-            for r in best.head(4).itertuples())
-        says = (f'{len(best)} pair(s) reach the top {top_n} on every dataset '
-                f'they ran on, under {C.condition_label(condition)}, without '
-                f'any AUC_norm above {C.AUC_NORM_IMPLAUSIBLE_HIGH}: {named}.')
+            f'({r.combined_scaled:.3f})'
+            for r in comparable.head(4).itertuples())
+        says = (f'{len(comparable)} pair(s) ran on all {widest} dataset(s). '
+                f'Ranked on accuracy and robustness together, each scaled '
+                f'within its own dataset: {named}.')
     else:
-        says = (f'No pair reaches the top {top_n} on every dataset it ran on '
-                f'under {C.condition_label(condition)}.')
+        says = 'No pair ran on every dataset.'
+    robust_only = table[(table['datasets_in_top'] >= table['datasets_run'])
+                        & (table['datasets_run'] >= 2)
+                        & (~table['any_auc_norm_above_one'])]
+    if len(robust_only):
+        says += (' On ROBUSTNESS alone, reaching the top '
+                 f'{top_n} on every dataset they ran: '
+                 + '; '.join(f'{C.model_label(r.model)} on {C.rep_label(r.rep)}'
+                             for r in robust_only.head(4).itertuples()) + '.')
     says += (' Pairs whose AUC_norm exceeds one are flagged rather than ranked: '
              'the metric is a ratio and a clean baseline near 0.35 inflates it.')
     return ({'standout_pairs': table},

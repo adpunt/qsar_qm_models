@@ -20014,3 +20014,121 @@ Replaces the "surplus" arithmetic, which the author rejected.
 
 **`uncertainty_pairs`** — the same shape for the uncertainty side: per cell, the q4 statistic, the
 permutation band it is read against, and whether it cleared it.
+
+### 14.15 THE RECORD, CORRECTED — 2026-09-14
+
+**Read this before any earlier §14.11 subsection.** This chat reached several conclusions and then
+overturned them with better numbers. Where an earlier section disagrees with this one, this one
+stands.
+
+#### 14.15a WITHDRAWN — things stated in this chat that the data later contradicted
+
+| stated | why it was wrong | what is true |
+|---|---|---|
+| "RF + ChemBERTa and QRF + ChemBERTa are the pairings to use" | ranked on AUC_norm ALONE. ChemBERTa's clean R² on the assay sets is near the bottom (0.398 Caco-2, 0.415 hERG), so retaining well there retains little | they are the most ROBUST pairings across four datasets. Ranked on accuracy and robustness together they fall to 46th and 43rd of 74 |
+| "NGBoost is the top model" | top by AUC_norm, and 14th of 14 on clean R² at ECFP4, 12th of 13 at PDV, 13th of 13 at ChemBERTa | NGBoost is the most noise-TOLERANT model on QM9 and among the least accurate. That decoupling is the result |
+| "NGBoost + PDV is a standout pairing" | NGBoost is rank 1 by AUC_norm on all six representations, and PDV is rank 1 or 2 for accuracy for 12 of 13 models | neither half is specific to the other; see §14.15e |
+| "the deep-run conditions are thin because they cover a named subset of pairs" | true but not the main cause | **15 of 21 combinations for each deep condition have NO level-0 run**, so AUC_norm has no denominator and the whole cell is dropped. One extra task per cell fixes it (§14.15g) |
+| "surplus" pairings (a constructed score) | the author rejected the metric; it was never asked for | `standout_pairs` reports raw numbers per dataset |
+| "the variant models earn a place in the heatmaps" | the author settled it: base models carry every cross-model comparison | §14.11k |
+| F2's caption: "the decomposition is repeated on each replicate separately" | that is the method the metric explicitly refuses — one observation per cell makes the residual arithmetically zero | it is a leave-one-replicate-out jackknife, and the whiskers are not confidence intervals |
+
+#### 14.15b THE THREE RANKINGS, AND THEY DO NOT AGREE
+
+Gaussian, base models, 74 pairings that ran on all four datasets. Each score rescaled within its own
+dataset, then averaged over the four. Produced every run by `standout_pairs`; drawn as **T8**.
+
+**Most accurate on clean labels:** GP + Sort & Slice, GP + MHG-GNN, NN-α + MHG-GNN, NN-α + Sort &
+Slice, LightGBM + Sort & Slice.
+
+**Most robust:** RF + ChemBERTa, QRF + ChemBERTa, BNN-α + PDV (flagged — AUC_norm 1.081 on Caco-2),
+NGBoost + Avalon, NGBoost + PDV.
+
+**Best on both together:** GP + Sort & Slice, GP + MHG-GNN, GP + PDV, RF + Sort & Slice, GP + ECFP4.
+
+**The two lists share NOTHING.** The ten most accurate pairings and the ten most robust have **zero
+members in common**, and across all 74 pairings the two rankings correlate at **ρ = −0.335**.
+
+⚠️ **This is a different claim from R16 and the two must not be conflated.** R16 is within ONE
+dataset at ONE representation — 66 cells, ρ = +0.13, not significant, no trade-off visible. Pooled
+across four datasets and six representations the correlation is negative. The honest statement is
+that within a dataset accuracy and robustness are unrelated, and across datasets the pairings that
+top one list are not the ones that top the other.
+
+#### 14.15c CAN YOU PICK SOMETHING THAT WILL HELP IN A NOISY SETTING
+
+Partly, and the useful answer is about families rather than about a single best choice.
+
+- **Forests and Gaussian processes occupy the top of both rankings.** Every neural family sits lower
+  on robustness at every representation.
+- **The clean-accuracy leader is not the safe choice.** NN-α + PDV is the most accurate cell in the
+  study (R² 0.918) at AUC_norm 0.940, against NGBoost's 0.975, and NN-α is 13th of 14 for robustness
+  at ECFP4.
+- **A specific pairing does not transfer.** §14.15d.
+
+#### 14.15d DOES A RANKING TRAVEL BETWEEN DATASETS — as counts, not correlations
+
+Take the ten best pairings on one dataset and count how many are still in the ten best on another.
+
+| | Caco-2 | hERG |
+|---|---|---|
+| best 10 on logD by **clean accuracy** | 4 of 10 | 6 of 10 |
+| best 10 on logD by **robustness** | 2 of 10 | 2 of 10 |
+
+Between the three assay datasets, **accuracy transfers about twice as often as robustness.** From
+QM9 to an assay dataset neither transfers: 5, 2 and 1 of 10 for accuracy, 5, 3 and 3 of 10 for
+robustness.
+
+The rank-correlation version of the same thing, six dataset pairs: model ordering agrees at ρ +0.661
+on accuracy and +0.318 on robustness; representation ordering at +0.505 and +0.276. **The author's
+suspicion that representations travel worse than models is not supported — models travel slightly
+better — and six dataset pairs is too few to call that small gap real.** The difference that IS
+visible is between the metrics, not between models and representations.
+
+#### 14.15e NGBOOST AND PDV ON QM9, AND WHY IT IS NOT A RULE OF THUMB
+
+On QM9, NGBoost + PDV is genuinely good on both counts: clean R² 0.865, the best accuracy NGBoost
+reaches on any representation, with AUC_norm 0.975.
+
+**But neither half is specific to the other.** NGBoost is rank 1 by AUC_norm on all six
+representations of QM9, and PDV is rank 1 or 2 for clean accuracy for 12 of 13 models and the most
+accurate for 6 of 13. It is the most noise-tolerant model meeting the representation this dataset
+happens to like.
+
+**And it does not survive the move to laboratory data.** NGBoost falls to 0.845 on Caco-2 and 0.882
+on hERG, below the forests, and PDV's accuracy advantage is much smaller there.
+
+**The paper's point, and it is a general one.** Which pairing works is a fact about the dataset in
+front of you, not a rule you can carry to the next one. What carries is the family-level guidance in
+§14.15c and the warning that the most accurate model on clean labels may not be the one to use when
+the labels are not clean. If there is reason to suspect noise — an assay endpoint, data combined
+from several sources — the choice of model and representation should be made with that in mind
+rather than on clean accuracy alone.
+
+#### 14.15f THE ACCURACY FLOOR, IN ONE SENTENCE
+
+AUC_norm is the share of a model's own clean accuracy that it keeps under noise, so a model that was
+barely accurate to begin with can keep nearly all of a very small number and score near or above 1
+without being robust at all — which is what VBLL does on Caco-2 and hERG (AUC_norm 1.088 from a
+clean R² of 0.356) and what the forests on ChemBERTa do not do (never below 0.928, from clean R²
+between 0.36 and 0.81).
+
+`standout_pairs` and T8 exclude any pairing whose AUC_norm exceeds 1 on any dataset. **A hard clean-
+accuracy floor above the existing 0.3 gate is still the author's to set.**
+
+#### 14.15g THE CHEAPEST OUTSTANDING RUN
+
+`what_is_missing.csv` now carries `dataset`, `condition`, `models`, `reps` and `runnable`, sorted so
+rows a submission can close come first. Its top row on the 2026-09-13 data:
+
+**15 of 21 combinations for each of Laplace, Outlier and Student-t have no level-0 run**, plus 2
+under grouped_shifted. AUC_norm is a ratio to the clean score, so those cells are dropped whole. It
+is one extra task per cell at noise level 0, and it would move 42 combinations from excluded to
+usable and let those three conditions rejoin D2 and the main grid.
+
+#### 14.15h T8 — THE PAIRINGS TABLE FOR THE PAPER
+
+`figlib_tables.t8_pairs_across_datasets`. One row per pairing, one pair of columns per dataset
+(clean R² and AUC_norm), the twelve best, **no score column** — the caption says how the order was
+reached and the number itself tells a reader nothing. Only pairings that ran on all four datasets
+appear, and any pairing exceeding AUC_norm 1 anywhere is excluded with the reason in the caption.

@@ -419,14 +419,17 @@ MODEL_LABELS = {
     'rf': 'RF', 'xgboost': 'XGBoost', 'lgb': 'LightGBM', 'qrf': 'QRF',
     'ngboost': 'NGBoost', 'svm': 'SVM',
     'dnn': 'NN-α', 'mlp': 'NN-β',
-    'gauche': 'GP', 'gauche_rbf': 'GP (RBF)',
+    # The Tanimoto process left the study (14.11v), so there is only one
+    # Gaussian process left and it is called GP. Naming it "GP (RBF)" makes a
+    # reader look for the other kernel (the author, 2026-09-14).
+    'gauche': 'GP (Tanimoto)', 'gauche_rbf': 'GP',
     'dnn_bnn_full': 'BNN-α', 'dnn_vbll': 'VBLL-α',
     'mlp_bnn_full': 'BNN-β', 'mlp_vbll': 'VBLL-β',
     # The suffix is load-bearing and stays in the label: these report a
     # different KIND of data-noise term from the model they are a variant of
     # (RERUN_PLAN.md 5.5f), and folding it away makes a per-molecule column and
     # a broadcast constant indistinguishable.
-    'het_gp_rbf': 'GP (RBF, het.)',
+    'het_gp_rbf': 'GP (het.)',
     'dnn_bnn_full_mve': 'BNN-α (var. head)',
     'mlp_bnn_full_mve': 'BNN-β (var. head)',
     'dnn_vbll_hetero': 'VBLL-α (het.)',
