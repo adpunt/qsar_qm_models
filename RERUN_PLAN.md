@@ -18713,30 +18713,75 @@ missing is tuning.** 13 of the 16 dataset-and-model tables in
 stopped collecting it on 2026-09-01 against the author's word. The setting each of those 13 chose
 is still shipped to Avalon.
 
-Four tasks fill the QM9 tables. The generator writes the range.
+**THE TUNING SCRIPTS ARE BUILT ON THE LAPTOP, NEVER ON THE CLUSTER.** Tried on ARC on
+2026-09-14 the generator stops with `results/tuning_local/timing.csv does not exist`, which is
+correct behaviour: it sizes every wall from measured seconds, that file is gitignored, and it lives
+on the laptop. `tune_bnn_lab.sh` is not on the cluster at all. So all of this is built here and
+copied.
+
+The four QM9 Bayesian networks split in two, because three of them are already in the DNN-family
+sweep at all six representations and only the two MLP families need an Avalon-only script. Two
+directories, because the same model would otherwise write the same filename twice.
+
+On the laptop:
 
 ```bash
-cd $QSAR/slurm_scripts_tuning
-python generate_scripts.py --settings 12 --reps avalon \
-    --models dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational
+cd /Users/apunt/repos/qsar_qm_models
+mkdir -p slurm_scripts_tuning_avalon
+python slurm_scripts_tuning/generate_scripts.py --settings 12 --reps avalon \
+    --models mlp_bnn_full mlp_bnn_full_variational --out-dir slurm_scripts_tuning_avalon
+python slurm_scripts_tuning/generate_scripts.py --settings 12 \
+    --models dnn dnn_bnn_full dnn_bnn_full_variational
+python slurm_scripts_tuning/generate_scripts.py --settings 12 \
+    --models dnn_bnn_full_mve mlp_bnn_full_mve \
+             dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero
 ```
 
-It prints four `sbatch` lines, each `--array=0-0`, walls 7:59 to 16:59 on `medium`, 13.5 core-hours
-in total.
-
-Twelve tasks fill the assay tables. `tune_bnn_lab.sh` is gitignored like every SLURM script, so the
-updated copy goes over by `scp` first; it now prints the indices its own `REPS` array puts Avalon
-at, rather than anybody typing them.
+On the cluster, once, so the copy has somewhere to land:
 
 ```bash
-scp slurm_scripts_tuning/tune_bnn_lab.sh \
-    scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_tuning/
+mkdir -p $QSAR/slurm_scripts_tuning_avalon
+```
+
+From the laptop, naming the files rather than the directory — the tuning directory holds older
+scripts for other models and copying all of it would overwrite them:
+
+```bash
+ARC=scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models
+cd /Users/apunt/repos/qsar_qm_models/slurm_scripts_tuning
+scp tune_dnn.sh tune_dnn_bnn_full.sh tune_dnn_bnn_full_variational.sh \
+    tune_dnn_bnn_full_mve.sh tune_mlp_bnn_full_mve.sh \
+    tune_dnn_bnn_full_variational_hetero.sh tune_mlp_bnn_full_variational_hetero.sh \
+    tune_bnn_lab.sh  $ARC/slurm_scripts_tuning/
+cd ../slurm_scripts_tuning_avalon
+scp tune_mlp_bnn_full.sh tune_mlp_bnn_full_variational.sh  $ARC/slurm_scripts_tuning_avalon/
+```
+
+Then on the cluster. Every range below was printed by the generator that wrote the script.
+
+```bash
+cd $QSAR/slurm_scripts_tuning_avalon
+sbatch --account=stat-cadd --partition=medium --array=0-0%6 tune_mlp_bnn_full.sh
+sbatch --account=stat-cadd --partition=medium --array=0-0%6 tune_mlp_bnn_full_variational.sh
 
 cd $QSAR/slurm_scripts_tuning
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_variational.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_mve.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_mlp_bnn_full_mve.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_dnn_bnn_full_variational_hetero.sh
+sbatch --account=stat-cadd --partition=medium --array=0-5%6 tune_mlp_bnn_full_variational_hetero.sh
+
 bash tune_bnn_lab.sh --array-for-rep avalon        # prints 3,9,15,21,27,33,39,45,51,57,63,69
 sbatch --account=stat-cadd --partition=long \
     --array=$(bash tune_bnn_lab.sh --array-for-rep avalon)%6 tune_bnn_lab.sh
 ```
+
+2 tasks for the two MLP families on Avalon, 5.1 core-hours. 18 for the DNN family at six
+representations, 43.5 core-hours, which fills Avalon for the other three QM9 tables as a side
+effect. 24 for the four transformations no sweep has ever scored, 130.4 core-hours. 12 for the
+assay tables on Avalon.
 
 Then the five merge commands in block 2.5, which is what turns the new rows into a chosen setting.
 
