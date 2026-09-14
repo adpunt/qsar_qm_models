@@ -185,6 +185,18 @@ def q6(df):
     return unc.q6_error_ranking(df)
 
 
+def q7(df):
+    """How much of a model's error a whole scaffold group shares.
+
+    The test of the mechanism written down in RERUN_PLAN.md 14.11y: shifted noise
+    moves a scaffold group as a block, a forest partitions and can isolate it, a
+    Gaussian process with one global kernel interpolates across it. If that is
+    what happens the process's error is more group-shared than the forest's
+    under grouped-shifted and the two match under the ungrouped condition.
+    """
+    return unc.q7_group_correlated_error(df)
+
+
 def component_slopes(q5_frame):
     """Per pair and condition: how fast each component rises with the noise.
 
@@ -404,7 +416,8 @@ def _stats_fingerprint(files, **settings):
     return h.hexdigest()[:16]
 
 
-_CACHE_KEYS = ('support', 'q4', 'q5', 'q6', 'slopes', 'retention', 'enrichment')
+_CACHE_KEYS = ('support', 'q4', 'q5', 'q6', 'q7', 'slopes',
+               'retention', 'enrichment')
 
 
 def _read_stats_cache(directory):
@@ -477,6 +490,7 @@ def _summarise_one(args):
         got['q4'] = q4(df, permutations=permutations, where=path.name)
         got['q5'] = q5(df)
         got['q6'] = q6(df)
+        got['q7'] = q7(df)
         got.update(curves(df))
     except Exception as exc:  # noqa: BLE001
         return path.name, None, f'{type(exc).__name__}: {exc}', []
@@ -540,7 +554,7 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
     print(f'  {where}: {len(files)} file(s), {n_workers} at a time -- each '
           f'worker holds ONE file, so the whole set still never has to fit in '
           f'memory')
-    parts = {'support': [], 'q4': [], 'q5': [], 'q6': [],
+    parts = {'support': [], 'q4': [], 'q5': [], 'q6': [], 'q7': [],
              'retention': [], 'enrichment': []}
     skipped, unmapped_seen = [], set()
     work = [(str(f), dataset_name, strict, permutations) for f in files]

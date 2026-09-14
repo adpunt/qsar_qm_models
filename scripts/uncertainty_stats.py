@@ -134,6 +134,7 @@ __all__ = [
     'permutation_null',
     'q5_mean_uncertainty',
     'q6_error_ranking',
+    'q7_group_correlated_error',
     'check_pattern_invariance',
     'check_noise_scale_redundancy',
     'scale_check_coverage',
@@ -1598,6 +1599,96 @@ def _retained_error(err, order, grid):
         out.append(float(np.sqrt(np.nanmean(err[n - keep:] ** 2)))
                    if keep > 0 else np.nan)
     return out
+
+
+def _murcko(smiles):
+    """The Murcko scaffold of a SMILES, or the SMILES itself if RDKit is absent.
+
+    The splits were built on Murcko scaffolds, so recomputing them here gives the
+    same grouping the experiment used. Without RDKit every molecule becomes its
+    own group, the group share collapses to 1 for everything, and the statistic
+    says so rather than silently returning a number.
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.Scaffolds import MurckoScaffold
+    except Exception:
+        return None
+    out = []
+    for s in smiles:
+        try:
+            mol = Chem.MolFromSmiles(str(s))
+            out.append(MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
+                       if mol is not None else '')
+        except Exception:
+            out.append('')
+    return out
+
+
+def q7_group_correlated_error(df, split='train_oof', min_n=_DEFAULT_MIN_N,
+                              extra_group_cols=None):
+    """How much of a model's error is shared by a whole scaffold group.
+
+    WHY THIS EXISTS. The grouped-shifted condition gives every scaffold group a
+    constant offset. A model that partitions the space -- a forest -- can isolate
+    an offset group; a model with one global kernel over the whole space -- a
+    Gaussian process -- interpolates across group boundaries and carries the
+    offset into the neighbours. If that is what happens, the process's error
+    should be MORE shared within a group than the forest's under grouped-shifted,
+    and the two should match under the ungrouped condition. This measures it.
+
+    THE STATISTIC. Per cell, take the out-of-fold error `y_pred - y_true_clean`,
+    group the molecules by Murcko scaffold, and report the share of the error
+    variance carried by the group means:
+
+        group_share = Var(group mean error) / Var(error)
+
+    Near zero means the error scatters inside a group; near one means the group
+    is wrong as a block. It is the same quantity F1's group panel reports for the
+    injected noise, so the two are directly comparable: a model whose
+    `group_share` matches the noise's is one that absorbed the group structure.
+
+    `n_groups` and `mean_group_size` travel with every row, because a share
+    computed over groups of one is exactly 1 and means nothing.
+    """
+    _require_columns(df, ['y_pred', 'y_true_clean'], 'q7_group_correlated_error')
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        error = (cell['y_pred'].to_numpy(dtype=np.float64)
+                 - cell['y_true_clean'].to_numpy(dtype=np.float64))
+        finite = np.isfinite(error)
+        if 'canonical_smiles' not in cell.columns:
+            rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
+                       reason='no canonical_smiles on the row')
+            rows.append(rec)
+            continue
+        scaffolds = _murcko(cell['canonical_smiles'].to_numpy()[finite])
+        if scaffolds is None:
+            rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
+                       reason='rdkit is not importable here')
+            rows.append(rec)
+            continue
+        err = error[finite]
+        frame = pd.DataFrame({'scaffold': scaffolds, 'error': err})
+        frame = frame[frame['scaffold'] != '']
+        n_groups = int(frame['scaffold'].nunique())
+        total = float(np.var(frame['error'])) if len(frame) else np.nan
+        means = frame.groupby('scaffold')['error'].mean()
+        share = (float(np.var(means) / total)
+                 if np.isfinite(total) and total > 0 and n_groups > 1
+                 else np.nan)
+        rec.update(group_share=share, n_groups=n_groups,
+                   mean_group_size=(float(len(frame) / n_groups)
+                                    if n_groups else np.nan),
+                   mean_abs_error=float(np.abs(frame['error']).mean())
+                   if len(frame) else np.nan,
+                   reason='')
+        rows.append(rec)
+    return pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols)
+        + ['n', 'n_sufficient', 'group_share', 'n_groups', 'mean_group_size',
+           'mean_abs_error', 'reason']))
 
 
 def error_retention_curve(df, split='train_oof', min_n=_DEFAULT_MIN_N,

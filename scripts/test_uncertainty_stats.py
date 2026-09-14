@@ -818,6 +818,68 @@ def test_censoring_levels_pair_despite_the_level_in_their_name():
                 f"of {len(noisy)} noisy rows, effect "
                 f"{float(noisy['effect'].iloc[0]):+.3f}")
 
+def test_q7_separates_a_group_wide_error_from_a_scattered_one():
+    """The statistic must tell a block-wrong model from a noisily-wrong one.
+
+    Two synthetic cells with the SAME total error variance. In the first every
+    molecule of a scaffold group is wrong by the same amount -- the group is
+    wrong as a block -- so the share of error variance carried by the group
+    means is near one. In the second the error scatters inside each group and
+    the share is near zero. If q7 cannot separate those two it cannot test the
+    mechanism in RERUN_PLAN.md 14.11y.
+    """
+    import numpy as np
+    import pandas as pd
+    import uncertainty_stats as us
+
+    try:
+        from rdkit import Chem  # noqa: F401
+    except Exception:
+        print('    rdkit is absent here, so q7 returns a REASON and not a '
+              'number -- checked that it says so rather than inventing one')
+        frame = pd.DataFrame({
+            'dataset': 'qm9', 'model': 'm', 'rep': 'r', 'condition': 'gaussian',
+            'sigma': 0.5, 'fold': 0, 'split': 'train_oof',
+            'canonical_smiles': ['CCO'] * 40,
+            'y_pred': np.zeros(40), 'y_true_clean': np.ones(40)})
+        got = us.q7_group_correlated_error(frame, min_n=10)
+        assert len(got) == 1
+        assert not np.isfinite(got['group_share'].iloc[0])
+        assert 'rdkit' in str(got['reason'].iloc[0])
+        return
+
+    rng = np.random.default_rng(0)
+    # Three scaffolds, each with its own ring system, twenty molecules each.
+    scaffolds = ['c1ccccc1', 'c1ccncc1', 'C1CCCCC1']
+    smiles, group_index = [], []
+    for g, core in enumerate(scaffolds):
+        for i in range(20):
+            smiles.append(core + 'C' * (i + 1))
+            group_index.append(g)
+    group_index = np.array(group_index)
+    n = len(smiles)
+
+    def cell(error, name):
+        return pd.DataFrame({
+            'dataset': 'qm9', 'model': name, 'rep': 'r',
+            'condition': 'grouped_shifted', 'sigma': 0.5, 'fold': 0,
+            'split': 'train_oof', 'canonical_smiles': smiles,
+            'y_true_clean': np.zeros(n), 'y_pred': error})
+
+    offsets = np.array([-1.0, 0.0, 1.0])
+    block = offsets[group_index]                      # wrong as a block
+    scattered = rng.permutation(block)                # same values, no structure
+    got = us.q7_group_correlated_error(
+        pd.concat([cell(block, 'block'), cell(scattered, 'scattered')],
+                  ignore_index=True), min_n=10)
+    by = got.set_index('model')['group_share']
+    assert len(got) == 2, got
+    assert by['block'] > 0.8, by['block']
+    assert by['scattered'] < 0.4, by['scattered']
+    assert set(got['n_groups']) == {3}, got['n_groups'].tolist()
+    print(f"    a block-wrong model scores {by['block']:.2f} and a scattered "
+          f"one {by['scattered']:.2f}, on identical total error")
+
 def test_diagnostics():
     rng = np.random.default_rng(91)
     pattern = np.where(np.arange(400) % 3 == 0, 3.0, 1.0)

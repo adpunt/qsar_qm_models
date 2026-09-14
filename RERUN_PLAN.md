@@ -19954,3 +19954,63 @@ outside the permutation band — and since F7 was cut that result has no picture
 new figure, one bar per model showing q4's correlation between predicted uncertainty and injected
 noise size, with the permutation band drawn behind it.** It is the paper's own headline question and
 it currently exists only as a row in a 292-row table. NOT BUILT — the author's call.
+
+#### 14.13 THE PAIRS, ON ALL FOUR DATASETS — measured 2026-09-14, raw numbers
+
+Gaussian, base models, each cell clean R² / AUC_norm. Pairs in the top 15 by AUC_norm on two or more
+of the four datasets. From `results/decisions_arc/auc_norm_qm9.csv` and `auc_norm_assay.csv`.
+Reproduced every run by `figlib_decisions.standout_pairs` into `standout_pairs.csv`.
+
+| pair | QM9 | logD | Caco-2 | hERG | in top 15 |
+|---|---|---|---|---|---|
+| **RF + ChemBERTa** | 0.801 / 0.976 | 0.521 / 0.955 | 0.398 / 0.934 | 0.415 / 0.938 | **4** |
+| **QRF + ChemBERTa** | 0.813 / 0.971 | 0.544 / 0.950 | 0.364 / 0.964 | 0.443 / 0.928 | **4** |
+| VBLL-β + ChemBERTa | 0.802 / 0.963 | 0.556 / **0.683** | 0.401 / 0.941 | 0.436 / 0.978 | 3 |
+| QRF + ECFP4 | 0.830 / 0.956 | 0.635 / 0.930 | 0.392 / 0.903 | 0.532 / 0.902 | 3 |
+| NGBoost + PDV | 0.865 / 0.975 | 0.673 / 0.939 | 0.370 / **0.845** | 0.456 / **0.882** | 2 |
+| NGBoost + ECFP4 | 0.706 / 0.979 | 0.534 / 0.924 | 0.381 / 0.878 | 0.430 / **0.842** | 2 |
+| RF + PDV | 0.897 / 0.952 | 0.711 / 0.939 | 0.419 / 0.882 | 0.481 / 0.921 | 2 |
+| RF + Sort & Slice | 0.872 / 0.962 | 0.691 / 0.950 | 0.434 / **0.842** | 0.561 / 0.889 | 2 |
+| BNN-β + PDV | 0.876 / 0.943 | 0.729 / 0.939 | 0.429 / 0.856 | 0.445 / 0.909 | 2 |
+| QRF + PDV | 0.896 / 0.946 | 0.715 / 0.924 | 0.388 / 0.903 | 0.493 / 0.889 | 2 |
+
+**Two pairs reach the top 15 on all four datasets, and both are a forest on ChemBERTa.** RF +
+ChemBERTa never drops below 0.934, QRF + ChemBERTa never below 0.928. Their clean accuracy is
+middling rather than best, so this is not a case of having little to lose.
+
+**NGBoost does not transfer.** It is the most robust model on QM9 at every representation and falls
+to 0.84–0.88 on Caco-2 and hERG, below the forests. Its QM9 dominance is QM9's.
+
+**NGBoost is not a pairing either.** It is rank 1 by AUC_norm on all six representations of QM9;
+what PDV supplies is the clean accuracy it lacks everywhere else — 0.865 against 0.706 at ECFP4.
+**The sentence: NGBoost is always the most robust on QM9, and PDV is the only representation that
+makes it accurate enough to be worth using.** That does not hold on the assay datasets.
+
+⚠️ **VBLL tops the Caco-2 and hERG lists partly as an artefact.** VBLL-α and VBLL-β reach AUC_norm at
+or above 1.0 there on clean R² of 0.35–0.39, which is the small-denominator case D6 reports. On
+logD, where clean R² is higher, VBLL-β + ChemBERTa falls to 0.683. `standout_pairs` flags any pair
+with an AUC_norm above 1.05 rather than ranking it.
+
+#### 14.14 BUILT 2026-09-14, ON THE AUTHOR'S INSTRUCTION
+
+**F9 — can the uncertainty find the corrupted labels.** One bar per model: the Spearman correlation
+between predicted uncertainty and the size of the injected noise, divided by the model's own
+out-of-fold error, with the permutation band drawn behind each bar as a grey block. A bar that
+clears its band found something the error alone does not. This is the picture of the question D7
+fires on and of the paper's own title; F7 drew the same result as a lift curve and is cut.
+
+**q7 — the scaffold-group error test** (`uncertainty_stats.q7_group_correlated_error`, surfaced as
+`unc_q7_group_error.csv`). Per cell, the out-of-fold error is grouped by Murcko scaffold and the
+statistic is `Var(group mean error) / Var(error)`: near zero the error scatters inside a group, near
+one the group is wrong as a block. It is the same quantity F1's group panel reports for the injected
+noise, so the two are directly comparable. `n_groups` and `mean_group_size` travel with every row,
+because a share over groups of one is exactly 1 and means nothing. **This tests §14.11y**: the
+mechanism predicts GP (RBF)'s share exceeds QRF's under grouped_shifted and that the two match under
+Gaussian. Without RDKit the function returns NaN with a reason rather than a number.
+
+**`standout_pairs`** — one row per model-and-representation pair, its clean R² and AUC_norm on every
+dataset it ran on, and how many datasets it reached the top 15 on. Raw numbers, no derived score.
+Replaces the "surplus" arithmetic, which the author rejected.
+
+**`uncertainty_pairs`** — the same shape for the uncertainty side: per cell, the q4 statistic, the
+permutation band it is read against, and whether it cleared it.

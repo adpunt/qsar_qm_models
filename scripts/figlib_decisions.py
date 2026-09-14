@@ -406,6 +406,118 @@ def accuracy_across_representations(accuracy, dataset='qm9',
                      fired=False, says=says))
 
 
+def standout_pairs(qm9_summary, assay_summary, condition='gaussian',
+                   top_n=15):
+    """Which model-and-representation pairs are robust on more than one dataset.
+
+    RAW NUMBERS, NOT A DERIVED SCORE. One row per pair, its clean R2 and its
+    AUC_norm on each dataset it ran on, and a count of how many datasets it
+    reached the top `top_n` on. The author asked for the data and got a
+    constructed "surplus" instead (2026-09-14); this is the data.
+
+    A pair that tops a list on a clean R2 near 0.35 is flagged: AUC_norm is a
+    ratio and a small denominator inflates it, which D6 already reports.
+    """
+    frames = [f for f in (qm9_summary, assay_summary)
+              if f is not None and len(f)]
+    if not frames:
+        return {}, _verdict('P', 'Which pairs are robust on more than one '
+                            'dataset?', False, 'no robustness numbers yet')
+    d = pd.concat(frames, ignore_index=True)
+    d = C.cross_model(d, 'the standout pairs')
+    d = d[d['condition'] == condition].dropna(subset=['auc_norm'])
+    if not len(d):
+        return {}, _verdict('P', 'Which pairs are robust on more than one '
+                            'dataset?', False, f'nothing under {condition}')
+    d = d.copy()
+    d['rank_in_dataset'] = d.groupby('dataset')['auc_norm'].rank(
+        ascending=False)
+    d['in_top'] = d['rank_in_dataset'] <= top_n
+    d['auc_norm_above_one'] = d['auc_norm'] > C.AUC_NORM_IMPLAUSIBLE_HIGH
+
+    rows = []
+    for (model, rep), group in d.groupby(['model', 'rep'], dropna=False):
+        rec = {'model': model, 'rep': rep, 'condition': condition,
+               'datasets_run': int(group['dataset'].nunique()),
+               'datasets_in_top': int(group['in_top'].sum()),
+               'lowest_auc_norm': float(group['auc_norm'].min()),
+               'any_auc_norm_above_one': bool(
+                   group['auc_norm_above_one'].any())}
+        for _, r in group.iterrows():
+            rec[f'{r["dataset"]}_clean_r2'] = float(r['baseline_r2'])
+            rec[f'{r["dataset"]}_auc_norm'] = float(r['auc_norm'])
+        rows.append(rec)
+    table = pd.DataFrame(rows).sort_values(
+        ['datasets_in_top', 'lowest_auc_norm'], ascending=False)
+
+    best = table[(table['datasets_in_top'] >= table['datasets_run'])
+                 & (table['datasets_run'] >= 2)
+                 & (~table['any_auc_norm_above_one'])]
+    if len(best):
+        named = '; '.join(
+            f'{C.model_label(r.model)} on {C.rep_label(r.rep)} '
+            f'(top {top_n} on all {int(r.datasets_run)} datasets it ran, '
+            f'lowest AUC_norm {r.lowest_auc_norm:.3f})'
+            for r in best.head(4).itertuples())
+        says = (f'{len(best)} pair(s) reach the top {top_n} on every dataset '
+                f'they ran on, under {C.condition_label(condition)}, without '
+                f'any AUC_norm above {C.AUC_NORM_IMPLAUSIBLE_HIGH}: {named}.')
+    else:
+        says = (f'No pair reaches the top {top_n} on every dataset it ran on '
+                f'under {C.condition_label(condition)}.')
+    says += (' Pairs whose AUC_norm exceeds one are flagged rather than ranked: '
+             'the metric is a ratio and a clean baseline near 0.35 inflates it.')
+    return ({'standout_pairs': table},
+            _verdict('P', 'Which pairs are robust on more than one dataset?',
+                     fired=False, says=says))
+
+
+def uncertainty_pairs(q4, statistic='rho_ratio', sigma=None):
+    """Which pairs are best at FINDING the corrupted labels. Raw numbers.
+
+    One row per model and representation: the statistic, the permutation band it
+    is read against, and whether it cleared the band. No derived score. The
+    author asked whether any pair is unusually good at this the way the boosted
+    trees are unusually good on Sort & Slice for robustness.
+    """
+    if q4 is None or not len(q4) or statistic not in q4.columns:
+        return {}, _verdict('U', 'Which pairs find the corrupted labels?',
+                            False, 'no q4 rows yet')
+    frame = q4.dropna(subset=[statistic]).copy()
+    if not len(frame):
+        return {}, _verdict('U', 'Which pairs find the corrupted labels?',
+                            False, f'{statistic} is empty')
+    if sigma is not None and 'sigma' in frame.columns:
+        frame = frame[frame['sigma'] == sigma]
+    keys = [c for c in ('dataset', 'model', 'rep', 'condition', 'sigma')
+            if c in frame.columns]
+    table = (frame.groupby(keys, dropna=False)
+             .agg(statistic_median=(statistic, 'median'),
+                  null_lo=('null_lo', 'median'),
+                  null_hi=('null_hi', 'median'),
+                  folds_outside_null=('outside_null', 'sum'),
+                  folds=(statistic, 'size'))
+             .reset_index()
+             .sort_values('statistic_median', ascending=False))
+    table['clears_the_band'] = (table['folds_outside_null']
+                                >= 0.5 * table['folds'])
+    clear = table[table['clears_the_band']]
+    if len(clear):
+        named = '; '.join(
+            f'{C.model_label(r.model)} on {C.rep_label(r.rep)} '
+            f'({statistic} {r.statistic_median:.3f})'
+            for r in clear.head(4).itertuples())
+        says = (f'{len(clear)} of {len(table)} model-and-representation cells '
+                f'clear their permutation band on {statistic}. Highest: '
+                f'{named}.')
+    else:
+        says = (f'No cell clears its permutation band on {statistic}, over '
+                f'{len(table)} cells.')
+    return ({'uncertainty_pairs': table},
+            _verdict('U', 'Which pairs find the corrupted labels?',
+                     fired=False, says=says))
+
+
 # ---------------------------------------------------------------------------
 # D2 -- how many noise conditions does F3 show
 # ---------------------------------------------------------------------------

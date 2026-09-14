@@ -1435,6 +1435,111 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
 
 
 # ---------------------------------------------------------------------------
+# F9 -- can the uncertainty find the corrupted labels (the author, 2026-09-14)
+# ---------------------------------------------------------------------------
+
+def f9_uncertainty_finds_noise(q4, output_dir, rep, condition, dataset='qm9',
+                               sigma=None, statistic='rho_ratio'):
+    """One bar per model: how well the predicted uncertainty tracks the noise.
+
+    SHAPE D. Bottom axis: the models. Side axis: the Spearman correlation
+    between what the model said it was unsure about and how much noise was
+    actually put into each label. One bar per model, and behind each bar the
+    grey band the permutation null covers -- the range the same statistic takes
+    when the noise is shuffled. A bar that clears its band is a model whose
+    uncertainty found the corrupted labels.
+
+    This replaces F7, which drew the same result as a lift curve with an axis
+    nobody asked for. D7 fires on the same numbers; this is the picture of it.
+    The paper's title is about uncertainty and this is its headline question.
+    """
+    if q4 is None or not len(q4):
+        return None
+    frame = q4[(q4['dataset'].map(C.canonical_dataset) == dataset)
+               & (q4['rep'] == rep) & (q4['condition'] == condition)]
+    if statistic not in frame.columns:
+        return None
+    frame = frame.dropna(subset=[statistic])
+    if not len(frame):
+        return None
+    frame, sigma = _one_level(frame, sigma)
+    if not len(frame):
+        return None
+    G.declare(frame, 'F9',
+              fixed={'dataset': dataset, 'rep': rep, 'condition': condition,
+                     'sigma': sigma},
+              varies=('model',), aggregates=('fold',))
+
+    per = (frame.groupby('model', dropna=False)
+           .agg(value=(statistic, 'median'),
+                lo=('null_lo', 'median'), hi=('null_hi', 'median'),
+                outside=('outside_null', 'mean'), folds=(statistic, 'size'))
+           .reset_index())
+    per = per.reindex(index=[i for m in C.sort_models(per['model'])
+                             for i in per.index[per['model'] == m]])
+    if not len(per):
+        return None
+
+    fig, ax = _fig(height=3.6)
+    x = np.arange(len(per))
+    # The null band FIRST and behind, so a bar is read against it.
+    for i, row in enumerate(per.itertuples()):
+        if np.isfinite(row.lo) and np.isfinite(row.hi):
+            ax.add_patch(plt_rect(i - 0.44, row.lo, 0.88, row.hi - row.lo))
+    clears = per['outside'] >= 0.5
+    ax.bar(x, per['value'], width=0.66, zorder=3,
+           color=[C.model_color(m) for m in per['model']],
+           alpha=0.9,
+           edgecolor=['#111111' if c else '#BBBBBB' for c in clears],
+           linewidth=[1.1 if c else 0.5 for c in clears])
+    ax.axhline(0, color='#444444', linewidth=0.8, zorder=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels([C.model_label(m) for m in per['model']], rotation=35,
+                       ha='right', fontsize=8)
+    ax.set_ylabel('Correlation between predicted uncertainty\n'
+                  'and the amount of noise in the label')
+    ax.set_title(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
+                 f'{C.condition_label(condition)}, noise level {sigma}',
+                 fontweight='bold', fontsize=9, loc='left')
+    ax.spines[['top', 'right']].set_visible(False)
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    fig.legend(handles=[
+        Patch(facecolor='#DDDDDD', edgecolor='none',
+              label='what shuffling the noise gives'),
+        Line2D([0], [0], marker='s', color='none', markerfacecolor='#888888',
+               markeredgecolor='#111111', markeredgewidth=1.1, markersize=8,
+               label='clears its band'),
+    ], loc='lower center', ncol=2, frameon=False, fontsize=7.5,
+        bbox_to_anchor=(0.5, -0.02))
+
+    n_clear = int(clears.sum())
+    caption('F9', f"""
+        Whether a model's own uncertainty points at the labels that were
+        corrupted, on {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}, at noise level {sigma}. One bar per
+        model: the Spearman correlation between the uncertainty the model
+        predicted for each held-out molecule and the amount of noise actually
+        added to that molecule's training label, divided by the model's own
+        out-of-fold error so that the comparison is against what the error
+        already tells you. The grey band behind each bar is what the same
+        statistic gives when the noise is shuffled and the error recomputed from
+        the shuffled noise, over the permutations; a bar that clears its band is
+        a model that found something the error alone does not.
+        {n_clear} of {len(per)} models clear it. Bars are the median over the
+        out-of-fold folds.""")
+    return S.save(fig, Path(output_dir) /
+                  f'F9_uncertainty_finds_noise_{rep}_{condition}.png')
+
+
+def plt_rect(x, y, width, height):
+    """A grey null band, drawn behind the bars."""
+    from matplotlib.patches import Rectangle
+    return Rectangle((x, y), width, height, facecolor='#DDDDDD',
+                     edgecolor='none', zorder=1)
+
+
+# ---------------------------------------------------------------------------
 # R17 -- each model against its own variant (recovered from paper.tex,
 # fig_nn_family_comparison.png, 2026-09-13)
 # ---------------------------------------------------------------------------

@@ -110,6 +110,23 @@ def test_uncertainty_figures(out):
             check(f'F7 option {option} drew',
                   got is not None and Path(got).name == name, str(got))
 
+        # F9 REPLACES F7 (the author, 2026-09-14). It must draw from the same
+        # q4 rows the decision is read off, and it must draw nothing at all
+        # when the statistic it plots is absent -- an empty bar chart with a
+        # title is worse than no figure.
+        got = FIG.f9_uncertainty_finds_noise(tables.get('d7_q4'), out, 'pdv',
+                                             'gaussian')
+        check('F9 drew from the q4 rows, or had no usable statistic',
+              got is None or Path(got).exists(), str(got))
+        empty = tables.get('d7_q4').copy()
+        empty['rho_ratio'] = float('nan')
+        check('F9 draws nothing when the statistic is all missing',
+              FIG.f9_uncertainty_finds_noise(empty, out, 'pdv', 'gaussian')
+              is None)
+        check('F9 draws nothing for a representation that was never run',
+              FIG.f9_uncertainty_finds_noise(tables.get('d7_q4'), out,
+                                             'no_such_rep', 'gaussian') is None)
+
         check('an unknown F7 option draws nothing',
               FIG.f7_uncertainty('7Z', out, 'pdv', 'gaussian',
                                  retention=stats['retention']) is None)

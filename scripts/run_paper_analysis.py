@@ -315,6 +315,10 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
             # which is small and is what T6's slopes are read from.
             if stats.get('q5') is not None and len(stats['q5']):
                 tables['unc_q5'] = stats['q5']
+            # q7: the share of a model's error that a whole scaffold group
+            # carries. Small, per cell, and the test of RERUN_PLAN.md 14.11y.
+            if stats.get('q7') is not None and len(stats['q7']):
+                tables['unc_q7_group_error'] = stats['q7']
             for key in ('retention', 'enrichment'):
                 got = stats.get(key)
                 if got is not None and len(got):
@@ -329,6 +333,11 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d10_probabilistic(qm9_per))
 
     collect(D.accuracy_across_representations(qm9))
+    # Raw numbers for two questions the author asked: which model-and-
+    # representation pairs are robust on more than one dataset, and which are
+    # best at finding the corrupted labels.
+    collect(D.standout_pairs(qm9_summary, assay_summary))
+    collect(D.uncertainty_pairs(q4))
 
     # WHAT IS MISSING, said in terms of the slots that wanted it. d0_coverage
     # says which cells are thin; this says what that costs -- which panel comes
@@ -559,6 +568,17 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
             if got:
                 drawn.append(got)
                 break          # one condition is the headline; the rest are T6
+    # F9: can the uncertainty find the corrupted labels. One bar per model
+    # against its permutation band. Replaces F7 (the author, 2026-09-13/14) and
+    # is the picture of the paper's own headline question.
+    q4 = tables.get('d7_q4')
+    if q4 is not None and len(q4):
+        for condition in (conditions or [first]):
+            got = FIG.f9_uncertainty_finds_noise(q4, out, rep, condition)
+            if got:
+                drawn.append(got)
+                break
+
     said_d7 = said.get('D7', {})
     if said_d7.get('fired'):
         _note_for_the_text(out, 'can uncertainty find the corrupted labels',
