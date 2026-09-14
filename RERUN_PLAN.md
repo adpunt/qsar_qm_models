@@ -18639,6 +18639,52 @@ python scripts/check_runs_landed.py --stage 1 --verbose
 It refuses to overwrite a clean row a job computed — it checks that one against the reference
 instead — and it will not run twice over the same file. **Queues nothing, costs nothing.**
 
+###### The 11 clean rows that disagree, traced 2026-09-14
+
+The dry run copied nothing, offered 657 rows, checked 2,203 computed clean rows against the
+reference and found **11 that disagree**, in two files: `anova_censoring_ecfp4_heteroscedastic_gp.csv`
+and `anova_censoring_pdv_dnn_bnn_full_mve.csv`. Both keep their own computed clean rows, so the
+refusal costs no data.
+
+**The cause is the Sort & Slice exclusion, `62f1fe2`, committed 2026-09-07 at 05:56.** It drops
+methane, ammonia and water from EVERY representation's split lists, because Sort & Slice cannot
+represent them and the six representations have to be scored on the same molecules. A run from
+before that commit trained and scored on 10,000 molecules; a run from after it on 9,998 or 9,999.
+
+**Which replicates that can touch is fixed by the draw, and it was reproduced here.** A QM9 task
+seeds `torch.manual_seed((42 ^ (replicate * 0x5DEECE66D)) & 0xFFFFFFFF)` and takes the first 10,000
+of `torch.randperm(129428)`. The three molecules sit at pool positions 0, 1 and 2. Over replicates
+0 to 10, **exactly two draws contain any of them: replicate 4 draws ammonia, replicate 8 draws
+methane and water.** Every other replicate draws none.
+
+Both files disagree at replicate 4 and replicate 8, and nowhere else beyond the seventh decimal.
+Two different models, two different representations, the same two replicates. That is the fix
+landing between two runs, not a defect.
+
+**The size is larger than three molecules of ten thousand suggests, and that is expected.** The
+gap differs by 0.0026 and 0.0168 on the ECFP4 Gaussian process, 0.0239 and 0.0165 on the PDV
+variance-head network. Methane, ammonia and water are extremes of the HOMO--LUMO gap, so one
+leaving the test split moves the spread the R-squared is measured against.
+
+**What cannot be told from a row.** `n` in a result row is `--sample-size`, the flag, not the
+realised count, so both sides read `n=10000` whether the exclusion ran or not. The only
+discriminator on disk is the log: a run since the fix prints either `Dropped from EVERY
+representation` or `Sort & Slice represents every molecule in this sample`, and a run from before
+it prints neither.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+ls *.out | wc -l
+grep -l "Dropped from EVERY representation" *.out | wc -l
+grep -l "represents every molecule in this sample" *.out | wc -l
+```
+
+The third count plus the second is how many tasks ran since the fix; the shortfall against the
+first is how many predate it. **Do not add a realised-count column to fix this properly while jobs
+are running** — `save_results` refuses to append to a file whose header differs, so a new column
+would kill every task now in the queue.
+
+
 **35 are Sort & Slice at three or four replicates of ten**, on `grouped_shifted` and
 `grouped_wider`, every model. That is the zero-vector crash of chat 5: methane, ammonia and water
 carry one Morgan substructure each, so their vector came out all zeros and the guard refused to
