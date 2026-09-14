@@ -2129,13 +2129,27 @@ nitrogen heterocycles, which is exactly what QM9 is full of. Every QM9 clash mea
 is of this kind, e.g. `CC#CCc1nc[nH]n1` and `CC#CCc1ncn[nH]1`. Do not write the caveat as a
 halogen-and-stereochemistry problem alone.
 
-**The rate, measured 2026-08-30 on the study's own molecules.** Report it per dataset; do not
-pool it.
+**The rate. RE-MEASURED 2026-09-12 on the molecules the runs actually load, and the hERG number
+changed by a factor of four.** Gate 4 of `scripts/crosscheck_chemberta.py` had never been run
+until then. Report it per dataset; do not pool it. The numbers live in
+`results/chemberta_collisions.json` and `results/chemberta_collisions.csv`, which a figure or
+table script reads — do not retype them.
 
-| dataset | distinct molecules | distinct feature vectors | molecules sharing a vector |
+| dataset | molecules the run loads | distinct token sequences | molecules sharing a vector |
 |---|---|---|---|
-| hERG | 648 | 583 | **130 (20.1%)** |
-| QM9 | 132,908 | 131,001 | **3,604 (2.71%)** |
+| hERG K$_i$ | 1,415 | 1,377 | **72 (5.09%)** |
+| QM9 pool | 129,238 | 127,388 | **3,502 (2.71%)** |
+
+**The 2026-08-30 row said hERG 130 of 648, 20.1%, and QM9 3,604 of 132,908.** Both were counted
+on the wrong set. The hERG one used a 648-molecule subset; the run loads all 1,415 (KIRBy
+`alternative_data_noise_robustness.py:4540` passes the whole set). The QM9 one used 132,908
+rows, which is more than the pool holds — `data/valid_qm9_indices.pth` is 129,428 positions and
+129,238 of them give a SMILES the reader accepts. Do not quote 20.1% again.
+
+**One more number, because QM9 never trains on the whole pool.** A QM9 task draws 10,000
+molecules at random per replicate, so what a fit actually sees is a median of 24 molecules
+sharing a vector out of 10,000 — **0.24%**, between 0.14% and 0.35% over 25 simulated draws.
+The pool rate is the property of the representation; the run rate is what a fit is exposed to.
 
 The rate is a property of the dataset, not of the model. hERG is high because halogens,
 charges and stereocentres are everywhere in drug-like molecules. QM9 is lower but **not
