@@ -276,6 +276,16 @@ def main():
                          f'{MEDIUM_MAX_HOURS}, an assumption, not read from the '
                          f'cluster).')
     ap.add_argument('--models', nargs='+', default=None)
+    ap.add_argument('--reps', nargs='+', default=None,
+                    help='Run the sweep on these representations only, instead '
+                         'of every one the roster gives the model. Added '
+                         '2026-09-14 for the Avalon gap: 13 of the 16 chosen '
+                         'settings were ranked over five representations '
+                         'because an earlier chat stopped collecting Avalon on '
+                         '2026-09-01, and filling those cells means fitting '
+                         'Avalon alone. The array range still comes from the '
+                         'generator -- it writes --array=0-(n-1) for whatever '
+                         'this leaves, so never type one by hand.')
     ap.add_argument('--qsar-dir', default=QSAR_DIR)
     ap.add_argument('--out-dir', default=str(_HERE))
     args = ap.parse_args()
@@ -295,8 +305,18 @@ def main():
     written, total_core_hours, unmeasured = [], 0.0, []
     derived = []
 
+    if args.reps:
+        known = sorted({r for m in rosters.MODELS for r in rosters.MODELS[m][4]})
+        stray = [r for r in args.reps if r not in known]
+        if stray:
+            raise SystemExit(f'unknown representation(s) {stray}. Known: {known}')
+
     for model in chosen:
         reps = rosters.MODELS[model][4]
+        if args.reps:
+            reps = [r for r in reps if r in args.reps]
+            if not reps:
+                continue
         sibling = DERIVED_FROM_SIBLING.get(model)
         ratio = sibling_ratio(rosters, model, sibling) if sibling else None
         seconds = {}
