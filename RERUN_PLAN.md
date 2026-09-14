@@ -19785,3 +19785,172 @@ representations is undefined, and cells that ran and were dropped say `excluded`
 `C.DEFAULT_FOCUS_MODEL = 'rf'`. It was left to a `--focus-model` flag with the data's own pick as
 the default, which overruled an instruction that had already been given. The data's pick is NGBoost,
 and §14.11s is why that is the wrong model to meet first.
+
+#### 14.11v GP (RBF) IS THE GAUSSIAN PROCESS — the author, 2026-09-14
+
+`gauche` (Tanimoto kernel) joins `VARIANT_MODELS` and leaves every cross-model figure and table.
+
+Measured on QM9, `results/decisions_arc/auc_norm_qm9.csv`: the Tanimoto process has numbers on
+**ECFP4 only**, three cells, because its kernel needs binary vectors. `gauche_rbf` has numbers on all
+six representations and five conditions. Where both ran, RBF wins 3 of 3 on clean R² (+0.007 mean)
+and 3 of 3 on AUC_norm (+0.013 mean).
+
+One row that exists on one of six representations and loses wherever it can be compared. **The
+three-cell comparison is a sentence, not a roster entry:**
+
+> On the fingerprint representation where both kernels are defined, the radial-basis process was
+> more accurate on clean labels and more robust under noise than the Tanimoto process, so the
+> radial-basis kernel is used for the Gaussian process throughout; a Tanimoto kernel is defined only
+> on binary vectors and cannot be applied to the descriptor or learned-embedding representations.
+
+⚠️ `paper.tex` line 197 claims the SVM uses a Tanimoto kernel. It does not — it is RBF throughout.
+That correction is separate and already logged.
+
+#### 14.11w NGBOOST IS NOT A PAIRING, AND WHAT THE REAL PAIRINGS ARE — measured 2026-09-14
+
+The author asked whether NGBoost + PDV is a specially good pairing. **It is not: NGBoost is rank 1
+by AUC_norm on all six representations.** What PDV supplies is the accuracy NGBoost lacks
+everywhere else.
+
+| NGBoost on | clean R² | AUC_norm | rank by AUC_norm |
+|---|---|---|---|
+| PDV | **0.865** | 0.975 | 1 of 13 |
+| MHG-GNN | 0.852 | 0.967 | 1 |
+| Avalon | 0.786 | 0.982 | 1 |
+| ChemBERTa | 0.762 | 0.980 | 1 |
+| Sort & Slice | 0.748 | 0.975 | 1 |
+| ECFP4 | 0.706 | 0.979 | 1 |
+
+**The pairings that do beat their parts.** Surplus = the cell minus that model's median over
+representations minus that representation's median over models plus the overall median. Gaussian,
+grouped_wider, grouped_shifted:
+
+| pairing | Gaussian | wider | shifted |
+|---|---|---|---|
+| **LightGBM + Sort & Slice** | +0.026 | +0.023 | +0.022 |
+| **XGBoost + Sort & Slice** | +0.028 | +0.019 | +0.031 |
+| **VBLL-α + ChemBERTa** | +0.017 | +0.018 | +0.018 |
+| VBLL-β + ChemBERTa | +0.026 | +0.015 | +0.017 |
+| NN-β + Sort & Slice | +0.015 | +0.017 | +0.021 |
+| RF + Sort & Slice | +0.015 | +0.013 | +0.016 |
+
+Boosted trees on Sort & Slice is the strongest and it holds under all three conditions. Sort & Slice
+is unremarkable alone — best for 2 of 14 models, worst for 2 — yet every tree family gains from it.
+The worst pairing is BNN-α + ECFP4, −0.052 under Gaussian, the same cell that leaves BNN-α last at
+ECFP4 and sixth at PDV.
+
+**Not yet asked of the uncertainty side.** Whether any pairing is unusually good at FINDING corrupted
+labels needs the same surplus computed on `d7_q4`, which is one short function and is not written.
+
+#### 14.11x WHY THE ANOVA SHOWS THREE CONDITIONS
+
+Not a choice. Gaussian, grouped_wider and grouped_shifted ran the full 19-model roster;
+student_t_nu5, outlier_p10 and laplace ran on the deep-run subset (2 to 6 models) and censoring on
+five named pairs. A two-way decomposition over two models describes those two models rather than the
+choice of model, so `two_way_eta2_by_condition` refuses below `MIN_MODELS_FOR_ANOVA` and prints the
+conditions it skipped with their model count.
+
+#### 14.11y THE GP-AGAINST-TREES MECHANISM IS TESTABLE ON WHAT HAS ALREADY RUN
+
+The claim, still **UNTESTED**: shifted noise moves a whole scaffold neighbourhood together; a tree
+partitions and can isolate a region, a process with one global kernel interpolates across
+neighbourhoods and carries the offset into them.
+
+It can be tested with files already on disk. The per-molecule uncertainty rows carry
+`canonical_smiles`, `y_pred_mean` and `y_true_original` (`utils.UNCERTAINTY_COLUMNS`); Murcko
+scaffolds recompute from SMILES deterministically, which is how the splits were built; GP (RBF) and
+QRF are both in the uncertainty roster and grouped_shifted is one of its conditions.
+
+**The test.** Per model, split the prediction error by scaffold group and take the share of error
+variance carried by the group means — the statistic F1's group panel uses, on errors instead of on
+injected noise. The mechanism predicts the process's error is MORE group-correlated than the
+forest's under grouped_shifted, and that the two match under Gaussian. One function in
+`uncertainty_stats.py`; **not written, awaiting the author's go-ahead.**
+
+#### 14.11z RESULTS THE AUTHOR HAS SETTLED — 2026-09-14
+
+For the Results section. Numbers from `results/decisions_arc/`, ARC run of 2026-09-13, QM9, ECFP4,
+base models.
+
+- **The variational networks resist group-shifted noise and the Gaussian processes are hurt by it.**
+  VBLL-α climbs five rank places (9th to 4th) and VBLL-β four (10th to 6th); both lose under 0.01
+  AUC_norm where the rest of the roster loses 0.03 to 0.05. GP (RBF) falls four places (5th to 9th).
+- **SVM resists group-widened noise**, up four places (7th to 3rd), and it is the condition that
+  costs NGBoost its first place (down three).
+- **The trees are predictable under noise.** RF, XGBoost and LightGBM move at most one rank place
+  across all three conditions, and their accuracy degrades without collapsing. ⚠️ **Not all trees
+  behave alike** — NGBoost is a tree ensemble and is the one model whose rank does change with the
+  condition, and QRF takes first place under grouped_wider. The statement is about the gradient- and
+  bagging-based forests, not about "trees".
+
+#### 14.11aa ECFP4 STAYS, AND THE OTHER REPRESENTATIONS NEED THEIR OWN SHOWING — the author, 2026-09-14
+
+**Settled: ECFP4 is the representation the main-text tables hold.** It has the widest model coverage
+(14 base models against 13) and it spreads the roster furthest apart — clean R² over 0.145 and
+AUC_norm over 0.098, against PDV's 0.058 and 0.040 — so differences between models are visible
+rather than compressed.
+
+**But the paper must not leave the reader thinking ECFP4 is the best representation. It is not.**
+What has to be said somewhere, with these numbers:
+
+- **ChemBERTa is the most robust representation for half the roster and the worst for none**, under
+  every one of the three conditions (best for 7, 6, 7 of 14 models). Its lowest AUC_norm on QM9,
+  0.926, is above ECFP4's median.
+- **ECFP4 is the WORST representation for 5 of 14 models** under Gaussian, second only to MHG-GNN's
+  6 of 14.
+- **PDV gives the highest clean accuracy** — NN-α at 0.918 is the most accurate cell in the study —
+  and compresses every model into 0.058 R², which is exactly why it is not the one to hold.
+- **Sort & Slice lifts every tree family** (§14.11w) despite being unremarkable on its own.
+- **A model's standing can depend entirely on the representation**: BNN-α is 14th of 14 at ECFP4 and
+  6th of 13 at PDV; VBLL-α is 9th at ECFP4 and last at PDV.
+
+F3 (the model-by-representation grid), R6 and R18 already carry this. The obligation is on the
+TEXT: no sentence may read as though the ECFP4 ranking is the ranking.
+
+#### 14.12 WHERE EVERY FIGURE AND TABLE GOES — a recommendation, 2026-09-14
+
+The author asked for clear decisions rather than options. This is one recommendation per slot, with
+the question it answers. **Journal of Cheminformatics has no stated figure cap; the submitted
+version of this paper carried seven figures and five tables, and that is the scale to hold.**
+Seven main-text figures, four main-text tables, the rest as Additional files.
+
+**MAIN TEXT — seven figures.**
+
+| slot | the question it answers | why it is main text |
+|---|---|---|
+| **F1** | what the noise actually is | Methods cannot be read without it, and its group panel is the only thing that stops six near-identical histograms reading as a failed experiment |
+| **F4a** | what does label noise cost you | the paper's first question, one line per model |
+| **F2** | is it the model, the representation, or the pairing | the decomposition is the paper's structural claim, and the residual is what keeps it honest |
+| **F3** | WHICH model and WHICH representation | the central grid; every other result is read off it |
+| **R17** | does making a model probabilistic help | the only place a model meets its own Bayesian version, and Q3 of the paper |
+| **F6** | does noisy training make a model less sure | the uncertainty half, and the only figure on that side |
+| **F8** | does any of this hold on assay data | external validity; **all three datasets, which is three files at present** |
+
+**MAIN TEXT — four tables.** T1 (metrics), T2 (noise conditions), T4 at ECFP4 (robustness by model
+and condition), T6 (the uncertainty statistics).
+
+**ADDITIONAL FILES.** F4b, F4c, R6, R9, R15, R18, R19, T3, T5, T7, and `what_is_missing.csv`,
+`excluded_qm9.csv`, `d0_duplicate_disagreements_qm9.csv`, `F1_group_share.csv`,
+`F1_delivered_dose.csv` as machine-readable supporting data.
+
+**CUT.** F7 (already cut, 2026-09-13). R10 and R15b are sentences (§L1 of the revision guide).
+Nothing else is cut — every remaining slot answers something.
+
+**The three judgement calls in that list, said plainly.**
+
+1. **F4b goes to Additional files.** Its finding — grouped-shifted costs every model, the other
+   conditions cost nothing measurable — is 14 out of 14 and reads better as a sentence with T4 than
+   as a figure of overlapping curves. Reverse this if the reviewer asks to SEE the kinds of noise
+   separating.
+2. **F4c goes to Additional files, F3 stays.** They are close relatives: F3 is model by
+   representation at one condition, F4c is model by condition at one representation. F3 is the one
+   the paper's argument rests on. F4c's clean-accuracy column survives as T4's first column.
+3. **R9 goes to Additional files and F8 stays.** Both answer "does it transfer". F8 shows the assay
+   results themselves; R9 shows rank agreement, which T7 also gives as numbers.
+
+**ONE GAP.** The paper's title is about uncertainty and the uncertainty side is currently ONE figure
+(F6) and one table (T6). D7 fired — uncertainty finds clipped labels better than the error alone,
+outside the permutation band — and since F7 was cut that result has no picture. **Recommended: one
+new figure, one bar per model showing q4's correlation between predicted uncertainty and injected
+noise size, with the permutation band drawn behind it.** It is the paper's own headline question and
+it currently exists only as a row in a 292-row table. NOT BUILT — the author's call.

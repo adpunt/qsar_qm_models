@@ -204,15 +204,19 @@ def line_chart(ax, frame, x, y, series, spread=None, labeller=None,
 def dot_rows(ax, frame, row, value, series=None, labeller=None,
              row_labeller=None, colours=None, reference=None,
              reference_label=None, spread_low=None, spread_high=None,
-             legend_ncol=3, dodge=True):
+             legend_ncol=3, dodge=False, markers=None):
     """One row per level of `row`; one dot per level of `series` on that row.
 
-    `dodge` nudges each series onto its own line within the row. Without it two
-    series landing on the same value draw one dot on top of another: the pair
-    blends into a colour that is in no legend, and a reader counts three dots
-    where four datasets were plotted. Ranks collide constantly -- there are only
-    nineteen of them and four datasets -- so this is on by default.
+    Two series landing on the same value draw one dot on top of another, and the
+    pair blends into a colour that is in no legend. The fix is NOT to move them
+    off the row: a dot a third of a row above its own label cannot be read back
+    to that label at all, which is what `dodge=True` did (the author,
+    2026-09-14). Every dot sits ON its row, and the series are told apart by
+    MARKER SHAPE as well as colour, so an overlap shows as two shapes rather
+    than as one invented colour. `dodge=True` is kept for a caller that really
+    wants the offset.
     """
+    markers = markers or ['o', 's', '^', 'D', 'P', '*']
     labeller = labeller or (lambda v: str(v))
     row_labeller = row_labeller or C.model_label
     rows = list(dict.fromkeys(frame[row]))
@@ -234,9 +238,10 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
             group = frame[frame[series] == name]
             offset = (index * step) - span / 2 if span else 0.0
             ax.scatter(group[value],
-                       [position[r] + offset for r in group[row]], s=44,
-                       alpha=0.85, label=labeller(name), zorder=3,
-                       linewidth=0.4, edgecolor='white',
+                       [position[r] + offset for r in group[row]], s=46,
+                       alpha=0.8, label=labeller(name), zorder=3,
+                       marker=markers[index % len(markers)],
+                       linewidth=0.5, edgecolor='white',
                        color=(colours or {}).get(name, C.model_color(name)))
         _order_legend(ax, legend_ncol, loc='best', fontsize=8)
 

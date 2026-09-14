@@ -215,9 +215,13 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
     # figure that shows it (the author, 2026-09-13).
     nrows = int(np.ceil(len(conditions) / ncols)) + 1
     import matplotlib.pyplot as plt
+    # 1.35 inches a row with hspace 0.95 put each panel's title into the panel
+    # above it and left the bottom panel's rotated tick labels over the legend.
+    # Taller rows and more room between them (the author, 2026-09-14).
     fig = plt.figure(figsize=(C.TEXTWIDTH_IN,
-                              min(C.MAX_HEIGHT_IN, 1.35 * nrows)))
-    spec = fig.add_gridspec(nrows, ncols, hspace=0.95, wspace=0.18)
+                              min(C.MAX_HEIGHT_IN, 1.62 * nrows + 0.6)))
+    spec = fig.add_gridspec(nrows, ncols, hspace=1.15, wspace=0.26,
+                            bottom=0.09, top=0.96)
 
     for index, condition in enumerate(conditions):
         ax = fig.add_subplot(spec[index // ncols, index % ncols])
@@ -271,9 +275,9 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
                     textcoords='offset points', ha='center', fontsize=7,
                     color='#333333')
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([C.condition_label(c) for c in order], rotation=25,
-                       ha='right', fontsize=8)
-    ax.set_ylabel('Share of the noise a\nscaffold group shares', fontsize=8)
+    ax.set_xticklabels([C.condition_label(c) for c in order], rotation=30,
+                       ha='right', fontsize=7)
+    ax.set_ylabel('Share of the noise a\nscaffold group shares', fontsize=7.5)
     ax.set_ylim(0, 1.0)
     S.title(ax, 'abcdefghij'[len(conditions)],
             'How much of the noise a whole scaffold group shares')
@@ -876,7 +880,8 @@ def r15_rank_against_level(accuracy, output_dir, rep, condition,
 # Contingent: retention against clean baseline (14.6 row 16, spec in 10b.5)
 # ---------------------------------------------------------------------------
 
-def r16_decoupling(summary, output_dir, rep, dataset='qm9'):
+def r16_decoupling(summary, output_dir, rep, dataset='qm9',
+                   condition='gaussian'):
     """Is robustness decoupled from accuracy?
 
     Built the way `create_figure3` in the old script is: ONE full-width panel,
@@ -890,13 +895,21 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9'):
     scores well by having less to lose. That is why the baseline is an axis and
     not a footnote.
     """
+    # ONE POINT PER MODEL. It used to draw one per model and NOISE CONDITION,
+    # and clean accuracy does not depend on the condition -- so each model came
+    # out as a vertical stack of identical markers at one x, which reads as
+    # duplicates (the author, 2026-09-14). Averaging the stack would average
+    # over a factor, so the figure holds ONE condition and names it.
     frame = C.cross_model(
-        summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)],
+        summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)
+                & (summary['condition'] == condition)],
         'R16')
     if not len(frame):
         return None
-    title = G.declare(frame, 'R16', fixed={'dataset': dataset, 'rep': rep},
-                      varies=('model', 'condition'))
+    title = G.declare(frame, 'R16',
+                      fixed={'dataset': dataset, 'rep': rep,
+                             'condition': condition},
+                      varies=('model',))
 
     fig, ax = _fig(height=C.TEXTWIDTH_IN * 0.85)
     for model in C.sort_models(frame['model'].unique()):
@@ -1493,10 +1506,13 @@ def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
         ax.legend(loc='lower left', fontsize=7, frameon=False,
                   handlelength=1.6, labelspacing=0.3)
         ax.spines[['top', 'right']].set_visible(False)
-        ax.set_xlabel(LEVEL_AXIS)
         S.title(ax, 'abc'[index], name)
         if index == 0:
             ax.set_ylabel(G.metric_label('r2'))
+    # ONE bottom-axis label under the middle panel. Three copies of the same
+    # words across three panels ran into each other and said nothing three
+    # times (the author, 2026-09-14).
+    axes[len(use) // 2].set_xlabel(LEVEL_AXIS)
     fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
                  f'{C.condition_label(condition)}',
                  fontsize=9, fontweight='bold', x=0.01, ha='left')

@@ -499,6 +499,14 @@ VARIANT_MODELS = {
     'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
     'dnn_vbll_hetero', 'mlp_vbll_hetero',
     'het_gp_rbf',
+    # The Tanimoto-kernel Gaussian process. The author's call, 2026-09-14:
+    # GP (RBF) is the Gaussian process everywhere. The Tanimoto kernel needs
+    # binary vectors, so it only ever ran on ECFP4 -- three cells on QM9 -- and
+    # the RBF process beats it in all three, on clean R2 (+0.007) and on
+    # AUC_norm (+0.013). One row that exists on one of six representations and
+    # loses wherever it can be compared. The three-cell comparison is a
+    # sentence; see RERUN_PLAN.md 14.11v.
+    'gauche',
 }
 
 #: Same set, kept under its old name because the ANOVA is one of the places it
