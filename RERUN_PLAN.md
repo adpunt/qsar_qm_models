@@ -18597,7 +18597,102 @@ model's laptop hours in the roster table, while the generator prices it from the
 `model_hours.json` — for `heteroscedastic_gp` those are 174 hours per 110 training runs against
 8.3228, measured on 15 finished tasks of an array of 18 on 2026-09-07. The walls in block 2.1
 are the generator's. Fixing the test to read the same graded rate the generator uses is an open
-thread and is not done.
+thread and is not done. **CLOSED 2026-09-14** — the test calls `gen.wall_hours` now instead of
+keeping a second formula, and it still separates a wall sized with the out-of-fold pass from one
+sized without it: on the screen, 5h against 2h for the quantile forest, 32h against 8h for
+NGBoost, 7h against 2h for the heteroscedastic process.
+
+---
+
+#### D8. WHAT THE FIGURE RUN SAYS IS MISSING, AND WHICH OF IT IS COMPUTE — 2026-09-14
+
+`results/decisions_arc/what_is_missing.csv` and `d0_coverage.csv` were written from the cluster's
+results on 2026-09-14 00:34. Read against each other they give the whole gap, and **most of it is
+not a re-run.**
+
+| dataset | combinations of model, representation and condition | complete | short |
+|---|---|---|---|
+| QM9 | 395 | 316 | **79** |
+| logD | 386 | 386 | 0 |
+| Caco-2 | 386 | 386 | 0 |
+| hERG K$_i$ | 386 | 386 | 0 |
+
+**The three assay datasets are finished.** All seven noise conditions, all six representations,
+all 19 models, every level and every replicate. Nothing there is waiting on compute.
+
+The 79 short QM9 combinations are two things and only two:
+
+**44 have every level except the clean one.** Six of the seven levels are present with ten
+replicates. This is the 654 cells `what_is_missing.csv` reports as "no clean level" and the reason
+`F4c`, `F8` and `T4` print "excluded" where a number should be. It is not missing work. Five of the
+seven conditions never run level zero on purpose (the author, 2026-08-28) because the clean fit is
+bit-identical whichever condition it is labelled with, and `copy_zero_rows.py` exists to fill them
+in. It has not been run over the current results.
+
+```bash
+cd $QSAR
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results results --dry-run
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results results
+python scripts/check_runs_landed.py --stage 1 --verbose
+```
+
+It refuses to overwrite a clean row a job computed — it checks that one against the reference
+instead — and it will not run twice over the same file. **Queues nothing, costs nothing.**
+
+**35 are Sort & Slice at three or four replicates of ten**, on `grouped_shifted` and
+`grouped_wider`, every model. That is the zero-vector crash of chat 5: methane, ammonia and water
+carry one Morgan substructure each, so their vector came out all zeros and the guard refused to
+train. Fixed at `62f1fe2`, which is registered in `scripts/fixed_causes.json` with its commit, so
+the resubmission tool will now print for it.
+
+```bash
+cd $QSAR
+python scripts/failed_tasks.py --emit-sbatch
+```
+
+Paste the lines it prints. It prints nothing for a cause that is not registered as fixed, and it
+checks the commit is an ancestor of this checkout's HEAD before it prints — a document cannot
+declare a fix.
+
+**The three depth-only conditions on QM9 are thin for a third reason, and it is queue position.**
+`laplace`, `outlier_p10` and `student_t_nu5` have a robustness number for 2 or 3 of the 19 models,
+and censoring for 5. Those are deep-run array elements that have not run yet. Check them against
+`squeue` before resubmitting anything: the deep run is `qm92_*`.
+
+##### Avalon's tuning cells — 16 tasks, and the only Avalon gap there is
+
+Avalon is complete on every grid: 54 of 54 QM9 combinations and all three assay datasets. **What is
+missing is tuning.** 13 of the 16 dataset-and-model tables in
+`results/tuning_local/CHOSEN_SETTINGS.md` hold no Avalon number at all, because an earlier chat
+stopped collecting it on 2026-09-01 against the author's word. The setting each of those 13 chose
+is still shipped to Avalon.
+
+Four tasks fill the QM9 tables. The generator writes the range.
+
+```bash
+cd $QSAR/slurm_scripts_tuning
+python generate_scripts.py --settings 12 --reps avalon \
+    --models dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational
+```
+
+It prints four `sbatch` lines, each `--array=0-0`, walls 7:59 to 16:59 on `medium`, 13.5 core-hours
+in total.
+
+Twelve tasks fill the assay tables. `tune_bnn_lab.sh` is gitignored like every SLURM script, so the
+updated copy goes over by `scp` first; it now prints the indices its own `REPS` array puts Avalon
+at, rather than anybody typing them.
+
+```bash
+scp slurm_scripts_tuning/tune_bnn_lab.sh \
+    scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_tuning/
+
+cd $QSAR/slurm_scripts_tuning
+bash tune_bnn_lab.sh --array-for-rep avalon        # prints 3,9,15,21,27,33,39,45,51,57,63,69
+sbatch --account=stat-cadd --partition=long \
+    --array=$(bash tune_bnn_lab.sh --array-for-rep avalon)%6 tune_bnn_lab.sh
+```
+
+Then the five merge commands in block 2.5, which is what turns the new rows into a chosen setting.
 
 ---
 
