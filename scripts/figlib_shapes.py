@@ -71,7 +71,8 @@ def save(fig, path, dpi=300):
 LEGEND_MARGIN = 0.09
 
 
-def shared_legend(fig, sources, ncol=4, extra=None, margin=None):
+def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
+                  group_by_family=True):
     """ONE legend, below the whole figure, reading left to right.
 
     Per-panel legends inside the axes cover the data -- with nineteen models
@@ -82,6 +83,12 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None):
 
     matplotlib fills a multi-column legend column-major, so the handles are
     permuted first or the list reads down instead of across.
+
+    `group_by_family` puts the entries in roster order -- forests, then boosted
+    trees, then the kernel methods, then each neural family -- rather than in
+    whatever order the panel happened to draw them. A chart that orders its
+    lines by rank scatters the families through the key, so a reader hunting for
+    "the other forest" reads the whole list (the author, 2026-09-16).
     """
     handles, labels = [], []
     for ax in (sources if isinstance(sources, (list, tuple)) else [sources]):
@@ -90,6 +97,13 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None):
             if label not in labels:
                 handles.append(handle)
                 labels.append(label)
+    if group_by_family and labels:
+        roster = [C.model_label(m) for m in C.MODEL_ORDER]
+        rank = {name: i for i, name in enumerate(roster)}
+        order = sorted(range(len(labels)),
+                       key=lambda i: (rank.get(labels[i], len(rank)), i))
+        handles = [handles[i] for i in order]
+        labels = [labels[i] for i in order]
     if extra:
         handles += [h for h, _ in extra]
         labels += [l for _, l in extra]
@@ -237,11 +251,14 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
         for index, name in enumerate(names):
             group = frame[frame[series] == name]
             offset = (index * step) - span / 2 if span else 0.0
+            # Semi-transparent so an overlap shows as a darker patch rather
+            # than as one dot hiding another, with a heavier edge so a single
+            # dot still reads at this size (the author, 2026-09-16).
             ax.scatter(group[value],
-                       [position[r] + offset for r in group[row]], s=46,
-                       alpha=0.8, label=labeller(name), zorder=3,
+                       [position[r] + offset for r in group[row]], s=52,
+                       alpha=0.62, label=labeller(name), zorder=3,
                        marker=markers[index % len(markers)],
-                       linewidth=0.5, edgecolor='white',
+                       linewidth=0.7, edgecolor='#333333',
                        color=(colours or {}).get(name, C.model_color(name)))
         _order_legend(ax, legend_ncol, loc='best', fontsize=8)
 

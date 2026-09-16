@@ -264,13 +264,17 @@ def dataset_unit(name):
     return DATASET_UNITS.get(canonical_dataset(name), 'label units')
 
 
+#: Gaussian was #E31A1C and Outlier #E91E63 -- a red and a pink-red that could
+#: not be told apart on a line chart (the author, 2026-09-16). Outlier moves to
+#: a dark blue, which is separated from every other colour here and from the
+#: red in particular.
 CONDITION_COLORS = {
     'gaussian': '#E31A1C',
     'grouped_wider': '#33A02C',
     'grouped_shifted': '#6A3D9A',
     'censoring': '#B15928',
     'student_t_nu5': '#FF7F00',
-    'outlier_p10': '#E91E63',
+    'outlier_p10': '#1F4E9C',
     'laplace': '#17BECF',
 }
 

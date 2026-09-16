@@ -560,7 +560,7 @@ def _excluded_keys(excluded, keys, **where):
 
 def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                 reference_condition='gaussian', focus_model=None,
-                top_models=8, excluded=None):
+                top_models=8, excluded=None, second_rep='pdv'):
     """THREE FIGURES, not three panels -- the author's call, 2026-09-13.
 
     One figure was 170 mm wide and 250 mm tall carrying two line charts and a
@@ -615,25 +615,49 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         fixed={'dataset': dataset, 'rep': rep,
                'condition': reference_condition},
         varies=('model', 'sigma'), aggregates=('replicate',))
-    fig, ax = _fig(height=4.0)
-    # NO BANDS. Eight overlapping shaded ranges made the lines unreadable and
-    # the spread is in T4 (the author, 2026-09-13).
-    S.line_chart(ax, curves, 'sigma', 'r2', 'model',
-                 labeller=C.model_label, reference_x=level,
-                 reference_label='reported at', legend=False)
-    ax.set_ylabel(G.metric_label('r2'))
-    ax.set_xlabel(LEVEL_AXIS)
-    ax.set_title(f'Models across {C.condition_label(reference_condition)} '
-                 f'noise — {C.dataset_label(dataset)}, {C.rep_label(rep)}',
-                 fontweight='bold', fontsize=9, loc='left')
-    ax.spines[['top', 'right']].set_visible(False)
-    S.shared_legend(fig, ax, ncol=4)
+    # TWO PANELS, ONE PER REPRESENTATION. The same models under the same noise,
+    # on the representation the tables hold and on one more, so the reader can
+    # see that a model's curve is a fact about the pairing and not about the
+    # model (the author, 2026-09-16). NGBoost is the case that makes it: its
+    # curve is the flattest on both and it starts far lower on ECFP4.
+    companions = [r for r in (second_rep,) if r and r in set(acc['rep'])]
+    panes = [rep] + companions
+    fig, axes = _fig(height=4.0, ncols=len(panes), sharey=True)
+    axes = np.atleast_1d(axes).ravel()
+    for index, (ax, held) in enumerate(zip(axes, panes)):
+        here = (accuracy[(accuracy['dataset'] == dataset)
+                         & (accuracy['rep'] == held)
+                         & (accuracy['condition'] == reference_condition)
+                         & (accuracy['model'].isin(keep))]
+                .groupby(['model', 'sigma'], as_index=False)['r2'].median())
+        here = C.cross_model(here, f'F4a {held}')
+        if not len(here):
+            continue
+        # NO BANDS. Eight overlapping shaded ranges made the lines unreadable
+        # and the spread is in T4 (the author, 2026-09-13).
+        S.line_chart(ax, here, 'sigma', 'r2', 'model',
+                     labeller=C.model_label, reference_x=level,
+                     reference_label='reported at' if index == 0 else None,
+                     legend=False)
+        ax.set_xlabel(LEVEL_AXIS)
+        ax.spines[['top', 'right']].set_visible(False)
+        S.title(ax, 'ab'[index], C.rep_label(held))
+        if index == 0:
+            ax.set_ylabel(G.metric_label('r2'))
+    fig.suptitle(f'Models across {C.condition_label(reference_condition)} '
+                 f'noise — {C.dataset_label(dataset)}',
+                 fontweight='bold', fontsize=9, x=0.01, ha='left')
+    S.shared_legend(fig, axes[0], ncol=4)
     caption('F4a', f"""
         What label noise costs you, on {title}. One line per model, the
         {len(keep)} most robust under {C.condition_label(reference_condition)}.
-        Bottom axis: the amount of noise put into the training labels, as a
-        fraction of the clean training label spread. Side axis: R2 on held-out
-        molecules, median over the ten replicates. The dashed vertical line
+        One panel per representation, the same models and the same noise on
+        each, sharing a side axis. Bottom axis: the amount of noise put into the
+        training labels, as a fraction of the clean training label spread. Side
+        axis: R2 on held-out molecules, median over the ten replicates. Two
+        panels rather than one because how far a model falls is a property of
+        the pairing and not of the model: the same curve can start high on one
+        representation and low on another while keeping the same shape. The dashed vertical line
         marks the level every table in the paper reports at. There are no bands:
         eight overlapping ranges hid the lines, and the spread across replicates
         is in T4.""")
@@ -642,9 +666,8 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     # ---- F4b: one model, across every noise condition ---------------------------
     if focus_model:
         by_condition = (acc[acc['model'] == focus_model]
-                        .groupby(['condition', 'sigma'], as_index=False)
-                        .agg(r2=('r2', 'median'),
-                             spread=('r2', lambda v: float(v.std(ddof=0)))))
+                        .groupby(['condition', 'sigma'], as_index=False)['r2']
+                        .median())
         G.declare(acc[acc['model'] == focus_model], 'F4b',
                   fixed={'dataset': dataset, 'rep': rep, 'model': focus_model},
                   varies=('condition', 'sigma'), aggregates=('replicate',))
@@ -652,8 +675,11 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         # No reference line: this panel is about the SHAPE of the curves
         # against each other, and a vertical rule through them was clutter
         # (the author, 2026-09-13).
+        # NO BANDS HERE EITHER. Six overlapping shaded ranges on one panel hid
+        # the lines they belonged to, and the lines are the point (the author,
+        # 2026-09-16). The spread across replicates is in T4.
         S.line_chart(ax, by_condition, 'sigma', 'r2', 'condition',
-                     spread='spread', labeller=C.condition_label,
+                     labeller=C.condition_label,
                      colours=C.CONDITION_COLORS, legend=False)
         ax.set_ylabel(G.metric_label('r2'))
         ax.set_xlabel(LEVEL_AXIS)
@@ -666,7 +692,9 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
             Whether the KIND of noise matters or only the amount, for
             {C.model_label(focus_model)} on {C.dataset_label(dataset)} at
             {C.rep_label(rep)}. One line per noise condition, same axes as the
-            previous figure. Lines that lie on top of each other mean this model
+            previous figure, each the median over the ten replicates. There are
+            no shaded ranges: six of them overlapping hid the lines, and the
+            spread across replicates is in T4. Lines that lie on top of each other mean this model
             cannot tell the noise conditions apart at a matched dose; lines that
             separate mean the shape of the noise costs something beyond its
             size. Censoring is absent: its level is a fraction of labels clipped
@@ -925,7 +953,7 @@ def r15_rank_against_level(accuracy, output_dir, rep, condition,
 # ---------------------------------------------------------------------------
 
 def r16_decoupling(summary, output_dir, rep, dataset='qm9',
-                   condition='gaussian'):
+                   condition='gaussian', conditions=None):
     """Is robustness decoupled from accuracy?
 
     Built the way `create_figure3` in the old script is: ONE full-width panel,
@@ -939,58 +967,81 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9',
     scores well by having less to lose. That is why the baseline is an axis and
     not a footnote.
     """
-    # ONE POINT PER MODEL. It used to draw one per model and NOISE CONDITION,
-    # and clean accuracy does not depend on the condition -- so each model came
-    # out as a vertical stack of identical markers at one x, which reads as
-    # duplicates (the author, 2026-09-14). Averaging the stack would average
-    # over a factor, so the figure holds ONE condition and names it.
+    # ONE POINT PER MODEL PER PANEL, AND ONE PANEL PER NOISE CONDITION. It used
+    # to draw every condition into ONE panel, and clean accuracy does not depend
+    # on the condition -- so each model came out as a vertical stack of
+    # identical markers at one x, which reads as duplicates (the author,
+    # 2026-09-14). Splitting them into panels keeps every point and lets the
+    # reader see whether the decoupling holds under each condition, which
+    # collapsing or averaging them both hide (the author, 2026-09-16).
+    shown = [c for c in (conditions or [condition])
+             if c in set(summary['condition'])]
+    shown = C.sort_conditions(shown) or [condition]
     frame = C.cross_model(
         summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)
-                & (summary['condition'] == condition)],
+                & (summary['condition'].isin(shown))],
         'R16')
     if not len(frame):
         return None
-    title = G.declare(frame, 'R16',
-                      fixed={'dataset': dataset, 'rep': rep,
-                             'condition': condition},
-                      varies=('model',))
+    title = G.declare(frame, 'R16', fixed={'dataset': dataset, 'rep': rep},
+                      varies=('model', 'condition'))
 
-    fig, ax = _fig(height=C.TEXTWIDTH_IN * 0.85)
-    for model in C.sort_models(frame['model'].unique()):
-        one = frame[frame['model'] == model]
-        ax.scatter(one['baseline_r2'], one['auc_norm'], s=50, alpha=0.7,
-                   color=C.model_color(model), marker=C.model_marker(model),
-                   label=C.model_label(model))
+    fig, axes = _fig(height=min(C.MAX_HEIGHT_IN, 3.6),
+                     ncols=len(shown), sharey=True)
+    axes = np.atleast_1d(axes).ravel()
+    models = C.sort_models(frame['model'].unique())
+    notes = []
+    for index, (ax, this) in enumerate(zip(axes, shown)):
+        panel = frame[frame['condition'] == this]
+        for model in models:
+            one = panel[panel['model'] == model]
+            if not len(one):
+                continue
+            ax.scatter(one['baseline_r2'], one['auc_norm'], s=50, alpha=0.75,
+                       color=C.model_color(model),
+                       marker=C.model_marker(model),
+                       linewidth=0.4, edgecolor='white',
+                       label=C.model_label(model) if index == 0 else None)
+        rho_here, p_here = (stats.spearmanr(panel['baseline_r2'],
+                                            panel['auc_norm'])
+                            if len(panel) >= 4 else (np.nan, np.nan))
+        notes.append(f'({"abcdef"[index]}) {C.condition_label(this)}: '
+                     f'rho {rho_here:.2f}'
+                     + ('' if not np.isfinite(p_here)
+                        else f', p {p_here:.2g}')
+                     + f', {len(panel)} models')
+        ax.margins(x=0.10)
+        ax.set_xlabel(f'Clean {G.metric_label("r2")}')
+        ax.spines[['top', 'right']].set_visible(False)
+        S.title(ax, 'abcdef'[index], C.condition_label(this))
+        if index == 0:
+            ax.set_ylabel(G.metric_label('auc_norm'))
 
-    # Padded to the data, so the spread fills the panel instead of being
-    # squeezed under a 1.0 reference line that is not there.
+    # Padded to the data, so the spread fills the panels instead of being
+    # squeezed under a 1.0 reference line that is not there. Shared, so the
+    # panels can be read against each other.
     values = frame['auc_norm'].dropna()
     if len(values):
-        pad = max((values.max() - values.min()) * 0.25, 0.02)
-        ax.set_ylim(values.min() - pad, values.max() + pad)
-    ax.margins(x=0.08)
+        pad = max((values.max() - values.min()) * 0.15, 0.02)
+        axes[0].set_ylim(values.min() - pad, values.max() + pad)
+    ax = axes[0]
     ax.set_xlabel(f'Clean {G.metric_label("r2")} (no noise added)')
     ax.set_ylabel(G.metric_label('auc_norm'))
-    S.title(ax, 'a', f'Clean accuracy against robustness — {title}')
-    ax.spines[['top', 'right']].set_visible(False)
-
-    pair = frame[['baseline_r2', 'auc_norm']].dropna()
-    if len(pair) >= 3:
-        rho, pval = stats.spearmanr(pair['baseline_r2'], pair['auc_norm'])
-        significance = 'n.s.' if pval >= 0.05 else f'p = {pval:.1e}'
-        S.stat_box(ax, f'Spearman ρ = {rho:.2f} ({significance}), '
-                       f'{len(pair)} cells')
-
-    S.shared_legend(fig, ax, ncol=4)
+    fig.suptitle(f'Clean accuracy against robustness — {title}',
+                 fontweight='bold', fontsize=9, x=0.01, ha='left')
+    # NOTHING WRITTEN OVER THE POINTS. The correlations are in the caption, one
+    # per panel, where they can be read without covering the data.
+    S.shared_legend(fig, axes[0], ncol=4)
     caption('R16', f"""
-        Clean accuracy against robustness on {title}, one point per model and
-        noise condition. Marker shape is the model; variants of one family share
-        a colour on purpose, so the shape is what tells them apart and it
-        survives greyscale printing. Read this beside the clean-accuracy axis
-        rather than alone: the robustness metric divides the clean baseline out
-        by construction, so a model with a weak baseline scores well by having
-        less to lose, and part of any apparent decoupling is arithmetic rather
-        than a finding.""")
+        Clean accuracy against robustness on {title}, one panel per noise
+        condition and one point per model in each. Bottom axis: R2 with no noise
+        added. Side axis: the share of that accuracy the model keeps as noise
+        rises, on one scale across the panels. Marker shape is the model.
+        Correlation between the two axes, panel by panel: {'; '.join(notes)}.
+        Read this beside the clean-accuracy axis rather than alone: the
+        robustness metric divides the clean baseline out by construction, so a
+        model with a weak baseline scores well by having less to lose, and part
+        of any apparent decoupling is arithmetic rather than a finding.""")
     return S.save(fig, Path(output_dir) / f'R16_decoupling_{rep}.png')
 
 
@@ -1540,8 +1591,7 @@ def f9_uncertainty_finds_noise(q4, output_dir, rep, condition, dataset='qm9',
     ax.set_xticks(x)
     ax.set_xticklabels([C.model_label(m) for m in per['model']], rotation=35,
                        ha='right', fontsize=8)
-    ax.set_ylabel('Correlation between predicted uncertainty\n'
-                  'and the amount of noise in the label')
+    ax.set_ylabel('Correlation between estimated\nuncertainty and label noise')
     ax.set_title(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
                  f'{C.condition_label(condition)}, noise level {sigma}',
                  fontweight='bold', fontsize=9, loc='left')

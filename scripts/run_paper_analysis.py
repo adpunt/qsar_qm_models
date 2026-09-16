@@ -411,7 +411,8 @@ def draw_figures(args, tables, verdicts):
                                      excluded=tables.get('excluded_qm9')))
         drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
                                                 'gaussian'))
-        drawn.append(FIG.r16_decoupling(qm9, out, rep))
+        drawn.append(FIG.r16_decoupling(qm9, out, rep,
+                                        conditions=conditions))
     if assay is not None and len(assay) and rep:
         drawn.append(FIG.f8_assay(assay, out, rep,
                                   excluded=tables.get('excluded_assay')))

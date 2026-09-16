@@ -20397,6 +20397,199 @@ rather than on the name, so the code is right and only the comments are stale.
 Introduction. The nine-defect handoff below them is closed and kept for its line numbers.
 
 
+### 14.17 WHAT EACH NOISE CONDITION BOUGHT — measured, 2026-09-16
+
+What the noise IS lives in `NOISE_DESIGN.md` §2 and §3; this is what it produced. Every number
+here comes from `results/decisions_arc/`, which is the 14 September harvest of the whole grid.
+
+#### 14.17a The axis is independence and zero mean, not Gaussianity
+
+Median change in AUC_norm against Gaussian, at a matched delivered dose, over the
+model-and-representation pairs that ran all six dose-matched conditions:
+
+| | QM9 (21 pairs) | logD (18) | Caco-2 (18) | hERG (17) |
+|---|---|---|---|---|
+| Laplace | +0.000 | +0.006 | +0.023 | +0.016 |
+| Student-*t* (ν=5) | +0.002 | +0.003 | +0.009 | −0.011 |
+| Outlier (10%) | +0.002 | +0.006 | +0.013 | −0.015 |
+| Grouped, wider | +0.002 | +0.011 | +0.018 | +0.005 |
+| **Grouped, shifted** | **−0.032** | **−0.042** | **−0.105** | **−0.094** |
+
+Censoring is off this axis and is worse than all of them — median AUC_norm 0.813 on QM9, 0.826 on
+logD, 0.555 on hERG, 0.459 on Caco-2, against 0.93, 0.87, 0.84 and 0.82 under Gaussian.
+
+**So five of the seven conditions do the same thing and two do not.** Changing the shape of one
+draw costs nothing measurable; changing the width by scaffold group costs nothing measurable;
+correlating the errors within a group costs real accuracy, and biasing them costs more. The
+mechanism is in `NOISE_DESIGN.md` §5.1e: `grouped_wider`'s group share is 0.108, below Gaussian's
+0.136, so it is structured without being correlated. **The paper's claim is therefore about
+independence and zero mean, not about Gaussianity**, and it is stronger for it — the two
+assumptions that fail are the two nobody tests.
+
+The effect is LARGER on the assay datasets than on QM9 (−0.042 to −0.105 against −0.032), which is
+the direction that matters: the mechanism costs more where the labels are real.
+
+#### 14.17b Model choice decides the penalty; representation does not
+
+Median grouped-shifted penalty, over all four datasets and all representations:
+
+| | range | spread |
+|---|---|---|
+| by model (19 models) | −0.101 (GP, RBF) to +0.025 (VBLL-α het.) | **0.13** |
+| by representation (6) | −0.056 (Avalon) to −0.043 (ChemBERTa) | **0.013** |
+
+A factor of ten. This is the ANOVA's finding (§14.16, and `anova_eta2.csv`: model 49.5% against
+representation 9.2% for robustness) arriving by an independent route, and it is worth saying twice
+in the paper because the two are different evidence for one claim.
+
+**The Gaussian process is the model correlated noise hurts most, on every dataset.**
+
+| model | Caco-2 | hERG | logD | QM9 | all | clean R² |
+|---|---|---|---|---|---|---|
+| GP (RBF) | −0.153 | −0.132 | −0.091 | −0.043 | **−0.101** | 0.70 |
+| GP (het.) | −0.129 | −0.137 | −0.077 | −0.041 | −0.090 | 0.71 |
+| GP (Tanimoto) | −0.074 | −0.101 | −0.068 | −0.039 | −0.071 | 0.70 |
+| QRF | −0.172 | −0.102 | −0.040 | −0.030 | −0.067 | 0.56 |
+| SVM | −0.118 | −0.068 | −0.033 | −0.039 | −0.057 | 0.66 |
+| NGBoost | −0.062 | −0.097 | −0.037 | −0.040 | −0.051 | 0.49 |
+| RF | −0.085 | −0.077 | −0.039 | −0.025 | **−0.045** | 0.56 |
+
+It is not a floor artefact: the Gaussian process has one of the highest clean R² on the roster and
+still loses most, and the forests have lower baselines and lose least. A reading is available and
+should be offered as a reading rather than a demonstration — a kernel that assumes structurally
+similar molecules have similar labels will absorb a scaffold-shared offset into its mean function
+instead of treating it as noise, which is exactly the assumption `grouped_shifted` violates.
+
+🔴 **TWO THINGS THAT MUST NOT BE PUBLISHED FROM THIS TABLE.**
+
+1. **The variational networks are not immune.** VBLL-α (het.) at +0.025 and VBLL-β (het.) at +0.014
+   look like the finding and are not: they are inconsistent across datasets (`mlp_vbll` is −0.153 on
+   hERG and +0.043 on logD) and they carry the lowest clean R² on the roster, 0.42–0.53, which is
+   the accuracy floor of §14.15f. Do not rank them here.
+2. **GP (het.) on QM9 is the model with the pre-fix/post-fix hazard** (§14.16). Its QM9 column above
+   is the one number in this table that may be an artefact of which code fitted it. The RBF Gaussian
+   process carries the claim; the heteroscedastic one only agrees with it.
+
+#### 14.17c Censoring — what may and may not be claimed
+
+`noise_conditions.json` says it in the scope field and it holds: censoring ran on five named pairs,
+**so no claim about WHICH model resists censoring best can rest on this run**, and the data agrees —
+the ordering flips between datasets (RF is worst on Caco-2 at 0.459 and best on QM9 at 0.817).
+
+What IS claimable is the dataset effect, and it is large: logD 0.83, QM9 0.81, hERG 0.56,
+Caco-2 0.46. Clipping a fixed fraction of labels costs most where the model had least signal to
+begin with — the ordering follows both the clean R² and the label spread, and the two are
+confounded here, so say what it tracks rather than why.
+
+#### 14.17d The uncertainty result has the same two conditions in it
+
+Cells clearing their permutation band on `rho_ratio` (`uncertainty_pairs.csv`; the null permutes the
+injected noise AND recomputes the error from the permuted value, so the trivial error–noise link is
+inside the null and clearing the band means the uncertainty contributed something):
+
+| Condition | clears / run |
+|---|---|
+| **Censoring** | **176 / 180** |
+| Grouped, shifted | 58 / 468 |
+| Grouped, wider | 17 / 468 |
+| Gaussian | 7 / 468 |
+| Laplace | 1 / 216 |
+| Outlier (10%) | 1 / 216 |
+| Student-*t* (ν=5) | 0 / 216 |
+
+By model under grouped-shifted: GP (RBF) 14 of 72, NGBoost 13 of 72, BNN-α (var. head) 11 of 72,
+QRF 8, VBLL-α 6, GP (het.) 0 of 36. Representation does not decide it — on QM9, PDV 13 of 36,
+ChemBERTa 11, ECFP4 9; on the assay side ChemBERTa 12 of 120, ECFP4 7, PDV 6.
+
+**Two readings, and the second is the paper's.** The models that find corrupted labels are the ones
+that fit a separate scale or observation-noise parameter during training, which is what the
+submitted paper already says. And **under the noise model everyone else uses, nothing finds
+anything** — 7 of 468 cells under Gaussian, against 176 of 180 under censoring. A study that
+modelled its label noise as Gaussian would have concluded that uncertainty estimates cannot identify
+bad labels, and that conclusion would be an artefact of its noise model. That is the same mechanism
+as §14.17a seen from the other side: the two conditions that cost the most accuracy are the two
+where a model's own uncertainty earns its keep.
+
+⚠️ Note for whoever writes this up: the four uniform-targeting conditions give every molecule the
+same noise SCALE, so "which molecules are unreliable" is undefined there rather than answered
+negatively (`NOISE_DESIGN.md` §2, `_CONSTANT_SCALE_STRATEGIES`). `grouped_shifted` is also flat in
+scale — what varies by group is DIRECTION. So the near-zero counts under Laplace and Student-*t* are
+partly by construction, and `outlier_p10` at 1 of 216 is the one uniform-shape row that is a genuine
+null. State that, or a referee will.
+
+---
+
+### 14.18 NOISEINJECT — THE PACKAGE AUDIT, 2026-09-16
+
+Read in `~/repos/NoiseInject` at `6d17350`. The paper ships this package (`M7`, and paper.tex
+364–373), so what it can and cannot claim is a run-plan decision, not a packaging one.
+
+#### 14.18a The regression half ships as it stands
+
+Five targetings by three shapes, dose-matched in closed form, `inject_verbose` returning the
+per-record noise with its provenance, a delivered-amount check against a derived tolerance band, and
+about thirty tests. It is ahead of anything it would be compared against and the dose matching is
+the contribution. Nothing to do.
+
+#### 14.18b 🔴 The classification half has the defect the regression half was rebuilt to remove
+
+It has not been touched since 1.0.0. **The six strategies are not rate-matched**, so comparing them
+at one nominal `flip_probability` compares amount and not pattern — which is precisely the fault
+that condemned the six retired regression strategies. Measured on balanced binary labels at
+`flip_probability = 0.2`:
+
+| strategy | effective flip rate delivered |
+|---|---|
+| `class_dependent` | 0.356 |
+| `instance_noise` | 0.219 |
+| `uniform` | 0.200 |
+| `class_imbalance` | 0.087 |
+
+A 4× spread, against the 0.49–2.00× spread that retired the old regression set.
+`calibrate_flip_probability` exists but is an opt-in separate call, and the package's own README
+Quick Start calibrates once for `uniform` and then applies that number across the sweep.
+
+🔴 **AND FOUR OF THE SIX INVENT CLASS LABELS.** `_uniform`, `_class_imbalance`, `_instance_noise` and
+`_class_dependent` all build their replacement set as
+`[c for c in range(n_classes) if c != true_class]`, which assumes the labels are `0 … k−1`.
+Measured on labels `{3, 7}`:
+
+| strategy | input classes | output classes |
+|---|---|---|
+| `uniform` | 3, 7 | 0, 1, 3, 7 |
+| `instance_noise` | 3, 7 | 0, 1, 3, 7 |
+| `class_imbalance` | 3, 7 | 0, 1, 3, 7 |
+| `class_dependent` | 3, 7 | **0, 1** — every label wrong |
+| `binary_asymmetric` | 3, 7 | 3, 7 ✓ |
+| `confusion_directed` | 3, 7 | 3, 7 ✓ |
+
+Binary `0/1` data is unaffected, which is why it has never surfaced. The two correct ones use
+`np.unique`. **Four one-line changes, and the package carries a DOI, so fix it either way.**
+
+Test coverage is 3 classification tests against about 30 regression ones, and it exercises 2 of the
+6 strategies: nothing touches `class_imbalance`, `instance_noise`, `class_dependent` or
+`confusion_directed`.
+
+#### 14.18c The decision, and it is the author's
+
+Either give classification the rate-matching, the provenance and the tests the regression half has
+and claim both halves; **or** ship classification explicitly as unvalidated and say so in the README
+and in the paper. What must not stand is `paper.tex:352`, which says the classification strategies
+"mirror the regression set" — they mirror the **retired** six, including the defect that retired
+them. `PAPER_REVISION_GUIDE_FINAL.md` §M7 already carries a replacement sentence; it needs widening
+to say which half of the package was benchmarked.
+
+#### 14.18d Two smaller things in the package
+
+- The README's regression Quick Start still prints `weibull_beta_r2`, and `metrics.py` still computes
+  Weibull β and τ. The metric is retired from this study (§14.1) though it remains a package feature;
+  the Quick Start should not lead with a metric the paper does not use.
+- `calculate_uncertainty_metrics` still computes ECE, which was removed from this study on
+  2026-08-19. Same resolution: a package feature the study does not report, and the paper's framework
+  sentence should not list it among what was benchmarked (`M7`, first bullet).
+
+---
+
 ### 14.15 THE RECORD, CORRECTED — 2026-09-14
 
 **Read this before any earlier §14.11 subsection.** This chat reached several conclusions and then
@@ -20571,3 +20764,121 @@ paper's title asks — whether a model's own uncertainty finds the corrupted lab
 currently an Additional file. **Recommended swap: F9 into the main text, F4b out of it.** F4b's
 finding is "grouped-shifted costs every model and the other conditions cost nothing measurable",
 which is 14 out of 14 and reads as a sentence beside T4. The author's call.
+
+#### 14.20 THE PHRASING LIST IS NOW IN THE HANDOFFS — 2026-09-16
+
+`~/Documents/ai_phrasing.rtf` is the author's own record of the AI-sounding constructions she took
+out of the paper: "indicates that", "suggests that", "demonstrates that", "emerged as", "warranted
+investigation", "The critical insight is", "Several avenues emerge", "providing actionable guidance".
+It was written 2025-12-09 and nothing in the repository pointed at it.
+
+**It is now quoted in all three Voice sections of `HANDOFF.md`** — Methods, Results, Introduction —
+so the three chats writing replacement text see it before they draft.
+
+**One instruction was reversed by it.** The Results Voice section told the next chat to open the
+second sentence of a pair with *"This suggests that"*, *"This translates to"*, *"This decoupling
+indicates"* or *"It appears that"*, quoting them from `paper.tex` as a model to copy. Those are the
+constructions the list bans. The bullet now says the second sentence states the consequence without
+announcing that it is doing so.
+
+**Eight lines of `paper.tex` still carry one**: 264, 380, 383, 433, 460, 462, 493, 540. Nothing was
+changed there — `paper.tex` is a read-only download. The handoffs tell the drafting chats to copy her
+sentence shape from those lines and not the connector. Whether the eight get replacement text in
+`PAPER_REVISION_GUIDE_FINAL.md` is the author's call; four of them (433, 460, 462, 493) are in the
+Results section that is being rewritten anyway.
+
+#### 14.21 THE METHODS WERE RE-AUDITED FROM THE CODE — 2026-09-16
+
+The third pass of 16 September read the code against the Methods drafts and concluded that four sentences
+change. The author rejected that. A fourth pass re-read the code with the drafts withheld: twenty-two
+agents, nine reading one topic each from `paper.tex`, this repository, the KIRBy checkout and the
+NoiseInject package, nine more trying to refute what the first nine found, three reading the reference
+papers in `~/Documents/ReferencePapers/`, and one asking what was missed.
+
+**90 distinct contradictions between the current Methods and the code**, against the third pass's four.
+Also 133 things the code does that the Methods never says, 32 passages to cut or move, and 50 differences
+between the QM9 pipeline and the assay pipeline where M0 lists twelve. 244 of 255 claims survived a second
+independent reading; the 11 that did not are recorded rather than acted on.
+
+**The findings are in `PAPER_REVISION_GUIDE_FINAL.md`, "The fourth pass", §4.1 to §4.10.** They are not in
+this file, because they are paper text rather than what gets run. The third pass above them now carries a
+note saying it is superseded where the two collide.
+
+**One correction that belongs here, because it is about what ran.** `results/decisions_arc/d0_coverage.csv`
+was read by hand: every dataset carries all seven noise conditions, and not at the same breadth. Gaussian,
+grouped-wider and grouped-shifted run 109 model-and-representation pairs on all four datasets. Laplace,
+outlier and Student-*t* run 24 pairs on QM9, 19 on LogD, 18 on Caco-2 and 18 on hERG. Censoring runs 5
+pairs on all four. Anything in this plan saying the assay datasets carry three of the seven is wrong, and
+so is anything saying they carry the identical shape QM9 carries.
+
+**Open, and the author's call:** the five decisions in `PAPER_REVISION_GUIDE_FINAL.md` §4.10, of which the
+one with a compute cost is whether the NN-$\alpha$ hyperparameter sweep is re-run so that both base networks
+are searched over the same parameters.
+
+#### 14.20 FIGURE WORK — 2026-09-16, the author's review
+
+**Done.**
+
+| slot | change |
+|---|---|
+| F4a | **two panels, ECFP4 and PDV, shared side axis.** How far a model falls is a property of the pairing, not the model; NGBoost's curve is the flattest on both and starts far lower on ECFP4. `second_rep='pdv'` |
+| F4b | shaded ranges removed — six overlapping bands hid the lines they belonged to. The spread is in T4 |
+| conditions | **Outlier moves from `#E91E63` to `#1F4E9C`.** It was a pink-red beside Gaussian's red and the two could not be told apart on a line chart |
+| F9 | side-axis label is now "Correlation between estimated uncertainty and label noise" |
+| R9 | points at alpha 0.62 with a dark edge, so an overlap reads as a darker patch rather than one dot hiding another |
+| every shared legend | **ordered by model family**, not by plotting order. A chart that orders its lines by rank scattered the families through the key. `shared_legend(group_by_family=True)` |
+| R16 | **one panel per noise condition**, one point per model in each, shared side axis, correlations moved out of the panel and into the caption |
+
+**R19 and the deep run — status for whoever submits, read 2026-09-16 off `d0_coverage.csv`.**
+
+All three deep conditions (Laplace, Outlier, Student-t) are identical on QM9:
+
+- 24 model-and-representation combinations present — 8 models across ECFP4, PDV and ChemBERTa
+- 19–20 of 24 complete
+- **3 of 24 have no level-0 run** (`NO_CLEAN_BASELINE`)
+- **1–2 of 24 are missing levels** (`PARTIAL_LEVELS`)
+
+**Nothing has failed. About 12 tasks remain across the three conditions**, named in
+`what_is_missing.csv` with `runnable=yes`.
+
+⚠️ **R19 is thinner than it looks.** Four of the deep run's eight models are the variants
+(§14.11k), so after filtering R19 draws **4 base models — RF, SVM, NGBoost, GP**. Whether that earns
+a figure or becomes a table is the author's call.
+
+#### 14.21 THE HEATMAP COLOUR SCALE — OPEN, needs the author
+
+**The problem, measured.** `AUC_RANGE` is (0.4, 1.0). On QM9 with base models and the three main
+conditions, AUC_norm runs **0.838 to 0.983** — every cell sits in the top quarter of the scale, so
+F3, F4c and R6 are one shade of green. On the assay datasets the same quantity runs **0.489 to
+1.134** and genuinely needs the wide range.
+
+One scale cannot serve both. The options:
+
+| | what it gives | what it costs |
+|---|---|---|
+| **two ranges, one per dataset family** (recommended) — QM9 figures on 0.83–1.00, assay figures on 0.48–1.00, each colour bar labelled | QM9 differences become visible; panels within a figure stay comparable; all QM9 figures stay comparable with each other | a QM9 cell's colour can no longer be compared with an assay cell's |
+| one range for everything, narrowed to 0.48–1.00 | keeps cross-dataset colour comparison | QM9 still occupies the top half and stays hard to read |
+| rank or percentile colouring | maximum contrast everywhere | breaks the rule that the same colour means the same number, which is why the fixed anchors exist |
+
+The cross-dataset colour comparison the first option costs was never meaningful: the datasets have
+different clean accuracy and different spreads, and no sentence in the paper makes that comparison.
+**NOT IMPLEMENTED — the author asked to discuss it first.**
+
+#### 14.22 F9 — OPEN, needs the author
+
+What it shows: for each model, whether the uncertainty it reports points at the molecules whose
+labels were corrupted. One bar per model, the correlation between predicted uncertainty and the size
+of the injected noise, and a grey block behind each bar showing the range that statistic takes when
+the noise is shuffled. A bar clearing its block found something the model's own error does not
+already tell you.
+
+If that is still not a clear story the alternative is to cut F9 and let T6 carry the finding as
+numbers — at which point the paper has **no figure for the question its title asks**, which is why
+F9 was built. **The author's call.**
+
+#### 14.23 R15's NOISE CONDITION — answered
+
+Not chosen. R15 writes one file per condition in the list D2 returns, which is currently Gaussian and
+Grouped-shifted, so both files exist and only one was being read. If they should sit side by side in
+one figure rather than as two files, that is the same panelling R16 now has and is a small change.
+**Open, and only if the author wants it.**
