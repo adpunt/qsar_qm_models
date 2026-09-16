@@ -569,16 +569,16 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
             if got:
                 drawn.append(got)
                 break          # one condition is the headline; the rest are T6
-    # F9: can the uncertainty find the corrupted labels. One bar per model
-    # against its permutation band. Replaces F7 (the author, 2026-09-13/14) and
-    # is the picture of the paper's own headline question.
-    q4 = tables.get('d7_q4')
-    if q4 is not None and len(q4):
-        for condition in (conditions or [first]):
-            got = FIG.f9_uncertainty_finds_noise(q4, out, rep, condition)
-            if got:
-                drawn.append(got)
-                break
+    # F9 IS CUT -- the author, 2026-09-16. It drew one bar per model for the
+    # correlation between predicted uncertainty and the size of the injected
+    # noise, against a permutation band. T6 carries the same numbers with their
+    # bands, and a bar chart of a correlation was not telling the story any
+    # better than the table. `f9_uncertainty_finds_noise` stays in
+    # figlib_figures unused, as F7's builders do.
+    #
+    # ⚠️ The uncertainty side of the paper is now ONE figure (F6) and ONE table
+    # (T6), and the paper's title is about uncertainty. Recorded in
+    # RERUN_PLAN.md 14.22.
 
     said_d7 = said.get('D7', {})
     if said_d7.get('fired'):

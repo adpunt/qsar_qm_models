@@ -502,7 +502,7 @@ def f3_model_by_representation(summary, output_dir, conditions,
     reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
     shown = [c for c in C.sort_conditions(frame['condition'].unique())]
 
-    lo, hi = C.AUC_RANGE_QM9
+    lo, hi = C.auc_range(dataset)
     caption('F3', f"""
         Robustness ({G.metric_label(value)}) of every model on every
         representation, one panel per noise condition, on
@@ -510,7 +510,11 @@ def f3_model_by_representation(summary, output_dir, conditions,
         are representations. Which conditions appear is decided from the data:
         conditions whose grids repeat another's are held back to an additional
         file, because showing both is showing one thing twice. Colour is on one
-        fixed range across panels. Grey cells were never run.""")
+        fixed range across the panels, printed on the colour bar; the range is
+        narrower than the metric's full span because every value on this dataset
+        falls inside it, and a scale wider than the data paints every cell the
+        same shade. A grey cell marked "not run" was never fitted; one marked
+        "excluded" ran and was dropped.""")
 
     layout = panel_layout(len(shown), len(models), len(reps), 'F3')
     if layout == 'stacked':
@@ -529,7 +533,7 @@ def f3_model_by_representation(summary, output_dir, conditions,
         S.title(ax, 'abcdefg'[index], C.condition_label(condition))
     if image is not None:
         bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(G.metric_label(value), fontsize=8)
+        bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
         bar.ax.tick_params(labelsize=7)
     return S.save(fig, Path(output_dir) / 'F3_model_by_representation.png')
 
@@ -717,9 +721,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                      ignore_index=True)
     dropped = _excluded_keys(excluded, ('model', 'condition'),
                              dataset=dataset, rep=rep)
+    lo, hi = C.auc_range(dataset)
     fig, ax = _fig(height=C.grid_height(len(order)))
     image, _ = S.grid(ax, both, 'model', 'condition', 'auc_norm',
-                      vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1],
+                      vmin=lo, vmax=hi,
                       excluded=dropped,
                       row_order=order, separate_first_column=True,
                       column_order=['clean'] + C.sort_conditions(
@@ -727,7 +732,8 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                       column_labeller=lambda c: ('Clean R²' if c == 'clean'
                                                  else C.condition_label(c)))
     bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
-    bar.set_label(G.metric_label('auc_norm'), fontsize=8)
+    bar.set_label(f'{G.metric_label("auc_norm")}  ({lo:g}\u2013{hi:g})',
+                  fontsize=8)
     bar.ax.tick_params(labelsize=7)
     ax.set_title(f'Robustness by model and noise condition — '
                  f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
@@ -788,7 +794,10 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
         {G.metric_label('r2')} and is deliberately uncoloured: it is the
         quantity the others are a fraction of, not a measurement on the same
         scale. Colour is on one fixed range across all panels so they can be
-        compared directly. A grey cell marked "not run" is a combination that
+        compared directly, printed on the colour bar. The assay datasets and QM9
+        use different ranges because their robustness spans differ by a factor
+        of three; panels within a figure and figures on the same datasets are
+        directly comparable, a QM9 cell and an assay cell are not. A grey cell marked "not run" is a combination that
         was never fitted; one marked "excluded" ran and was then dropped, with
         the reason in the excluded table. There are no error bars:
         one fit per cell with the seed pinned, and the five scaffold folds are a
@@ -846,7 +855,7 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
                 ax.set_title(name, fontweight='bold', fontsize=9, loc='left')
         if image is not None:
             bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-            bar.set_label(G.metric_label(value), fontsize=8)
+            bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
             bar.ax.tick_params(labelsize=7)
         suffix = f'_{group[0]}' if layout == 'split' else ''
         written.append(S.save(
@@ -1492,10 +1501,10 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
         marked = set(map(tuple, flagged[['model', 'rep']].to_numpy()))
 
     fig, ax = _fig(height=C.grid_height(len(models)))
+    lo, hi = C.auc_range(dataset)
     image, table = S.grid(ax, frame, 'model', 'rep', value,
                           row_order=models, column_order=reps,
-                          column_labeller=C.rep_label,
-                          vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1])
+                          column_labeller=C.rep_label, vmin=lo, vmax=hi)
     # The outline is the point of the figure: one cell of a model's row that its
     # other representations do not reach.
     import matplotlib.patches as mpatches
@@ -1509,7 +1518,7 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
                 linewidth=2.0, zorder=4))
             drawn += 1
     bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
-    bar.set_label(G.metric_label(value), fontsize=8)
+    bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
     bar.ax.tick_params(labelsize=7)
     ax.set_title(f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
                  fontweight='bold', fontsize=9, loc='left')
@@ -1842,6 +1851,7 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
     G.declare(frame, 'R19', fixed={'dataset': dataset},
               varies=('model', 'rep', 'condition'))
 
+    lo, hi = C.auc_range(dataset)
     fig, axes = _fig(height=C.grid_height(len(models), len(reps)),
                      nrows=len(reps), sharex=True)
     axes = np.atleast_1d(axes).ravel()
@@ -1852,11 +1862,11 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
                           row_order=models,
                           column_order=[c for c in show
                                         if c in set(panel['condition'])],
-                          vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1])
+                          vmin=lo, vmax=hi)
         S.title(ax, 'abcdef'[index], C.rep_label(rep))
     if image is not None:
         bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(G.metric_label(value), fontsize=8)
+        bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
         bar.ax.tick_params(labelsize=7)
 
     named = ', '.join(C.condition_label(c) for c in show if c != 'gaussian')

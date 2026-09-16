@@ -20882,3 +20882,57 @@ Not chosen. R15 writes one file per condition in the list D2 returns, which is c
 Grouped-shifted, so both files exist and only one was being read. If they should sit side by side in
 one figure rather than as two files, that is the same panelling R16 now has and is a small change.
 **Open, and only if the author wants it.**
+
+#### 14.24 THE HEATMAP SCALE — SETTLED 2026-09-16, and F9 IS CUT
+
+**Two colour ranges, one per dataset family** (the author's call on the §14.21 recommendation).
+
+```
+AUC_RANGE_QM9   = (0.83, 1.0)     F3, F4c, R6, R19
+AUC_RANGE_ASSAY = (0.48, 1.0)     F8
+```
+
+`figlib_config.auc_range(dataset)` returns the right one so no call site has to remember, and
+**every colour bar now prints its own range** beside the metric name.
+
+What it does, measured on the run of 2026-09-14 with base models and the three main conditions:
+
+| | data | fills, before | fills, now | clipped |
+|---|---|---|---|---|
+| QM9 | 0.838 – 0.983 | 24% of the 0.4–1.0 scale | **85%** | none |
+| assay | 0.489 – 1.134 | 108% | 124% | 11 cells above 1.0 |
+
+The top stays at 1.0 on both, because 1.0 means "kept all of it" and is an anchor a reader can name.
+The 11 assay cells above it saturate, and `grid()` prints how many and how far — those are the
+small-denominator cells of §14.15f, and saturating them is the honest treatment.
+
+**What this keeps:** panels within a figure share a scale, and every figure on the same dataset
+family shares one. **What it gives up:** comparing a QM9 cell's colour with an assay cell's. No
+sentence in the paper makes that comparison and the two families have different clean accuracy and
+different spreads.
+
+**F9 IS CUT** (the author, 2026-09-16). T6 carries the numbers with their permutation bands.
+`f9_uncertainty_finds_noise` stays in `figlib_figures.py` unused, as F7's builders do.
+
+⚠️ **CONSEQUENCE, AND IT IS A REAL ONE.** The uncertainty side of this paper is now **one figure (F6)
+and one table (T6)**, and the paper's title is about uncertainty. D7 fires — the uncertainty finds
+clipped labels better than the error alone, outside the permutation band — and that result now
+appears only as rows in a 292-row table. The Results text has to carry it in prose, from
+`notes_for_the_text.md` and T6.
+
+**R15 needs nothing.** It already writes one file per condition D2 returns, so Gaussian and
+Grouped-shifted both exist; only one was being read.
+
+#### 14.25 THE FIGURE LIST, AS IT NOW STANDS — 2026-09-16
+
+**PAPER — 7 figures:** F1, F2, F3, F4a, F6, F8, R17.
+**PAPER — 4 tables:** T1, T2, T4 (at ECFP4), T6.
+
+**ADDITIONAL FILES — 7 figures:** F4b, F4c, R6, R9, R15, R18, R19.
+**ADDITIONAL FILES — 4 tables:** T3, T5, T7, T8.
+
+**CUT:** F7 (2026-09-13), F9 (2026-09-16), R10 and R15b (both are sentences, §L1 of the revision
+guide).
+
+14 slots. More PNG files than that appear on disk because F8 writes one per dataset and R6, R15 and
+R18 write one per condition or representation pair.

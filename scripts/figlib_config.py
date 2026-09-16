@@ -310,9 +310,32 @@ CONDITION_LABELS = {
 #:
 #: A value outside the range is CLIPPED AND COUNTED, never silently flattened;
 #: shapes.grid says how many and by how much.
-AUC_RANGE = (0.4, 1.0)
-AUC_RANGE_QM9 = AUC_RANGE
-AUC_RANGE_ASSAY = AUC_RANGE
+#: TWO COLOUR RANGES, ONE PER DATASET FAMILY. The author's call, 2026-09-16.
+#:
+#: One range cannot serve both. Measured on the run of 2026-09-14, base models,
+#: the three main conditions: AUC_norm runs 0.838 to 0.983 on QM9 and 0.489 to
+#: 1.134 on the three assay datasets. Under a single 0.4-1.0 scale every QM9
+#: cell sat in the top quarter and F3, F4c and R6 were one shade of green.
+#:
+#: What this keeps: panels within a figure share a scale, and every figure on
+#: the same dataset family shares a scale, so the comparisons the paper actually
+#: makes are all still colour comparisons. What it gives up: comparing a QM9
+#: cell's colour against an assay cell's. No sentence in the paper makes that
+#: comparison, and the two families have different clean accuracy and different
+#: spreads, so the comparison was never meaningful.
+#:
+#: The top stays at 1.0 on both because 1.0 means "kept all of it", which is the
+#: anchor a reader can name. Assay cells above 1.0 saturate, and `grid()` says
+#: how many and how far -- those are the small-denominator cells (14.15f).
+AUC_RANGE = (0.4, 1.0)          # the generic default, for anything unlabelled
+AUC_RANGE_QM9 = (0.83, 1.0)
+AUC_RANGE_ASSAY = (0.48, 1.0)
+
+
+def auc_range(dataset):
+    """The colour range for a dataset, so no call site has to remember."""
+    return AUC_RANGE_QM9 if canonical_dataset(dataset) == 'qm9' \
+        else AUC_RANGE_ASSAY
 
 #: Grey, not black and not the darkest end of the colour map. A missing cell
 #: rendered in the map's own dark end reads as a very low value.
