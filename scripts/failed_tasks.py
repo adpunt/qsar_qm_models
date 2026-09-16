@@ -445,6 +445,27 @@ def main():
               f"resend as-is, and\n  the ones fixed in this checkout. Paths are "
               f"relative to the repository root.\n  Regenerate the scripts first if "
               f"the fix was in the generator.")
+        # A FAILURE IS NOT A GAP. THIS TOOL CANNOT TELL THE DIFFERENCE.
+        #
+        # Everything here comes from sacct, which records that a task exited
+        # non-zero. It says nothing about whether the cells that task lost are on
+        # disk now -- and they often are, because a later submission covered them.
+        # On 2026-09-16 this printed 20 lines, about 60 tasks, for the Sort & Slice
+        # zero-vector crash and the Gaussian-process subsample mismatch. Every one
+        # of those cells had landed: `check_runs_landed --stage 1` reported QM9 at
+        # 332 of 332 with nothing missing, partial or thin, and a direct count over
+        # results/anova_*_sns_*.csv found 378 cells and not one under 9 replicates.
+        # Pasting them would have recomputed rows that exist and added to the 11,935
+        # duplicate rows the figure loader is already resolving by median.
+        print("\n  BEFORE PASTING ANY OF THESE, CHECK THEY ARE STILL MISSING.\n"
+              "  Every line below comes from sacct -- a task that exited non-zero,\n"
+              "  possibly weeks ago. It does NOT mean the cell is absent today; a\n"
+              "  later submission may have covered it, and resubmitting then writes\n"
+              "  a duplicate row rather than a missing one.\n"
+              "      python scripts/check_runs_landed.py --stage 1 --verbose\n"
+              "      python scripts/check_runs_landed.py --stage 2 --verbose\n"
+              "  Resend a line only for a model that command still reports as\n"
+              "  MISSING, PARTIAL or THIN.")
         if cli.emit_sbatch:
             print()
             for line in lines:
