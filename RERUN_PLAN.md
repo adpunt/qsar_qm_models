@@ -20287,6 +20287,44 @@ Replaces the "surplus" arithmetic, which the author rejected.
 **`uncertainty_pairs`** — the same shape for the uncertainty side: per cell, the q4 statistic, the
 permutation band it is read against, and whether it cleared it.
 
+### 14.16 THE THIRD METHODS PASS — 2026-09-16
+
+The pipelines were re-read from the entry points down and checked against the Methods drafts in
+`PAPER_REVISION_GUIDE_FINAL.md`. The findings are in that file's **third pass** section, which is
+where they belong; this is the pointer and the two things that belong here rather than there.
+
+**One row of the two-pipelines table died, and it is a run fact rather than a writing one.** The
+guide's §M0 said QM9 ran seven noise conditions and the assay datasets three. `d0_coverage.csv` —
+built from the results files themselves — shows each of logD, Caco-2 and hERG carrying 18 cells each
+of Laplace, Outlier (10%) and Student-*t* and 5 censoring cells, the same shape QM9 carries. So the
+depth conditions are on all four datasets and Q2 is answerable everywhere. §M0 is twelve
+differences now, not thirteen. Anything in this plan that still says otherwise predates 12 September.
+
+**A hazard for every heteroscedastic Gaussian-process number on QM9.** Commit `83228f3` (13 September
+21:55) fixed `_fit_het_gp` to initialise its lengthscale from the data, and its own message records
+that *"1,717 rows already on disk are a different fit and are a resubmission"*. The analysis in
+`results/decisions_arc/` was harvested at 06:58 on 14 September, nine hours later, and
+`what_is_missing.csv` still lists `het_gp_rbf` cells as incomplete on the three depth conditions.
+That leaves QM9's GP-Hetero rows a probable mixture of pre-fix and post-fix fits, and the numbers
+behave like it: `d3_condition_spread.csv` gives `het_gp_rbf` the largest cross-condition spread of
+any model (0.126 against a replicate spread of 0.036), and in the matched-pair comparison it scores
+AUC_norm 0.905 under Gaussian and 0.975 under Laplace at ChemBERTa — a 0.07 gap no other model shows.
+**Establish from the job start times which rows were fitted on which code before quoting one.** The
+results row carries `spec_hash` and `gp_fit_method` and not the lengthscale, so this is a `sacct`
+question, not a CSV one.
+
+**Two stale comments, flagged so nobody writes a Methods sentence from them.**
+`scripts/process_and_train.py:141–143` and `models/model_defaults.py:448–450` both say `pdv` means
+the binarised descriptor vector on QM9. The binary form was deleted on 2026-08-28 and
+`continuous_pdv` was renamed to `pdv`; QM9 stores 200 RDKit descriptors as float32 and standardises
+them, so PDV is continuous on both pipelines. The standardisation rule is keyed on the features
+rather than on the name, so the code is right and only the comments are stale.
+`KIRBy/tests/alternative_data_noise_robustness.py:863` still credits QM9's split to DeepChem.
+
+**Two handoffs were written**, both at the top of `HANDOFF.md`: the Results section, and the
+Introduction. The nine-defect handoff below them is closed and kept for its line numbers.
+
+
 ### 14.15 THE RECORD, CORRECTED — 2026-09-14
 
 **Read this before any earlier §14.11 subsection.** This chat reached several conclusions and then
@@ -20404,3 +20442,60 @@ usable and let those three conditions rejoin D2 and the main grid.
 (clean R² and AUC_norm), the twelve best, **no score column** — the caption says how the order was
 reached and the number itself tells a reader nothing. Only pairings that ran on all four datasets
 appear, and any pairing exceeding AUC_norm 1 anywhere is excluded with the reason in the caption.
+
+#### 14.16 TWO FIGURE DIRECTORIES, AND THE STALE ONE IS THE TRAP — 2026-09-16
+
+The author reviewed figures that had every defect fixed a week earlier. The cause was two
+directories on the laptop:
+
+| directory | written | what it holds |
+|---|---|---|
+| `results/decisions/figures/` | 8–9 September | `F4_overview.png`, three separate `F8_assay_datasets_*.png`, GP (RBF), 19 models in every heatmap, grey cells throughout. **Predates every fix in §14.11 onward.** |
+| `results/decisions_arc/figures/` | 14 September | the current set |
+
+**Delete command, the author's to run** — nothing reads from it and the current set is elsewhere:
+
+```
+mv results/decisions/figures results/decisions/figures_SUPERSEDED_2026-09-09
+```
+
+**What the 14 September set actually shows**, checked by opening the images: F3 has 13 base models,
+one row labelled `GP`, no grey cells. R16 has 13 points, one per model. F8 has 13 base models and
+three conditions with no grey cells. F2's Gaussian residual is 21% for robustness and 30% for
+accuracy, and its key is at the bottom.
+
+#### 14.17 F8's LAYOUT, F1's PANEL TEXT — fixed 2026-09-16
+
+**F8 drew three panels side by side and the labels collided.** `panel_layout` tested column WIDTH
+only: three four-column grids gave 14 mm a column, which passed, and then "Grouped, shifted" rotated
+35 degrees swept out of its panel and under the next. It now takes `longest_label` and requires
+`max(12, characters × 1.6 × cos 35°)` mm a column, so three panels split into one file per dataset
+at full width and two panels still sit across.
+
+**F1** loses the "delivered 0.N" text from all seven panels — a dose check is not a property of the
+distribution, and it is in `F1_delivered_dose.csv` and one Methods sentence. **Censoring leaves panel
+h**: it has no variance parameter to dose-match, so its group share is not comparable with the
+others', and the caption says so. Panel h's side axis says "Share of the noise, 0 to 1" with ticks at
+0, 0.25, 0.5, 0.75, 1 rather than repeating its own title.
+
+**Panel h is working and it is the answer to "why do all the conditions look alike".** Grouped-shifted
+sits at 0.78 and every other condition between 0.11 and 0.14.
+
+#### 14.18 R16's DUPLICATE POINTS — answered, 2026-09-16
+
+Asked twice and not answered plainly, so: **R16 drew one point per model PER NOISE CONDITION.** Clean
+R² does not depend on the noise condition, so every model appeared as a vertical stack of identical
+markers at one x-position — three points where one belonged. Fixed 2026-09-14: it holds one condition,
+names it in the title, and draws one point per model. Averaging the stack would have averaged over a
+factor and the guard refuses it.
+
+#### 14.19 WHERE THE FIGURES GO — confirmed for the Results write-up, 2026-09-16
+
+**§14.12 stands.** Main text, seven figures: **F1, F4a, F2, F3, R17, F6, F8**. Main text, four tables:
+**T1, T2, T4 at ECFP4, T6**. Additional files: F4b, F4c, F9, R6, R9, R15, R18, R19, T3, T5, T7, T8.
+
+**One reconsideration since §14.12 was written.** F9 did not exist then. It answers the question the
+paper's title asks — whether a model's own uncertainty finds the corrupted labels — and it is
+currently an Additional file. **Recommended swap: F9 into the main text, F4b out of it.** F4b's
+finding is "grouped-shifted costs every model and the other conditions cost nothing measurable",
+which is 14 out of 14 and reads as a sentence beside T4. The author's call.

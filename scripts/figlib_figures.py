@@ -82,7 +82,8 @@ def write_captions(output_dir):
 MAX_COLUMNS_ACROSS = 14
 
 
-def panel_layout(n_panels, n_rows, n_columns_each, name):
+def panel_layout(n_panels, n_rows, n_columns_each, name,
+                 longest_label=0):
     """Stacked, side by side, or one file each -- decided, not guessed.
 
     The old script stacks panels vertically every time, and says why in three
@@ -93,8 +94,17 @@ def panel_layout(n_panels, n_rows, n_columns_each, name):
 
       stacked        if the stack fits the page
       side by side   if it does not, and the columns still get enough width
+                     FOR THEIR LABELS
       one file each  otherwise -- an unreadable single figure is worth less than
                      three readable ones, and the journal caps neither
+
+    `longest_label` is the character count of the longest bottom-axis label.
+    Column width alone is not the constraint: three four-column grids at 14 mm a
+    column passed this test and then drew "Grouped, shifted" rotated 35 degrees
+    out of its own panel and across the panel beside it. A rotated label needs
+    horizontal room of roughly its length times the character width times
+    cos(35 degrees), and that is what decides whether panels can sit side by
+    side (the author, 2026-09-16).
 
     Returns 'stacked', 'across' or 'split', having said which and why.
     """
@@ -102,17 +112,24 @@ def panel_layout(n_panels, n_rows, n_columns_each, name):
     if stacked <= C.MAX_HEIGHT_IN:
         return 'stacked'
     across = n_panels * n_columns_each
-    if across <= MAX_COLUMNS_ACROSS:
+    per_column = 170 / across if across else 170
+    # An 8-point character is about 1.6 mm wide; rotated 35 degrees a label of
+    # `longest_label` characters sweeps this far sideways.
+    needed = max(12.0, longest_label * 1.6 * 0.82)
+    if across <= MAX_COLUMNS_ACROSS and per_column >= needed:
         print(f'    {name}: {n_panels} stacked panels of {n_rows} rows is '
               f'{stacked * 25.4:.0f} mm, past the '
               f'{C.MAX_HEIGHT_IN * 25.4:.0f} mm the journal allows. Side by '
-              f'side instead -- {across} columns still get '
-              f'{170 / across:.0f} mm each.')
+              f'side instead -- {across} columns get {per_column:.0f} mm each, '
+              f'and the longest label needs {needed:.0f} mm.')
         return 'across'
+    why = ('too many columns' if across > MAX_COLUMNS_ACROSS else
+           f'each column would get {per_column:.0f} mm and the longest bottom '
+           f'label needs {needed:.0f} mm, so the labels would run into the '
+           f'panel beside them')
     print(f'    {name}: {n_panels} stacked panels is {stacked * 25.4:.0f} mm '
-          f'(limit {C.MAX_HEIGHT_IN * 25.4:.0f}) and side by side would give '
-          f'{across} columns {170 / across:.0f} mm each. Writing one figure per '
-          f'panel instead.')
+          f'(limit {C.MAX_HEIGHT_IN * 25.4:.0f}) and side by side is out -- '
+          f'{why}. Writing one figure per panel instead.')
     return 'split'
 
 
@@ -246,9 +263,11 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
             ax.spines[side].set_visible(False)
         # Headroom so the annotation clears the bars.
         ax.set_ylim(top=ax.get_ylim()[1] * 1.30)
-        amount = float(np.sqrt(np.mean((noised - clean) ** 2)))
-        ax.text(0.97, 0.94, f'delivered {amount:.2f}', transform=ax.transAxes,
-                ha='right', va='top', fontsize=7, color='#333333')
+        # The delivered amount is NOT written on the panel. It is a check that
+        # the doses match, not a property of the distribution being drawn, and
+        # seven copies of it were seven pieces of text over seven histograms
+        # (the author, 2026-09-16). It is in F1_delivered_dose.csv and in one
+        # sentence of Methods.
         # Only the bottom histogram in each column, or the label lands on the
         # title of the panel underneath it.
         if index >= len(conditions) - ncols:
@@ -256,7 +275,12 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
 
     # The scaffold-group panel, across the full width.
     ax = fig.add_subplot(spec[nrows - 1, :])
-    order = C.sort_conditions(conditions)
+    # CENSORING IS NOT ON THIS PANEL. It is not dose-matched to the others and
+    # has no variance parameter, so the share of its noise carried by a group
+    # is not comparable with theirs and invites a comparison that cannot be
+    # made (the author, 2026-09-16). Said in the caption instead.
+    order = [c for c in C.sort_conditions(conditions)
+             if not str(c).startswith('censoring')]
     shared = []
     for position, condition in enumerate(order):
         noised = drawn[condition]
@@ -277,8 +301,11 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels([C.condition_label(c) for c in order], rotation=30,
                        ha='right', fontsize=7)
-    ax.set_ylabel('Share of the noise a\nscaffold group shares', fontsize=7.5)
+    # The side axis is a share of one, so it says so in three words and the
+    # title carries the meaning. It used to repeat the title down the side.
+    ax.set_ylabel('Share of the\nnoise, 0 to 1', fontsize=7.5)
     ax.set_ylim(0, 1.0)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     S.title(ax, 'abcdefghij'[len(conditions)],
             'How much of the noise a whole scaffold group shares')
     ax.spines[['top', 'right']].set_visible(False)
@@ -315,7 +342,12 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         label spread — censoring at {censored_fraction:.0%} of labels clipped,
         because its level is a fraction clipped rather than a fraction of the
         spread. Drawn with the injector the pipeline runs, not a
-        reimplementation. The final panel is the one that separates the grouped
+        reimplementation. The amount each condition actually delivered is
+        reported in the text and in F1_delivered_dose.csv rather than written on
+        each panel, and censoring is absent from the final panel because it has
+        no variance parameter to dose-match and its group share is therefore not
+        comparable with the others'. The final panel is the one that separates
+        the grouped
         conditions from the plain one, and it is there because the panels above
         it cannot: grouped-shifted gives every scaffold group a constant offset
         and every molecule its own error on top, both drawn from the same shape,
@@ -733,7 +765,10 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
     # journal allows 225 mm, so past that it becomes one figure per dataset.
     # An unreadable single figure is worth less than three readable ones and the
     # journal caps neither.
-    layout = panel_layout(len(datasets), len(models), len(conditions) + 1, 'F8')
+    longest = max([len('Clean R²')]
+                  + [len(C.condition_label(c)) for c in conditions])
+    layout = panel_layout(len(datasets), len(models), len(conditions) + 1, 'F8',
+                          longest_label=longest)
     written = []
     panels = [[d] for d in datasets] if layout == 'split' else [datasets]
     for group in panels:
