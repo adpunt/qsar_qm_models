@@ -341,6 +341,41 @@ def test_a_whisker_is_never_negative(out):
     check('F2 drew', path is not None and Path(path).exists(), str(path))
 
 
+def test_f2_draws_no_residual_bar(out):
+    """The author chose the whiskers over the residual bar, 2026-09-16.
+
+    Both in one figure was the thing she rejected, so the residual must not
+    creep back into FACTOR_COLUMNS -- and the whiskers must not quietly go with
+    it, because then the figure carries neither.
+    """
+    print('  F2 carries the whiskers and not the residual')
+    drawn = [column for column, _ in FIG.FACTOR_COLUMNS]
+    check('no residual bar', 'eta2_residual' not in drawn, ', '.join(drawn))
+    check('the three factor bars are still there',
+          drawn == ['eta2_model', 'eta2_rep', 'eta2_interaction'],
+          ', '.join(drawn))
+
+    # The residual is still COMPUTED -- it is what the whiskers are a jackknife
+    # over, and T3 prints it. Dropping the bar must not drop the column.
+    anova = pd.DataFrame([{
+        'dataset': 'qm9', 'condition': 'gaussian',
+        'outcome': 'Robustness (AUC$_{norm}$)', 'eta2_model': 49.5,
+        'eta2_rep': 9.2, 'eta2_interaction': 20.4, 'eta2_residual': 20.8,
+        'eta2_model_spread': 1.3, 'eta2_rep_spread': 1.3,
+        'eta2_interaction_spread': 1.7, 'eta2_residual_spread': 2.6,
+        'n_models': 13, 'n_reps': 6, 'n_replicates': 10}])
+    path = FIG.f2_variance_decomposition(anova, out)
+    check('F2 still draws with the residual column present in the data',
+          path is not None and Path(path).exists(), str(path))
+
+    import figlib_tables as T
+    T.t3_variance(anova, out)
+    csv = Path(out) / 'T3_variance_decomposition_qm9.csv'
+    header = csv.read_text().splitlines()[0] if csv.exists() else ''
+    check('T3 still carries the residual', 'Residual' in header,
+          header or 'T3 wrote nothing')
+
+
 def test_the_caches_actually_write(out):
     """Both caches were silently failing, so every re-run paid full price."""
     print('  the two caches')
@@ -457,6 +492,7 @@ def main():
         test_guards_still_bite(out)
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
+        test_f2_draws_no_residual_bar(out)
         test_the_caches_actually_write(out)
         test_workers_change_the_speed_and_not_the_answer()
         test_kendall_says_what_it_used()

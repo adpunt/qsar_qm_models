@@ -19756,7 +19756,9 @@ rho = 0.90", and `qrf`, `gauche`, `gauche_rbf`. A representation this study is m
 dropped on a correlation, and §0 forbids pruning an axis on a theory. Those four are the author's to
 reinstate if they were meant.
 
-#### 14.11h HOW MANY REPLICATES THE RESIDUAL NEEDS — 2026-09-13
+#### 14.11h HOW MANY REPLICATES THE RESIDUAL NEEDS — 2026-09-13 ⚠️ SUPERSEDED BY §14.11ab
+
+**Two reasons not to quote anything below.** The author settled on 2026-09-16 that the residual is NOT drawn in F2 (§14.11ab), so the recommendation at the end of this section is overturned. And every number in it predates `drop_variant_models`: it was computed on 114 cells and 1081 rows, where the current `anova_eta2.csv` has 78 cells and 780 rows. **The 35.1% residual, the 42.3% model share and the 97.6% censoring residual quoted here do not appear in any current file.** The section is kept for the argument, not the arithmetic.
 
 The author asked whether the residual belongs in F2 at ten replicates. The binding number is not
 replicates per cell.
@@ -20179,6 +20181,76 @@ What has to be said somewhere, with these numbers:
 F3 (the model-by-representation grid), R6 and R18 already carry this. The obligation is on the
 TEXT: no sentence may read as though the ECFP4 ranking is the ranking.
 
+#### 14.11ab THE RESIDUAL BAR LEAVES F2, THE WHISKERS STAY — the author, 2026-09-16
+
+**The decision.** F2 showed both a residual bar and a whisker on every bar. The author's ruling: one
+or the other, not both, and it is the whiskers that stay. Done in `scripts/figlib_figures.py`.
+
+**What changed.**
+
+- `FACTOR_COLUMNS` now lists three bars — model, representation, their pairing. `eta2_residual` is
+  gone from it.
+- The side axis stays at 0 to 100 per cent so the gap to 100 is visible rather than hidden by a
+  rescale. **Nothing was renormalised**: every share printed is the same number it was, a share of
+  the total variance.
+- The caption says the three bars do not sum to 100, says what the remainder is in words — the
+  variation between replicates of one identical configuration, same model, same representation, same
+  noise condition, same noise level, different seed — and points at T3 for the number.
+- The legend is three keys wide instead of four.
+- **T3 keeps the residual column.** That is where the ANOVA literature puts it (see below), and it is
+  what the paper cites when a reader wants the number.
+- `figlib_metrics.two_way_eta2` is untouched. The residual is still computed, is still what every
+  whisker is a jackknife over, and the guard that refuses a decomposition with one observation per
+  cell still bites.
+
+**Guard.** `test_figure_slots.test_f2_draws_no_residual_bar` fails if the residual returns to
+`FACTOR_COLUMNS`, if the three factor bars change, or if T3 loses its residual column. All five
+figure test suites pass.
+
+**Why the claim does not need the residual.** "Model choice matters more than representation choice
+for noise robustness" compares two terms. The residual is a third term and does not enter it. Off
+`results/decisions_arc/anova_eta2.csv` (14 September; 13 models x 6 representations = 78 cells, 10
+replicates, 780 rows per condition), robustness in AUC_norm:
+
+| condition | model share | representation share | model / representation |
+|---|---|---|---|
+| gaussian | 49.5% | 9.2% | 5.4 |
+| grouped_wider | 50.5% | 8.6% | 5.9 |
+| grouped_shifted | 30.5% | 6.6% | 4.6 |
+
+**🔴 The same sentence is NOT true of accuracy and must never be written as though it were.** For R2
+at the reported level in the same file: gaussian 29.1% model against 26.6% representation, which is
+a tie; grouped_wider 36.3% against 24.7%; grouped_shifted 7.1% against 10.2%, where representation is
+AHEAD. The lower panel of F2 shows this and its whiskers there are wide. Any claim of the form
+"model beats representation" is a robustness claim only.
+
+**What the whiskers say, and it is not what the degrees-of-freedom formula says.** The whisker is the
+leave-one-replicate-out range: drop one replicate of ten, decompose the remaining nine, repeat, take
+the largest share minus the smallest. On the model share for robustness that range is 1.3 percentage
+points under gaussian, 2.2 under grouped_wider, and **8.0 under grouped_shifted**. The pooled
+degrees of freedom would call all three well determined. They are not, and the jackknife is the one
+to report, because it is measured rather than assumed. The ordering of model against representation
+survives in all three regardless.
+
+**What the ANOVA literature does**, looked up 2026-09-16 for this decision:
+
+| source | format | error bars on the shares | residual shown |
+|---|---|---|---|
+| Gelman 2005, *Annals of Statistics* 33(1) 1-53, "Analysis of variance — why it is more important than ever" | dot-and-bar plot, one row per source of variation | yes, 50% and 95% intervals | in the classical table yes; in his graphical display the finest interaction row IS the error term |
+| Smilde et al. 2005, ASCA, *Bioinformatics* 21(13) 3043 | table of per cent of total sum of squares | no | yes, a named Residuals row |
+| ASCA tutorial review, arXiv 2604.19265 | same table convention | no | yes |
+| Bouthillier et al. 2021, MLSys, "Accounting for Variance in Machine Learning Benchmarks" | plot of variance sources | **unverified — the PDF would not extract** | seed and data sampling are named sources, which is this study's residual as its own bar |
+| Gauge R&R, AIAG / Minitab convention | table with a %Contribution column summing to 100 | no | yes — repeatability IS the residual and is the headline number |
+| Variance partitioning in ecology, Borcard/Legendre lineage | Venn diagram of fractions | no | yes, labelled "unexplained" |
+
+Most report the residual, so "everyone reports it" is close to true — but **not one of them puts a
+residual and an uncertainty interval in the same display.** The author's reading was right on the
+convention as well as on the crowding.
+
+**The assay datasets have no residual at all** — five scaffold folds are a partition of one dataset,
+not repeats of an experiment. F8 and T4 carry no residual and no whisker, and Limitations already
+says so.
+
 #### 14.12 WHERE EVERY FIGURE AND TABLE GOES — a recommendation, 2026-09-14
 
 The author asked for clear decisions rather than options. This is one recommendation per slot, with
@@ -20192,7 +20264,7 @@ Seven main-text figures, four main-text tables, the rest as Additional files.
 |---|---|---|
 | **F1** | what the noise actually is | Methods cannot be read without it, and its group panel is the only thing that stops six near-identical histograms reading as a failed experiment |
 | **F4a** | what does label noise cost you | the paper's first question, one line per model |
-| **F2** | is it the model, the representation, or the pairing | the decomposition is the paper's structural claim, and the residual is what keeps it honest |
+| **F2** | is it the model, the representation, or the pairing | the decomposition is the paper's structural claim, and the whiskers are what keep it honest (§14.11ab) |
 | **F3** | WHICH model and WHICH representation | the central grid; every other result is read off it |
 | **R17** | does making a model probabilistic help | the only place a model meets its own Bayesian version, and Q3 of the paper |
 | **F6** | does noisy training make a model less sure | the uncertainty half, and the only figure on that side |

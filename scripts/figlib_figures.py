@@ -367,9 +367,14 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
 # F2 -- Q1: model, representation, or their pairing
 # ---------------------------------------------------------------------------
 
+#: THE RESIDUAL IS NOT A BAR. Author's call 2026-09-16 (RERUN_PLAN.md 14.11ab):
+#: the figure carries the whiskers OR the residual, not both, and she chose the
+#: whiskers. The residual is still computed in figlib_metrics.two_way_eta2, is
+#: still what every whisker is a jackknife over, and is still a column of T3 --
+#: which is where the ANOVA literature puts it. Putting it back here without
+#: her word is the change test_figure_slots refuses.
 FACTOR_COLUMNS = [('eta2_model', 'Model'), ('eta2_rep', 'Representation'),
-                  ('eta2_interaction', 'Interaction'),
-                  ('eta2_residual', 'Residual')]
+                  ('eta2_interaction', 'Interaction')]
 
 
 def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
@@ -377,9 +382,13 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
 
     Top panel is predictive accuracy, bottom is robustness. Bottom axis of both
     is the noise conditions; side axis is share of variance, 0 to 100 per cent.
-    Four bars at each condition -- the model, the representation, their pairing,
-    and the leftover. A thin whisker on each bar is how much that share moved
-    across the replicates.
+    Three bars at each condition -- the model, the representation, and their
+    pairing. A thin whisker on each bar is how much that share moved across the
+    replicates.
+
+    The three bars do NOT reach 100 per cent and the side axis is left at 100 so
+    that the gap is visible. The gap is the between-replicate share; it is named
+    in the caption and printed in T3, but it is not drawn.
 
     NO version of this figure has ever carried that whisker, because the metric
     behind it was computed on an averaged curve and had no spread to show.
@@ -440,7 +449,7 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
                         ha='center', va='bottom', fontsize=5.5,
                         style='italic', color='#777777', rotation=90)
     axes[-1].set_xlabel('Noise condition')
-    S.shared_legend(fig, axes[0], ncol=4)
+    S.shared_legend(fig, axes[0], ncol=len(FACTOR_COLUMNS))
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
     n_reps_less = max(n_reps - 1, 0)
@@ -453,19 +462,19 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         f'reported level to decompose.' if empty else '')
     caption('F2', f"""
         How much of the variation in each outcome is explained by the choice of
-        model, the choice of representation, the pairing of the two, and what is
-        left over, on {C.dataset_label(dataset)}. Bars are the share of variance
-        from a two-way analysis with sequential sums of squares; the four shares
-        sum to 100 per cent. The whiskers are NOT confidence intervals: they
-        are a leave-one-out jackknife over the {n_reps} replicates -- drop one
-        replicate, decompose the remaining {n_reps_less}, repeat -- so they say
-        how much the answer depends on any one replicate, not how precisely the
-        share is known. The leftover share is the variation between replicates
-        of the identical configuration: same model, same representation, same
-        noise condition, same level, different seed. It is reported because
-        without it a reader takes the leftover to be structure rather than
-        nothing, and every other share then reads as explaining more than it
-        does.{missing_note}""")
+        model, the choice of representation, and the pairing of the two, on
+        {C.dataset_label(dataset)}. Bars are the share of the total variance
+        from a two-way analysis with sequential sums of squares. The three bars
+        do not sum to 100 per cent: the remainder is the variation between
+        replicates of one identical configuration -- same model, same
+        representation, same noise condition, same noise level, different seed
+        -- and it is reported for every condition in
+        T3_variance_decomposition_{dataset} rather than drawn here. The
+        whiskers are NOT confidence intervals: they are a leave-one-out
+        jackknife over the {n_reps} replicates -- drop one replicate, decompose
+        the remaining {n_reps_less}, repeat -- so they say how much the answer
+        depends on any one replicate, not how precisely the share is
+        known.{missing_note}""")
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
 
 
