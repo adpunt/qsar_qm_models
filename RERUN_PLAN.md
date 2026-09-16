@@ -10553,6 +10553,78 @@ for its reasoning about replicate counts, not for its totals.
 job that wrote it and a missing cell can be told apart from a job that never ran. Add to this
 section; do not start a second file for it.
 
+#### Submission 9 — the heteroscedastic process re-run and the tuning sweeps, 2026-09-14
+
+**14 arrays, 134 tasks.** Submitted in the order below, and the job ids are consecutive in that
+order. Every range was printed by the generator that wrote the script; none was typed.
+
+**The heteroscedastic process, 78 tasks.** Two reasons at once. Its rows on disk were fitted from
+gpytorch's lengthscale of 0.69 rather than the median distance between training molecules
+(`83228f3`), and none of them ran the out-of-fold pass, because the model only joined
+`uncertainty_pairs.json` on 2026-09-12 — `check_runs_landed --stage 1` reported QM9 out-of-fold at
+57 of 67 with all 10 absent cells this model. `--kernel rbf`, as the roster has always had it.
+
+| Job ID | Script | Array | Tasks | Wall | Partition |
+|---|---|---|---|---|---|
+| 13128490 | `qm9_s0_heteroscedastic_gp.sh` (the screen) | `0-17%5` | 18 | 7:59:00 | long |
+| 13128491 | `qm9_s1_heteroscedastic_gp.sh` (the main grid) | `0-17%5` | 18 | 58:59:00 | long |
+| 13128492 | `qm9_s2_heteroscedastic_gp.sh` (the deep run) | `0-35%5` | 36 | 64:59:00 | long |
+| 13128493 | `qm9_s2_heteroscedastic_gp.sh` (censoring) | `0-5%5` | 6 | 64:59:00 | long |
+
+13128493 is from `slurm_scripts_qm9_censoring`, not from `slurm_scripts_qm9_rerun`; both emit a
+script of that name, which is why the directory is part of the row (§13.23 A1).
+
+**Avalon's two MLP families, 2 tasks**, from `slurm_scripts_tuning_avalon`. The other two Bayesian
+networks are covered at all six representations by the DNN-family sweep below.
+
+| Job ID | Script | Array | Tasks | Wall | Partition |
+|---|---|---|---|---|---|
+| 13128497 | `tune_mlp_bnn_full.sh` | `0-0%6` | 1 | 7:59:00 | medium |
+| 13128498 | `tune_mlp_bnn_full_variational.sh` | `0-0%6` | 1 | 10:59:00 | medium |
+
+**The DNN family, 18 tasks.** Its settings were chosen over a search of three numbers; the learning
+rate and the dropout fraction joined the space on 2026-09-12, so the old winners were drawn from a
+narrower search.
+
+| Job ID | Script | Array | Tasks | Wall | Partition |
+|---|---|---|---|---|---|
+| 13128499 | `tune_dnn.sh` | `0-5%6` | 6 | 5:59:00 | medium |
+| 13128500 | `tune_dnn_bnn_full.sh` | `0-5%6` | 6 | 11:59:00 | medium |
+| 13128501 | `tune_dnn_bnn_full_variational.sh` | `0-5%6` | 6 | 29:59:00 | medium |
+
+**The four transformations no sweep had ever scored, 24 tasks.** They resolved to no search space
+at all, so every previous sweep recorded them `blocked` and exited 0. Two of the four ask 44:59 and
+43:59 against `medium`'s 48 hours.
+
+| Job ID | Script | Array | Tasks | Wall | Partition |
+|---|---|---|---|---|---|
+| 13128502 | `tune_dnn_bnn_full_mve.sh` | `0-5%6` | 6 | 16:59:00 | medium |
+| 13128503 | `tune_mlp_bnn_full_mve.sh` | `0-5%6` | 6 | 25:59:00 | medium |
+| 13128504 | `tune_dnn_bnn_full_variational_hetero.sh` | `0-5%6` | 6 | 44:59:00 | medium |
+| 13128505 | `tune_mlp_bnn_full_variational_hetero.sh` | `0-5%6` | 6 | 43:59:00 | medium |
+
+**Avalon on the three assay datasets, 12 tasks.**
+
+| Job ID | Script | Array | Tasks | Wall | Partition |
+|---|---|---|---|---|---|
+| 13128506 | `tune_bnn_lab.sh` | `3,9,15,21,27,33,39,45,51,57,63,69%6` | 12 | 11:59:00 | long |
+
+Those twelve indices were printed by `bash tune_bnn_lab.sh --array-for-rep avalon`, which reads the
+script's own `REPS` array. Avalon is index 3 of 6, and the index decodes representation fastest,
+then model, then dataset.
+
+**One command for all fourteen:**
+
+```bash
+squeue -u $USER -o "%.20i %.12P %.34j %.2t %.11M %.11l %R" | grep -E "1312849[0-9]|131285[0-9][0-9]"
+sacct -j 13128490,13128491,13128492,13128493,13128497,13128498,13128499,13128500,13128501,13128502,13128503,13128504,13128505,13128506 \
+      -X -n -P --format=JobID,JobName%36,State,Elapsed,ExitCode
+```
+
+**After the tuning arrays finish**, the five merge commands in §13.27 D7 block 2.5 are what turn
+the rows into a chosen setting: `--merge`, `--confirm`, `--write-master --margin 0.01`, then the two
+`confirm_tuned_on_validation_datasets.py` lines. Nothing reads a sweep's output until `--merge` runs.
+
 #### Submission 1 — the QM9 screen, 2026-09-02
 
 `slurm_scripts_qm9_rerun`, `--stage 0`: replicate 0, three conditions (gaussian, grouped-wider,
