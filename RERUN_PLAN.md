@@ -11276,9 +11276,15 @@ them predates the 2026-09-05 change. The runner does an unlocked read-modify-wri
 `all_results.csv`, so a depth run submitted from a script of that vintage would write into those
 same directories and take the breadth rows with it. A regenerate fixes it, checked rather than
 assumed: the freshly generated depth script writes to
-`results/validation_rerun/mlp-vbll-full-hetero_${rep_safe}_6cond_stud_outl_lapl_${dataset}`, its
+`results/validation_rerun/mlp-vbll-full-hetero_${rep_safe}_3cond_stud_outl_lapl_${dataset}`, its
 own directory, and carries the selection gate. Submitting the stale script is the only way to
 lose those rows.
+
+⚠ **Corrected 2026-09-17.** That path read `_6cond_` here until today. The tag is written by
+`conditions_tag` in the generator, which is `_<number of conditions>cond_` followed by the
+depth-only names — so the command quoted above, three conditions, gives `_3cond_`. Regenerated on
+the laptop 2026-09-17 and read off `val_mlp-vbll-full-hetero.sh`: `_3cond_stud_outl_lapl_`.
+`_6cond_` is what `--include-depth-conditions` writes.
 
 
 
@@ -12004,12 +12010,13 @@ Everything below is either fixed, or waiting on one of these six. Nothing else i
 | # | | Owner |
 |---|---|---|
 | C0 | 🔴 **FIVE JOBS MAY RUN OUT OF WALL CLOCK. Measured 2026-09-07, and this is the only irreversible failure in the study.** `scontrol` cannot raise a limit for its owner, so each needs the generator's wall raised and the unrun indices resubmitted — never a cut. Four of the five are the **quantile forest**, whose longest task is 20:52 across the whole study, and the generator is asking barely more than that.<br><br>`val_svm` **1.13×** — 0:54 against 1:00:00, laboratory censoring, `12986386`<br>`qm91_qrf` **1.29×** — 20:52 against 1-02:59, main grid, `12980589`, three replicates still to run<br>`qm92_qrf` **1.44×** — 20:52 against 1-05:59, deep run `12986325` AND censoring `12986344`<br>`qm90_qrf` **1.66×** — 2:25 against 3:59, screen, `12971607`<br><br>Everything else in the study has 4.9× or more. **The generator's wall rule for `qrf` is what is wrong, not these five job ids** — fix it there or the next submission repeats it | **the author** — see §13.23b |
-| C0b | 🔴 **THE ENTIRE UNCERTAINTY EVIDENCE IS QUEUED AND HAS NEVER STARTED.** All twelve arrays, **378 tasks**, `12986390`–`12986401`, submitted 2026-09-06. Not one task has begun, and `unc_*` is its own pipeline so no other run can size its walls — the tool says "this model has run NOWHERE" for all twelve. Nothing about aleatoric-versus-epistemic exists yet, on either dataset. It is also the run whose pair list is still an open author decision (C4) | **the author** — C4 first, then let one array through to time it |
+| ~~C0b~~ | ✅ **CLOSED 2026-09-17 (§13.27 D9). They ran, and every cell is on disk: 441 of 441**, counted from `results/decisions_arc/d0_coverage.csv` and `d7_q4.csv` against the generator's own seven models, three datasets, three representations and seven noise conditions. The text below is the state on 2026-09-07 and is kept for the record. ~~THE ENTIRE UNCERTAINTY EVIDENCE IS QUEUED AND HAS NEVER STARTED.~~ All twelve arrays, **378 tasks**, `12986390`–`12986401`, submitted 2026-09-06. Not one task has begun, and `unc_*` is its own pipeline so no other run can size its walls — the tool says "this model has run NOWHERE" for all twelve. Nothing about aleatoric-versus-epistemic exists yet, on either dataset. It is also the run whose pair list is still an open author decision (C4) | **the author** — C4 first, then let one array through to time it |
 | C1 | ✅ **CORRECTED 2026-09-07 — they were put back on 2026-09-04.** 25 laboratory tasks, all hERG, all six representations, from the missing-cache deaths of 2026-09-02. `scripts/slurm_jobs.py` labels `12975687` plus `12979965`–`12979969` "the 25 jobs lost to the missing cache", and the script-by-script list adds to exactly 25. The old FAILED rows under `12971620`–`12971638` can never change state; they are a record, not a queue, and resubmitting them would duplicate live work. **Check, do not resubmit:** `sacct -S 2026-09-03 -j 12975687,12979965,12979966,12979967,12979968,12979969 -X -n -P --format=JobID,JobName,State,Elapsed` | **the cluster** — the check above, §13.29a STEP 11 |
 | C2 | 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
 | ~~C2b~~ | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
 | C3 | **`scripts/lab_tasks_on_old_noise.py` has never been run.** The laboratory noise draw changed on 2026-09-04 (§3.3b); tasks that FINISHED before the pull wrote rows under the old draw and have to be replaced. Written for exactly this and named as outstanding in three separate messages | **the cluster** |
-| C4 | **NARROWED 2026-09-07 (§13.27 D3c), and smaller than it reads.** This said the models that can measure the aleatoric/epistemic split per molecule are on neither list. **Three of the six queued models do measure it** — the quantile forest and the two variance-head networks, which the author added on 2026-09-01 for exactly this. The run as queued answers the question on two network architectures and a forest. What is still open is whether to ALSO run a model whose data-noise half varies per molecule from a noise head: `GP-Hetero`, `VBLL-Full-Hetero`, `MLP-VBLL-Full-Hetero`. Four options with their task counts are in §13.27 D3d; the recommendation is to run the 378 as they are, or to ADD `GP-Hetero` as a seventh model at 63 tasks, because the two swap options delete a measurement to buy one | **the author** |
+| ~~C4~~ | ✅ **CLOSED 2026-09-17 (§13.27 D9).** The author took D3d option 4 on 2026-09-07 — `GP-Hetero` added, nothing removed — and its results are on disk on all three datasets. Kept for the record: **NARROWED 2026-09-07 (§13.27 D3c), and smaller than it reads.** This said the models that can measure the aleatoric/epistemic split per molecule are on neither list. **Three of the six queued models do measure it** — the quantile forest and the two variance-head networks, which the author added on 2026-09-01 for exactly this. The run as queued answers the question on two network architectures and a forest. What is still open is whether to ALSO run a model whose data-noise half varies per molecule from a noise head: `GP-Hetero`, `VBLL-Full-Hetero`, `MLP-VBLL-Full-Hetero`. Four options with their task counts are in §13.27 D3d; the recommendation is to run the 378 as they are, or to ADD `GP-Hetero` as a seventh model at 63 tasks, because the two swap options delete a measurement to buy one | **the author** |
+| C8 | 🔴 **THE LABORATORY DEPTH RUN IS 51 CELLS SHORT, and both the models it is short of were added after it was submitted.** `VBLL-Full-Hetero` owes 27 cells and has none; `MLP-VBLL-Full-Hetero` owes 27 and has 3, all of them logD on ECFP4 from job `13111529` of 2026-09-11. 27 cells is three datasets times three representations times the three depth-only noise conditions. A task that skipped stays skipped, so widening `deep_run_pairs.json` needed a resubmission that never happened for the first model and produced one working task of nine for the second. Counted 2026-09-17 from `d0_coverage.csv` against the generator's expected set; the breadth grid (981 of 981) and the uncertainty runs (441 of 441) are complete. §13.27 D9 has the read block and the resubmission | **the author** — read block first, because eight tasks died of something |
 | C5 | **§13.17 A1 is open** — which number replaces the Caco-2 anchor. The evidence is in (§13.20 decision 2); the choice is not made. Still one line outstanding: print the clean Caco-2 training label SD once | **the author** |
 | C6 | **`13033488 paper_analysis` is running against an incomplete grid.** It is `slurm_scripts_analysis/run_paper_analysis.sh`, the author's own decision report — not a mystery job. But Sort & Slice is missing from every replicate 1–9 of the main grid, so one representation of six is absent from anything it reads | **me** — `check_runs_landed.py` should be run before it, not after |
 | ~~C7~~ | ✅ **CLOSED 2026-09-07.** The level gates held `--seed` fixed at 42 across the whole grid, which is the one thing production never does — so the level-dependent affected set passed green on a configuration nobody runs. The gates derive both seeds the way the caller does now, and the transcribed CRC-32 is pinned against `zlib.crc32` case by case. **30 gates pass, up from 15.** Committed and pushed with the `--levels` flag | done |
@@ -12394,7 +12401,7 @@ Every ID below appears in exactly one chat. `HANDOFF.md` holds the prompt for ea
 | **C-SELECT** | The deep-run and censoring selection, and the clean-row copy it depends on | T02 T03 T08 T11 T33 T52 T53 T56 |
 | **C-RESUB** | Putting the 174 failed tasks back | T12 T15 T17 T24 T25 T54 T55 |
 | **C-QUEUE** | Walls and memory — queue throughput, nothing scientific | T06 T07 T18 T26 T27 T28 T35 T36 |
-| **C-UNC** | The uncertainty runs: 378 tasks, none started, and the pair list | T22 T23 |
+| ~~**C-UNC**~~ | ✅ **CLOSED 2026-09-17** — the uncertainty runs landed, 441 cells of 441, and the pair list was settled on 2026-09-07 by adding `GP-Hetero`. §13.27 D9 | T22 T23 |
 | **C-KIRBY** | The KIRBy checkout and the roster question | T10 T37 T38 T39 T40 T41 |
 | **C-FIG** | Figures, the analysis job, and paper replacement text | T13 T21 T42 T43 T44 |
 | **C-DECIDE** | The author's decisions, each put in a form that can be answered in one word | T04 T05 T19 T20 T49 T50 |
@@ -18692,6 +18699,13 @@ not a re-run.**
 **The three assay datasets are finished.** All seven noise conditions, all six representations,
 all 19 models, every level and every replicate. Nothing there is waiting on compute.
 
+⚠️ **Wrong by 51 cells, corrected 2026-09-17 (§13.27 D9).** The counts above are of the
+combinations that are ON DISK, and every one of those is complete. They are not a count of the
+combinations the generators queue. `VBLL-Full-Hetero` and `MLP-VBLL-Full-Hetero` were added to
+`deep_run_pairs.json` on 2026-09-07 and 2026-09-10, after the laboratory depth run went out, and
+between them they are short 51 of the 54 depth cells they are owed. The breadth grid is genuinely
+complete — 981 of 981.
+
 The 79 short QM9 combinations are two things and only two:
 
 **44 have every level except the clean one.** Six of the seven levels are present with ten
@@ -18866,6 +18880,151 @@ effect. 24 for the four transformations no sweep has ever scored, 130.4 core-hou
 assay tables on Avalon.
 
 Then the five merge commands in block 2.5, which is what turns the new rows into a chosen setting.
+
+#### D9. THE LABORATORY DATASETS, RE-READ 2026-09-17 — three of the four questions are closed by the results
+
+Counted from `results/decisions_arc/d0_coverage.csv`, written 2026-09-17 at 03:59 from the
+cluster's own directories, against the expected set that `scripts/check_runs_landed.py` builds
+from the generators. Not from any document.
+
+| what | cells the generators ask for | cells on disk and complete | short |
+|---|---|---|---|
+| laboratory breadth grid (`--stage 1`) | 981 | 981 | **0** |
+| laboratory depth run and censoring (`--stage 2`) | 231 | 180 | **51** |
+| uncertainty runs, all seven noise conditions | 441 | 441 | **0** |
+
+A cell is one dataset, one model, one representation, one noise condition, over all of that
+condition's noise levels.
+
+**The fifty breadth-grid failures are closed by the results.** Every cell the breadth grid asks
+for is on disk and complete, on all three datasets. Whatever those tasks died of, the work they
+were carrying was done by the resubmissions. Nothing there is owed.
+
+**The 378 uncertainty tasks ran.** All 441 cells the seven models, three datasets, three
+representations and seven noise conditions ask for are present. D3d option 4 was the author's
+call, `GP-Hetero` is in the results, and the question of whether they should run at all is over.
+§13.23 C0b and C4 are closed.
+
+**No laboratory uncertainty cell shows the truncation defect of D3b, on the evidence readable off
+the laptop.** The defect writes a row for every training molecule and a real number for only
+some, because one inner fold of the cross-fitting pass failed. Its signature is the loss of about
+one fifth of the training molecules at every noise level including the clean one, in whole
+scaffold families. `d7_q4.csv` reports the count of molecules whose uncertainty could not be used,
+per cell per level. The quantile forest is the only laboratory model with any, and it has two
+patterns, neither of them that one:
+
+- Under censoring the count climbs with the noise level and is zero at the clean level — logD on
+  PDV, fold 1, goes from 0 molecules of 3,225 at level 0 to 706 of 3,225 at level 0.50, and all
+  five folds are present at every level. Censoring clips labels, so quantile intervals of zero
+  width are the condition working.
+- Everywhere else it is 1 to 4 molecules of about 911, at the clean level only, on hERG K$_i$
+  alone. Those are ties in the forest's quantiles.
+
+**The authoritative list is still the merge's own coverage file and it has to be run on the
+cluster**, because `TRUNCATED_OOF` is decided by comparing each cell's completed inner folds
+against the five the jobs were submitted with. The command is in the block below. It deletes
+nothing.
+
+##### The 51 cells that are short, and what they are
+
+All 51 are the laboratory depth run, and all of them belong to the two variational networks with
+a noise head that were added to `deep_run_pairs.json` AFTER that run was submitted on 2026-09-06.
+A task that has already skipped stays skipped — the file's own `one_way` note.
+
+| model | added to the file | cells asked for | cells on disk | short |
+|---|---|---|---|---|
+| `VBLL-Full-Hetero` / `dnn_vbll_hetero` | 2026-09-07 | 27 | 0 | **27** |
+| `MLP-VBLL-Full-Hetero` / `mlp_vbll_hetero` | 2026-09-10 | 27 | 3 | **24** |
+
+27 cells is three datasets times three representations times the three depth-only noise
+conditions — `student_t_nu5`, `outlier_p10`, `laplace`. The three that landed for
+`MLP-VBLL-Full-Hetero` are logD on ECFP4, one per condition, from job `13111529` of 2026-09-11.
+Eight of that job's nine working tasks produced nothing.
+
+Both models have their full breadth grid: 18 cells each per breadth condition, six
+representations times three datasets, all complete. Neither is in `censoring_pairs.json`, so
+neither owes a censoring cell.
+
+⚠️ **§13.27 D8 says "the three assay datasets are finished" and it is wrong on these 51.** D8
+counted the combinations that are on disk and asked whether each is complete. It did not ask
+whether every combination the generators queue is on disk. That is the difference
+`check_runs_landed.py` exists to catch.
+
+##### What to run — the read first, because eight tasks died of something
+
+`13111529` asked 67 hours per task. Whether its eight tasks hit that limit, failed, or are still
+queued decides whether resubmitting at the same wall repeats the same death. Read it before
+sending anything.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+bash scripts/pull_safely.sh && git log -1 --oneline
+KIRBY=/data/stat-ecr/scat9264/KIRBy
+
+# 1. Is anything for these two models still in the queue? Do not resubmit over a running task:
+#    the runner does an unlocked read-modify-write of all_results.csv.
+squeue -u $USER -o "%.14i %.30j %.2t %.11M %.11l %.7m %R" | grep -i hetero
+
+# 2. What became of the tasks already sent for them, with how long each one lasted.
+sacct -S 2026-09-07 -X -n -P --format=JobID,JobName%34,State,Elapsed,ExitCode \
+    | grep -i 'vbll-full-hetero'
+
+# 3. The completeness check, both stages, pointed at the KIRBy checkout.
+python scripts/check_runs_landed.py --stage 1 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun
+python scripts/check_runs_landed.py --stage 2 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun
+
+# 4. The truncated-cell list. All seven conditions named, because the four depth ones were
+#    generated into a second directory and the default reads only the first. Deletes nothing.
+python slurm_scripts_uncertainty_rerun/merge_results.py \
+    --root $KIRBY/tests/results/uncertainty_rerun \
+    --expected-oof-folds 5 --kirby-dir $KIRBY \
+    --conditions gaussian grouped_wider grouped_shifted censoring \
+                 student_t_nu5 outlier_p10 laplace
+```
+
+##### The resubmission, once block 1 says nothing of theirs is queued or running
+
+18 tasks, nine per model. One of the 18 — `MLP-VBLL-Full-Hetero` on logD at ECFP4 — repeats work
+that is already on disk; the runner replaces its own rows, so it costs queue time and nothing
+else. No array range is typed: `resubmit_selected.sh` decodes the indices from the same
+representation-and-dataset map the task script uses, and `scripts/test_submit_all_ranges.py`
+fails if the set is not what the selection names.
+
+A new directory, because regenerating `slurm_scripts_validation_depth` would rewrite all 19
+models' scripts there and the seven other selected models ran their depth run from that
+directory's six-condition versions.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+mkdir -p slurm_scripts_validation_depth4
+cd slurm_scripts_validation_rerun
+python generate_scripts.py \
+    --conditions student_t_nu5 outlier_p10 laplace \
+    --runtime-selection /data/stat-cadd/scat9264/qsar_qm_models/deep_run_pairs.json \
+    --out-dir /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_validation_depth4
+
+cd ../slurm_scripts_validation_depth4
+grep -h 'time=\|partition=\|mem=' val_vbll-full-hetero.sh val_mlp-vbll-full-hetero.sh
+bash resubmit_selected.sh VBLL-Full-Hetero        # 9 tasks, 69:00:00, long, 64G
+bash resubmit_selected.sh MLP-VBLL-Full-Hetero    # 9 tasks, 67:00:00, long, 64G
+
+# PROVE IT TOOK — what the cluster says, not what was typed.
+squeue -u $USER -o "%.14i %.30j %.2t %.11M %.11l %.7m %R" | grep -i hetero
+```
+
+Generated on the laptop 2026-09-17 to check it before she runs it: 19 scripts, 327 tasks,
+`resubmit_selected.sh` offering both models at `--array=0,3,5,6,9,11,12,15,17`, and the output
+path `results/validation_rerun/vbll-full-hetero_${rep_safe}_3cond_stud_outl_lapl_${dataset}` —
+its own directory, so the breadth grid's rows are not touched.
+
+**If block 1 says TIMEOUT.** The wall is the cause and the same wall gets the same death. The
+walls above are the generator's own numbers from its per-fit table, not hand-typed constants, and
+raising them is `--time` on the `sbatch` lines or chat 1's rate table. Do not resubmit at 67 hours
+against a task that already spent 67 hours.
 
 ---
 
