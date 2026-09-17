@@ -21459,3 +21459,68 @@ which also gains the two study repositories — neither was linked anywhere in t
 **Nothing here changes what runs.** The one item that touches the cluster is unchanged from §14.21: whether
 the NN-$\alpha$ hyperparameter sweep is re-run. The author settled it on 2026-09-16 — it is not re-run, and
 the Methods states which parameters each of the two searches covered.
+
+#### 14.27 LEGENDS, TITLES AND TYPEFACE — 2026-09-17, commit `93fe179`
+
+**Legends read DOWN by family, one column each.** The author's layout: trees, then the α networks,
+then the β networks, then SVM, GP and NGBoost. matplotlib fills a multi-column legend column-major,
+so a flat grouped list lands that way — provided every column holds the same number of rows, which
+is why shorter families are padded with invisible handles. `figlib_config.MODEL_GROUPS` names the
+four groups and `figlib_shapes.shared_legend(group_by_family=True)` applies it everywhere.
+
+```
+RF          NN-α       NN-β       SVM
+QRF         BNN-α      BNN-β      GP
+XGBoost     VBLL-α     VBLL-β     NGBoost
+LightGBM
+```
+
+**NGBoost leaves the tree colours** (`#D55E00` → `#44546A`) and joins the fourth group. It boosts
+trees and behaves like none of the other four — top by AUC_norm at every representation while near
+last on clean accuracy (§14.15s) — so a colour that grouped it with them argued against every result
+in the study.
+
+**Eight figure titles go to the captions**: F4a, F4b, F4c, F6, R6, R16, R17, R18. A journal caption
+carries what a figure is and a title above it says the same thing twice. **Panel titles stay** —
+F2's and F3's letters, R16's conditions, R17's families, and F8's, so its three split files read as
+panels a, b and c of one figure rather than as three unrelated grids.
+
+**`Student-$t$` and `K$_i$` were mathtext.** Matplotlib renders `$...$` in its own math font, which
+has **no bold face**, so inside a bold panel title those letters came out lighter and in a different
+typeface from the words around them. That is why F1 panel e looked wrong. Both labels are plain
+characters now — `Student-t (ν=5)` and `hERG Kᵢ` — which also fixes every hERG label in F8, T4 and
+T7.
+
+**Smaller things in the same commit.** `notes_for_the_text.md` moves out of `figures/` and sits
+beside `DECISIONS.md`, because it is text for the paper rather than a picture. Colour bars print
+`AUC_norm` without the range, which the caption carries (§14.24 still sets the ranges). R19's colour
+bar moves off the rightmost column's labels, pad 0.02 → 0.055. R16's key gets a 30% band; thirteen
+models in four columns were touching.
+
+#### 14.28 WHO OWNS WHAT, AND WHAT THE CONCURRENCY COST — 2026-09-17
+
+Three sessions were writing to `scripts/figlib_figures.py` and `RERUN_PLAN.md` at once. **Settled by
+the author: this session owns `scripts/`; the other owns the ANOVA residual and the plan documents.**
+
+**Two things were reported destroyed and neither was.** A session believed it had cut
+`test_f4a_draws_its_companion_panel` out of `scripts/test_figure_slots.py` unrecoverably, and that
+`second_rep` — F4a's companion panel — had been erased by a whole-file `git checkout`. Checked
+against the repository rather than the report: both are present in `HEAD` and on disk, committed in
+`69815b6` at 04:06, and the full suite is green. The `git checkout` restored that work rather than
+erasing it. **The F4a companion panel is built.**
+
+**What was real.** `93fe179` was very nearly a revert: this session had been editing a copy of
+`figlib_figures.py` that was 192 lines behind `HEAD` and never picked up `69815b6`, which fixed a
+genuine bug in the F4a panel — `companions` tested `acc`, already filtered to one representation, so
+the second panel could never draw while the caption promised it. Taking `HEAD`'s file and
+re-applying the day's edits on top is what avoided it.
+
+**The rule that would have prevented all of it:** check `git log -1` and `git status` on a file
+before editing it when more than one session is open, and stage only the files you changed.
+
+**F2 is settled and is NOT this session's to touch.** `5865c88` puts the residual bar back with the
+whiskers, on the author's reading of the rendered figure: the leave-one-replicate-out range on the
+model share is 1.3 percentage points under Gaussian and 2.2 under grouped-wider against 8.0 under
+grouped-shifted, so only one of the three conditions has whiskers that say anything. §14.11h's
+argument for the bar stands; `06133fc`'s removal is reverted; the guard is
+`test_f2_carries_the_residual_and_the_whiskers`.
