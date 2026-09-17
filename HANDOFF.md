@@ -1,604 +1,486 @@
-# Handoff — the code defects found 2026-09-12
+# Handoff — finishing the revision guide: the Results and the Introduction
 
-Read `CLAUDE.md` first. Branch `additional_reps`. Code reaches the cluster only when the author
-runs `bash scripts/pull_safely.sh` against a commit that is already pushed. Write answers into
-`RERUN_PLAN.md` §13.27.
-
-These nine came out of a second code pass over the paper's Methods on 2026-09-12, which re-checked
-302 claims against the pipelines and corrected 74. Most of the 74 were writing problems and are
-handled in `PAPER_REVISION_GUIDE_FINAL.md`. **These nine are not. They are things the code or the
-run configuration is doing wrong** — not results that have failed to arrive — and every one is
-verified at the line numbers given.
-
-They are ordered by what a wrong result costs. **1 and 2 change numbers. 3, 4 and 5 change which
-model was fitted. 6 to 9 are provenance — nothing is wrong with the runs, but a claim in the paper
-cannot be backed.**
-
-Three things to be clear about before starting.
-
-**None of these nine is a claim that a result is missing. Work is in the queue right now.** The
-author's `squeue` on 2026-09-12:
-
-```
-             JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST(REASON)
- 13043774_[2-26%6]      long unc_gp_h scat9264 PD       0:00      1 (Priority)
- 13043781_[0-35%6]      long unc_gp_h scat9264 PD       0:00      1 (Priority)
- 13043780_[0-35%6]      long unc_mlp_ scat9264 PD       0:00      1 (Priority)
- 13043778_[0-35%6]      long unc_vbll scat9264 PD       0:00      1 (Priority)
- 13043776_[0-35%6]      long unc_ngbo scat9264 PD       0:00      1 (Priority)
-13099373_[0-1,4,6-      long qm92_mlp scat9264 PD       0:00      1 (Priority)
- 13111529_[0-17%4]      long val_mlp- scat9264 PD       0:00      1 (Priority)
-       12986318_34      long qm92_ngb scat9264  R   22:48:00      1 arc-c149
-       12986318_28      long qm92_ngb scat9264  R 1-12:23:40      1 arc-c244
-       12986318_22      long qm92_ngb scat9264  R 2-02:57:57      1 arc-c049
-12971614_[14-17%4]    medium qm90_mlp scat9264 PD       0:00      1 (Priority)
-```
-
-Every pending array says `(Priority)`, which is queue position and nothing else — not a bad resource
-request, not an unmet dependency. Six arrays and three running tasks were outstanding when this list
-was written, so **`check_runs_landed.py` reporting MISSING for any of them means "has not run yet",
-not "was never submitted".** Run `squeue` before you resubmit anything, every time.
-
-The job names decode from the three generators — `slurm_scripts_uncertainty_rerun` writes
-`--job-name=unc_{slug}` (`:390`), `slurm_scripts_validation_rerun` writes `val_{name}` (`:546`), and
-`slurm_scripts_qm9_rerun` writes `qm9{stage}_{slug}` (`:798`):
-
-| Prefix | What it is | Where it writes |
-|---|---|---|
-| `unc_*` | the uncertainty runs | `<KIRBy>/tests/results/uncertainty_rerun/` |
-| `val_*` | the assay robustness grid | `<KIRBy>/results/validation_rerun/` |
-| `qm90_*` | the QM9 screen | `results/` in this checkout |
-| `qm92_*` | the QM9 deep run | `results/` in this checkout |
-
-**Not on this list, because it is correct.** Five of the seven QM9 conditions never run noise level
-zero, and `copy_zero_rows.py` refuses to copy a clean *uncertainty* row into them. That is the
-author's decision of 2026-08-28, with the reasoning written out at
-`slurm_scripts_qm9_rerun/generate_scripts.py:468-503`: of the three conditions with a shape,
-`grouped_wider` is keyed to the scaffold group that the out-of-fold pass splits on and
-`outlier_p10` picks at random, so both are structural nulls, and censoring is the only condition
-whose clean level buys anything. **Do not "fix" it.**
-
-**Do not re-fetch hERG.** See item 8.
-
----
-
-## 1. QM9's heteroscedastic Gaussian process never gets its lengthscale from the data
-
-**What is wrong.** `init_rbf_lengthscale` is defined at `models/models.py:2672` and called at
-exactly one place, `:2744`, inside `fit_gp_with_fallback`. The heteroscedastic Gaussian process
-does not go through that function: `_fit_het_gp`, from `models/models.py:8449`, builds its own
-`HeteroscedasticGPModel`, its own `GaussianLikelihood` and its own Adam optimiser, and never calls
-it. So on QM9 that model starts at gpytorch's default lengthscale.
-
-KIRBy does it at both sites — `alternative_data_noise_robustness.py:1602` for the plain process and
-`:1762` for the heteroscedastic one — so the two pipelines differ on the one model where it matters
-most.
-
-**Why it costs numbers.** The default lengthscale sits near 1 while real pairwise distances on these
-representations run far above that, which is the condition that makes a process return its prior and
-predict one flat value for every molecule. That is the defect fixed in `574a3f0` on 2026-08-26 and
-it is still live on this path. `GP-Hetero` is the model
-`slurm_scripts_uncertainty_rerun/generate_scripts.py:186` calls "the cleanest separation measured in
-the roster" and "the only kernel model that can be asked the per-molecule question".
-
-**Do.** Call `init_rbf_lengthscale` inside `_fit_het_gp` on `x_fit`, before the optimisation loop,
-so the inner out-of-fold folds get it too — `_fit_het_gp` is deliberately one function for exactly
-that reason.
-
-Then ask which of three states the QM9 `heteroscedastic_gp` tasks are in, because the work differs:
-**not yet submitted** — fix, push, `pull_safely.sh`, then submit, and nothing is wasted;
-**queued** — the same, and get the fix onto the cluster before those tasks dispatch, because a
-pending task picks up whatever the code says when it starts; **already completed** — those rows were
-fitted at gpytorch's default lengthscale, so check `gp_collapsed` and the spread of the predictions
-on each and resubmit what collapsed. Say how many rows each state holds.
-
-Note that the `unc_*` arrays in the queue above are the uncertainty runs, which go through KIRBy, and
-KIRBy already initialises at both its sites. This defect is QM9's `heteroscedastic_gp` alone.
-
-## 2. Two different lists of which models the uncertainty work runs
-
-**What is wrong.** `uncertainty_pairs.json` names six models. `MODELS` in
-`slurm_scripts_uncertainty_rerun/generate_scripts.py:116-186` names seven — the extra one is
-`GP-Hetero`, added there on 2026-09-07. Nothing in that generator reads `uncertainty_pairs.json`;
-grep it and you get no hits.
-
-**Why it matters, in the file's own words.** `uncertainty_pairs.json` exists because
-"Both pipelines answer the same uncertainty questions on the same pairs, so a table can put QM9
-beside logD, Caco-2 and hERG row for row. A second list anywhere means the two halves stop being
-comparable, which is what happened between 2026-08-28 and 2026-08-29." There is a second list now.
-The effect is that the assay datasets can ask GP-Hetero the per-molecule question and QM9 cannot,
-because QM9's out-of-fold pass only fires on pairs from that file.
-
-**This is live, not hypothetical.** Two `unc_gp_h` arrays are queued right now — 13043774 and
-13043781 — so the assay side is about to produce GP-Hetero uncertainty rows that QM9 has no
-counterpart for. Do not read their absence on the QM9 side as a missing run: QM9 has no uncertainty
-submission of its own, its uncertainty rows fall out of the main grid, and the out-of-fold pass only
-fires on pairs named in `uncertainty_pairs.json`.
-
-**Do.** Put the question to the author: does `GP-Hetero` join the QM9 out-of-fold list, or come out
-of the assay one? Then make the assay generator READ `uncertainty_pairs.json` instead of holding its
-own copy, so this cannot recur. If GP-Hetero goes in, that is a resubmission of those QM9 tasks —
-size it before submitting.
-
-## 3. The tuned setting was ranked without Avalon and then shipped to Avalon
-
-**What is wrong.** `scripts/write_chosen_settings.py:71` ranks over
-`REPS = ['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'sns']`, under a comment at `:69-70` reading
-"AVALON IS OUT OF THIS STUDY (author, 2026-09-01). Its columns are not shown and no run collects
-it." `scripts/ship_tuned_settings.py:58` then uses
-`REPS = ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']` and writes
-`master[key] = {rep: setting for rep in REPS}` at `:84`.
-
-**The comment is false about the study.** `ALL_REPS` at
-`slurm_scripts_qm9_rerun/generate_scripts.py:112` and at
-`slurm_scripts_validation_rerun/generate_scripts.py:49` both contain Avalon, and `CLAUDE.md` lists
-it as one of the six. Every run collects it.
-
-**Consequence.** `results/master_tuned_hyperparameters.json` carries an `avalon` entry for all four
-Bayesian networks, holding a setting chosen by a ranking Avalon never entered.
-
-**Do.** Ask the author what the 2026-09-01 decision actually was. Then either re-rank including
-Avalon, or stop shipping to Avalon and let it run at the shared default. Correct the comment either
-way — it is the only record of that decision and it currently contradicts both generators.
-
-## 4. The two base networks are tuned over different parameter sets
-
-**What is wrong.** `models/models.py:3458` builds NN-$\alpha$'s optimiser with
-`lr=NEURAL_DEFAULTS['training']['lr']` — the shared default, unconditionally.
-`models/models.py:4193` builds NN-$\beta$'s with `lr=params['lr']`, which comes from the tuned
-dictionary. Dropout is the same story: `models.py:1050` hard-codes `p=0.2` on the $\alpha$ path
-while `models.py:4066` reads it from the tuned dictionary on the $\beta$ path.
-
-**Consequence.** The shipped settings run BNN-$\beta$ at learning rate 4.29e-3 and dropout 0.379 and
-VBLL-$\beta$ at 1.19e-3 and 0.357, while BNN-$\alpha$ and VBLL-$\alpha$ cannot leave 1e-3 and 0.2
-whatever the sweep found for them. An $\alpha$-versus-$\beta$ comparison is then partly a comparison
-of how much tuning each was allowed.
-
-**Do.** Make both paths read the same keys from the same place. Then check whether the $\alpha$
-models' tuned entries hold a learning rate or dropout that was never being applied — if they do,
-those runs were not at the setting the file says.
-
-## 5. The variance-head and heteroscedastic networks train at defaults beside tuned siblings
-
-**What is wrong.** Nothing hidden — `models/tuning_rosters.py:161-166` states it: the two
-variance-head networks "have their own keys, so they read their own entry or none — and no sweep has
-ever scored them, so as things stand they train at their defaults. That is a fact about what has
-been measured, not a decision to leave them untuned; tuning them needs a sweep that includes
-`--loss heteroscedastic`." The same applies to the two heteroscedastic VBLL networks, and
-`:170-172` says the heteroscedastic Gaussian process has no tuned path at all.
-
-**Consequence.** Four transformations sit on each base network. Two of them run tuned and two run at
-the shared default, so a BNN-versus-MVE comparison on one base network is partly
-tuned-versus-untuned.
-
-**Do.** Either run the sweep with `--loss heteroscedastic` so all four are on the same footing, or
-get the author's word that the asymmetry stands and it goes in the Methods. Cost the sweep before
-proposing it.
-
-## 6. ChemBERTa's collision count has never been produced
-
-`scripts/crosscheck_chemberta.py` gate 4 counts how often two molecules collapse to one embedding.
-It has never been run, and the Methods needs the two percentages — QM9 and hERG. Run it, and put the
-output where a figure script can read it rather than quoting it into a document.
-
-## 7. The QM9 pool has no generator
-
-`data/valid_qm9_indices.pth` holds 129,428 indices with a maximum of 130,830. Five scripts read it
-(`scripts/process_and_train.py:73` and `:1136`, plus `clean_noise.py`, `domain_clustering.py`,
-`run_qm_qsar_models.py`, `noise_mitigation.py`). Nothing writes it. It is a binary dated
-12 November 2024, and the only account of what the 1,403 missing molecules are is a comment.
-
-The Methods currently says they are the uncharacterised ones plus a set RDKit could not process.
-**Do.** Write the script that regenerates the index from PyG's QM9 and prove it returns the same
-129,428, or establish that it does not and say what the difference is. Until then that sentence
-cannot be written.
-
-## 8. hERG provenance — verify, do NOT regenerate
-
-`fetch_chembl_herg_ki` at `alternative_data_noise_robustness.py:952` returns the cached
-`data_cache/chembl_herg_ki.csv` — two columns, SMILES and pChEMBL, 1,415 rows — before reaching the
-binding-assay filter at `:1036`, the median collapse at `:1042` or the inter-assay
-standard-deviation filter at `:1045`. A live fetch is refused unless `KIRBY_ALLOW_CHEMBL_FETCH=1`.
-
-**The cache-first behaviour is correct and deliberate**, and the refusal message says why: fetching
-live pulls whatever release is current today, which is not the dataset any existing result came
-from. **A re-fetch would silently change N and invalidate every assay result in the study. Do not
-do it on the working path.**
-
-The problem is only that nothing proves which filters produced that file.
-`data_cache/chembl_herg_ki.provenance.json` states release 36 and a re-check against 37, and says in
-its own text that it was reconstructed on 2026-09-04 rather than written by the fetch.
-
-**Do.** Fetch into a SEPARATE file, with the environment variable set and the output path changed,
-and compare it against the cache: how many of the 1,415 survive, what the release actually is, and
-whether the standard-deviation filter reproduces the same set. Report the comparison. Do not
-overwrite the cache whatever it shows — the answer goes into the Methods sentence, not into the
-data.
-
-## 9. Additional file 1 is hand-typed and contradicts the code
-
-`additional_files.tex:38-122` lists hyperparameters for eleven models. The roster is nineteen
-configurations. It gives both forests `min_samples_leaf` 1 where `models/model_defaults.py` pins 5
-and `max_features` sqrt where it pins 0.3, gives the Gaussian process a Tanimoto kernel and nothing
-else, and has no rows at all for any BNN, VBLL or MVE variant, the heteroscedastic Gaussian process,
-the epoch cap, the patience or the 100 Monte Carlo passes. `scripts/generate_supp_tables.py` writes
-Additional files 2 to 5 and not this one.
-
-The Methods' first sentence points at it.
-
-**Do.** Write the generator, reading `models/model_defaults.py` (SPEC_VERSION 1.7.0) and the tuned
-files, and emit the LaTeX. Do not hand-edit the table — that is how it got here. Additional file 12
-is the representation-specific SVM kernel table that `paper.tex:197` cites; the claim it supports is
-being deleted, so it goes too.
-
----
-
-## One thing to confirm with the author, because it changes what runs
-
-All nineteen assay scripts pass `--conditions gaussian grouped_wider grouped_shifted`. The
-Student-$t$, Laplace and outlier conditions are opt-in on that generator via
-`--include-depth-conditions` (`slurm_scripts_validation_rerun/generate_scripts.py:1203-1205`) and
-were not asked for, and censoring needs its pairs named. `noise_conditions.json` gives the three
-depth-only conditions no `applies_to` scope, so nothing declares that they should run there.
-
-So the assay datasets carry three of the seven conditions, and QM9 carries all seven. **Confirm that
-is intended before the Methods says it.** If it is not, it is a submission, not a code fix.
-
-This is about which conditions were *asked for*, not about which have finished: `val_mlp-`
-(13111529) was still queued on 2026-09-12, so the assay grid is incomplete on disk for reasons that
-have nothing to do with this question. Read the `--conditions` line in the generated `val_*.sh`
-scripts, not the results directory.
-
----
-
-## Every chat owes the same two round trips as before
-
-The rules at the bottom of this file still hold: prove the change took, and prove nothing is
-missing. `python scripts/check_runs_landed.py --stage N --verbose`, pointed at the KIRBy checkout for
-the laboratory and uncertainty results. No item is finished while its part of that output is not
-clean.
-
-**With one addition, from the queue above.** `check_runs_landed.py` compares what is on disk against
-what the generators asked for. It cannot see the queue, so anything still pending reads as MISSING.
-Pair every run of it with `squeue -u $USER` and separate the two before reporting:
-
-```bash
-squeue -u $USER -o "%.20i %.12P %.14j %.2t %.11M %R"
-python scripts/check_runs_landed.py --stage 2 --verbose
-```
-
-A task that is MISSING **and** in `squeue` is waiting. A task that is MISSING and **not** in `squeue`
-needs resubmitting. Saying "34 missing" without that split sends the author to resubmit work that is
-already queued, which is worse than saying nothing — it doubles the queue and the second copy wins
-the race unpredictably.
-
----
----
-
-# Handoff — five chats, one thing each (2026-09-07, state in `RERUN_PLAN.md` §13.27)
+Written 2026-09-17. Branch `additional_reps`. **This is the only handoff. Everything older was deleted
+because six stacked handoffs in one file sent five chats off to do work from 7 September.**
 
 Read `CLAUDE.md` first.
 
-The author, 2026-09-07: *"All I care about is getting all the results in from the server."*
-Figures, the paper and the analysis job are set aside until that is done.
+---
 
-Each chat owns one thing from end to end. That is the point — the previous versions of this
-file split each thing across several chats by kind of problem, so no chat could answer a
-question about any one of them.
+## The job, in one line
 
-Branch `additional_reps`. Code reaches the cluster only when the author runs
-`bash scripts/pull_safely.sh` against a commit already pushed. Write answers into
-`RERUN_PLAN.md` section 13.27.
+Write the Results and discussion, and revise the Introduction, into `PAPER_REVISION_GUIDE_FINAL.md` as
+replacement text — following the format of `PAPER_REVISION_GUIDE.md`, which is the one the author says
+worked.
 
-**Read section 13.28 first. It is what the cluster said on 2026-09-07, measured, and it
-closes four questions that earlier versions of this file still asked.**
+The Methods are already done. They are in the same file under **PART ONE REWRITTEN — METHODS**.
 
 ---
 
-## Every chat owes two round trips to the cluster
+## The author's brief. This is the specification — read it before anything else
 
-The author, 2026-09-07: *"By the end of this not only does everything have to be fixed code
-wise, every single result has to be queued up correctly."* Fixing the cause is not the job.
-The job is the task running.
+Her words, 2026-09-16:
 
-**The middle one: prove the change took.** After you change a time limit, a memory request or
-a generator, and after you resubmit anything, send one block that shows it on the cluster.
-Not the command you ran — what the cluster now says. A resubmitted task that fails again in
-thirty seconds looks exactly like a resubmitted task that is working, for the first thirty
-seconds.
-
-```bash
-squeue -u $USER -o "%.12i %.28j %.2t %.11M %.11l %.7m %R" | head -40
-sacct -S today -X -n -P --format=JobID,JobName,State,Elapsed,ExitCode | grep -v COMPLETED | head -30
-```
-
-**The end one: prove nothing is missing.** This is the only command that answers the author's
-question, because it checks what is on disk against what the generators asked for, rather than
-against anything anyone typed.
-
-```bash
-python scripts/check_runs_landed.py --stage 1 --verbose      # the QM9 main grid
-python scripts/check_runs_landed.py --stage 2 --verbose      # the deep run and censoring
-python scripts/check_runs_landed.py --stage 0 --verbose      # the screen
-```
-
-It exits 0 when everything has landed. Three states, and each needs a different action:
-**MISSING** — resubmit that index. **PARTIAL** — the task wrote a file and died part-way
-through the noise levels, so squeue showed it finished; resubmit it. **THIN** — it ran but has
-fewer replicates than the variance work needs.
-
-For the laboratory and uncertainty results, point it at the KIRBy checkout, because those
-jobs change into the `tests` directory and write there. **Confirm the path before trusting an
-empty answer** — a wrong directory reports everything missing and looks like a disaster.
-
-```bash
-python scripts/check_runs_landed.py --stage 1 --verbose \
-    --validation-dir <KIRBy>/results/validation_rerun \
-    --uncertainty-dir <KIRBy>/tests/results/uncertainty_rerun
-```
-
-**No chat is finished while its part of that output is not clean.** Say so plainly if it is
-not, rather than closing on the code being fixed. And say which of MISSING, PARTIAL or THIN
-is left, because they are three different amounts of work.
-
----
-
-## Chat 1 — how long and how much memory every job asks for
-
-> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
+> This one should be based on the actual results which are like mostly in (there's a few things that will
+> need to be left blank with TODOs). It will involve reading the figure generation script, HEAVILY reading
+> the re-run plan. I like how I phrased things in paper.tex. Obviously a lot will change. Oh yea and you
+> have to really go through my results. I did a lot of analysis while I was editing the figures, so a lot
+> of the stuff is in the rerun plan, but you can't just take that for granted you need to dig deep.
 >
-> The author: *"I need far more accurate guesses on how long these will take that won't
-> jeopardize its ability to finish in time but also doesn't land it in the queue for
-> eternity. This step is vital."*
+> I have those set of questions that I want to answer in the rerun plan. I may explicitly ask a few of them
+> in the paper text, but I want to naturally work most of them in. The takeaways should be the main point
+> of my paper. I have the figures and the tables as proof of my results. Once I briefly explain what the
+> reader is seeing I want to focus on the importance. I don't want many numbers in the text itself, that's
+> what tables are for.
 >
-> The measurement is done and it is in section 13.28. `measure_walls.py` found **188 changes
-> worth making**, and `--emit-scontrol` prints them. You do not need to re-measure. You need
-> to apply it, and to make the generators stop producing the old numbers.
+> I'm going to need the latex style inputs of the figures themselves. I'll upload the PNGs to my overleaf
+> with those names. The captions need to be included as well.
 >
-> **1. Five jobs may be killed before they finish.** These ask for barely more than their
-> longest measured run, and a job stopped at its limit writes nothing and cannot be recovered.
-> `scontrol` cannot raise a limit, so each needs the generator changed and those tasks sent
-> again.
+> This is going to be the hardest part for you, don't go overboard. In fact, flag things that could be
+> taken out. Things that don't contribute to the main points of my argument and are making my paper more
+> complex. I want a clear story. Not a bunch of random facts. There should be a flow. It should start broad
+> with the anova, saying generally, how does the choice of model and representation affect accuracy and
+> noise robustness. Then I'll go deeper into specific models, things like NN variants. Then I get into
+> different noise conditions and different datasets, seeing if my conclusions for which specific models,
+> reps, and model/rep pairs did well on experimental datasets (as opposed to QM9 which is clean). Then I go
+> into uncertainty, and seeing how uncertainty and noise play together and how the choice of model and how
+> it estimates uncertainty plays a huge role in whether or not it works with noise, and what kind of noise
+> it works for.
 >
-> | job | longest run | asks for | margin | should ask |
-> |---|---|---|---|---|
-> | `val_svm`, laboratory censoring | 0:54 | 1:00:00 | 1.13× | 2:47:00 |
-> | `qm91_qrf`, QM9 main grid | 20:52 | 1-02:59 | 1.29× | 1-18:43 |
-> | `qm92_qrf`, QM9 censoring | 20:52 | 1-05:59 | 1.44× | 1-18:43 |
-> | `qm92_qrf`, QM9 deep run | 20:52 | 1-05:59 | 1.44× | 1-18:43 |
-> | `qm90_qrf`, QM9 screen | 2:25 | 3:59 | 1.66× | 5:49 |
+> Something to emphasize is the use of non-Gaussian noise, and hopefully finding conclusions that differ
+> between gaussian and non-gaussian noise. Most papers when they look at noise model it as gaussian. I want
+> to be able to say no and you're missing conclusions if you do that. That's what sets this paper apart.
+> Hopefully. Or I find amazing uncertainty tracking. Let the results guide the final takeaway.
 >
-> **2. Nothing in this study has ever used more than 4.2 GB.** That is the peak across every
-> finished task. The screen jobs ask 128 GB and the deep run asks 96 GB. 64 GB is the author's
-> floor and stays; the uncertainty jobs stay at 96 GB. Everything else should come down, and
-> a smaller request is what lets the scheduler fit a job into a gap at all.
+> This chat is responsible for the results section, but I'm intentionally leaving the abstract/conclusion
+> till the end. That will all come from the results, and I may extend this chat later to do that because
+> again, the focus should be the main takeaways.
 >
-> **3. The long requests are why work sits still.** `qm92_ngboost` asks 22 days against 18
-> hours measured. `qm92_mlp_bnn_full_mve` asks 13 days 18 hours against 6 hours. Lowering a
-> limit on a job that has not started keeps its place in the queue, so it costs nothing.
+> The introduction hopefully won't change all too much, but given my change in methods plus a lot of new
+> references (esp with noise) in the re-run plan it will definitely need some edits. A FULL audit of the
+> rerun plan is necessary here. Actually the introduction will change a lot wrt noise conditions. I'll need
+> to focus on a few papers that I'm using to justify why I made the noise conditions the way I did. And I
+> haven't seen other cheminformatics papers do this so I do need an emphasis on this.
 >
-> **4. Two of the three generators still use times typed by hand.** The QM9 one reads measured
-> times from `model_hours.json`. The laboratory one and the uncertainty one do not, so
-> anything rebuilt from them carries the old guess. Fix that first, because chats 2 and 3
-> both need to resubmit.
+> Remember we're following the format of the old revision guide, which is vaguely figure out what's wrong,
+> suggest replacements, HUGE focus on answering the main questions and flow of the paper and the story I'm
+> telling with it.
 >
-> Chats 2, 3 and 5 all have tasks to resubmit and all of them are waiting on item 4. Tell
-> them the moment it is pushed.
->
-> **✅ 2026-09-07, chat 1: item 4 was already done and nobody is waiting on it.** All three
-> generators price their walls from measurement — the QM9 one from `model_hours.json`, the
-> laboratory one from its own seconds-per-fit table, the uncertainty one by importing that
-> table rather than keeping a second copy. It was fixed at `eb08bb8`, before this file was
-> written. Checked by generating each submission twice: once from the commit that was live
-> when it went out, once from the branch tip. **Chats 2, 3 and 5 can regenerate and resubmit
-> now.** Items 1, 2 and 3 are done and are in `RERUN_PLAN.md` §13.27 D1 with the paste block.
-> Two things there that those chats need: memory is 64 GB everywhere on both grid pipelines
-> now, and the twelve uncertainty arrays are queued with walls too short for five of their six
-> models, on a partition that cannot hold the right ones.
->
-> Done when section 13.27 lists, per submission, what it asks now, what it should ask, and the
-> command to change it — **and `squeue` shows the new limits in place**, not just the
-> `scontrol` lines having been printed.
+> You really like complicating things but your biggest challenge is going to be distilling information in
+> the correct form.
 
 ---
 
-## Chat 2 — `gauche_rbf`
+## Step one, and it is most of the work: read the reference papers
 
-> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
->
-> One model, four separate problems, and until now they were in three different chats so
-> nobody owned it. The author added this model for the uncertainty requirement: it separates
-> the two halves of uncertainty better than anything else in the study.
->
-> **1. Twenty tasks failed and the cause is already fixed.** Eight on the QM9 main grid and
-> twelve on the deep run, all at noise level 1.5, replicates 7 to 9, on all three
-> representations. The error said the model was fitting 5,000 rows while the noise record
-> covered 8,000. Commit `c223ec3` fixed it: an exact Gaussian process is too slow above 5,000
-> molecules so it subsamples, and the function returned only the count and threw away which
-> molecules it kept. **Nobody has checked whether the twenty failures survive the fix.** Check
-> that first; everything else about this model depends on it.
->
-> **2. Its screen jobs have never started.** Eighteen tasks, job 12971618, queued since 2
-> September, waiting on Priority. It asks 1 day 18 hours and 128 GB. The same model finished
-> elsewhere in 1 hour 34 minutes and peaked at 4.2 GB. Cut both and it will be scheduled.
->
-> **3. It is in the deep run's model list and the corrected reading takes it out.** See chat
-> 4 — do not act on that alone, the two chats have to agree.
->
-> **4. Whether it stays at all was raised as a way to finish sooner**, on the grounds that it
-> had never run and was worth 17 days of requested time. Both of those are now false: it has
-> produced screen results, and 17 days was the wrong request, not the real cost. Re-price it
-> before anyone offers dropping it again.
->
-> Done when the twenty tasks are either running clean or their remaining cause is written
-> down, its screen jobs have started, and `check_runs_landed.py` no longer reports this model
-> as MISSING or PARTIAL anywhere.
+**Do not start drafting.** The author asked for this explicitly and twice:
 
----
+> I am begging you, the new chats need to use dynamic workflows and actually read these papers to verify
+> structure, how things are explained, language, and honestly most importantly the KIND of content. How
+> much detail? How many numbers go in the text? What kind of information is presented? What goes in the
+> captions? How much do the results state what's in the figures vs a quick summary, how do the other papers
+> flow? How do other papers discuss uncertainty? How long are the paragraphs? How much content is put into
+> it?
 
-## Chat 3 — the laboratory datasets
+They are at `/Users/apunt/Documents/ReferencePapers`, eighteen files in four folders:
 
-> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
->
-> logD, Caco-2 and hERG. Everything here writes into the KIRBy checkout, not this one:
-> the breadth grid into `results/validation_rerun/`, the uncertainty jobs into
-> `tests/results/uncertainty_rerun/`, because those jobs change into the `tests` directory
-> and pass a relative results path.
->
-> **1. Fifty tasks failed and nothing knows why.** Six each from `val_bnn-full`,
-> `val_bnn-full-mve`, `val_dnn` and `val_lightgbm`, one from `val_gp-tanimoto`, and the 25
-> hERG resubmissions. Their output files are missing. The jobs ran in
-> `slurm_scripts_validation_rerun` in this repository, so the tool was looking in the right
-> place — the logs are genuinely gone, most likely because the scripts were rebuilt with a
-> different output name afterwards. **Get the cause from the cluster another way** before
-> resubmitting any of them, because resending an unfixed cause gets the same failure. The 25
-> hERG ones were the missing-cache deaths of 2 September and the cache is present now, loading
-> 1,415 molecules, so those are probably ready — confirm and send them.
->
-> **2. One bug can write results that look fine.** In the KIRBy runner, if one inner fold
-> fails while scoring training molecules, it is caught, skipped with a warning, and rows are
-> still written for every molecule with empty values. The checks count rows rather than real
-> values, so the job reports success. The merge step labels the cell truncated and also
-> reports success. **A laboratory uncertainty result cannot be trusted from whether the job
-> succeeded.** Fix the check to count real values, run the merge over everything already
-> written, and list every truncated cell for deletion.
->
-> **3. The 378 uncertainty jobs have never started.** Twelve arrays, 12986390 to 12986401,
-> queued since 6 September, all waiting on Priority, all asking 96 GB and one and a half to
-> two days. Nothing has ever run in this pipeline so nothing can size them; chat 1 owns the
-> request sizes, you own whether they should run at all. Of the four models chosen, only the
-> quantile forest reports both halves of its uncertainty per molecule. NGBoost has no
-> model-uncertainty half. The Gaussian process and the variational network give one noise
-> number for the whole fit. The three models that do give both halves per molecule are on
-> neither list. Price the options and put it to the author; do not choose.
->
-> **4. Two things are already clean, do not re-open them.** No laboratory task anywhere ran
-> under the old noise draw — that was checked on 7 September and the answer was zero. And the
-> laboratory depth run repeats three conditions the breadth grid already runs, which wastes
-> queue time but produces correct numbers, because the runner replaces its own rows.
->
-> Done when the fifty failures have a cause, the truncated cells are listed, the 378 jobs are
-> either running or withdrawn on the author's word, and `check_runs_landed.py` pointed at the
-> KIRBy checkout reports nothing MISSING or PARTIAL for logD, Caco-2 or hERG.
+| folder | what is in it |
+|---|---|
+| `JChem Papers` | three PDFs — the target journal, so these set the conventions the paper must meet |
+| `NatureML Papers` | nine PDFs from Nature Machine Intelligence |
+| `Other Papers` | five, including two chemistry preprints and the no-free-lunch paper |
+| `Theses` | Markus Dablander's DPhil thesis |
+| root | one review PDF on uncertainty quantification in QSAR, experimental noise and calibration |
+
+Run this as a dynamic workflow: one agent per paper or per small group, each reading for the same fixed
+list of questions, then one agent reconciling them into a short style specification. What comes back has to
+be concrete enough to check a draft against — paragraph length in sentences, how many numbers appear in a
+results paragraph, whether figures are described or summarised, what a caption carries that the text does
+not, how an uncertainty result is framed. **Keep that specification in front of you while drafting and
+check each drafted paragraph against it.**
+
+The journal is JCheminf. It uses a combined "Results and discussion" and then "Conclusions". There is never
+a standalone Discussion section — do not propose one.
 
 ---
 
-## Chat 4 — the deep run's model list
+## The format to follow
 
-> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
->
-> `deep_run_pairs.json` names six models and three representations, eighteen combinations.
-> `censoring_pairs.json` names five combinations outright. Both still say provisional. The
-> deep run, jobs 12986314 to 12986332, and both censoring runs are executing against them now.
-> **Each task reads the file when it starts**, so removing a combination is free at any
-> moment, and adding one back means resubmitting those indices.
->
-> **1. The list was written from an unfinished screen and a tool with a bug in it.** The
-> corrected tool was run on 7 September, at six models, over 20,224 rows. Its reading and the
-> queued file agree on three of six and differ on three:
->
-> | in the file now | the reading says | why |
-> |---|---|---|
-> | `ngboost` | `ngboost` | locked; the generator refuses to build without it |
-> | `rf` | `rf` | most noise-tolerant in 2 of the screen's combinations |
-> | `svm` | `svm` | the only kernel model |
-> | `het_gp_rbf` | `dnn_vbll_hetero` | least noise-tolerant in 8 of 9, against 2 of 3 before |
-> | `gauche_rbf` | `gauche` | one from the Gaussian process family |
-> | `dnn_bnn_full_mve` | `dnn` | one from the plain neural family |
->
-> **2. The reading's own list breaks a rule and the queued file does not.** The tool warns
-> that only one of its six reports an uncertainty per molecule, and the rule needs at least
-> two. The author put `gauche_rbf` and `dnn_bnn_full_mve` in the file for exactly that reason.
-> So this is not "the tool is right and the file is wrong" — say that plainly when you put it
-> to her.
->
-> **3. The censoring list has the same problem, more sharply.** The reading names five
-> combinations and warns that only one of them reports an uncertainty per molecule.
->
-> **4. The scores this rests on are sound.** The no-noise results the ranking divides by were
-> checked on 7 September and agree exactly across the three noise types. See section 13.28.
->
-> **This is the author's decision, not yours.** Put the three differences in front of her with
-> what each costs, note that removing is free and adding back is not, and let her answer.
->
-> Done when both files say what she has decided, no longer say provisional, and
-> `check_runs_landed.py --stage 2` accounts for every combination those files name.
+`PAPER_REVISION_GUIDE.md`, 645 lines, is the shape the author says worked. Its order:
+
+1. **The current main picture — read this first.** The spine of the paper in two numbered points.
+2. **The spine.** The same argument at length, with the table that makes it concrete.
+3. **Your main points: where each is reflected.** One row per claim, and where in the paper it lands.
+4. **The big picture: N whole units to rebuild, not patch.** A numbered list, one line each.
+5. **FULL REBUILDS.** Numbered sections, each with the `paper.tex` lines it replaces and the replacement
+   text written out.
+6. **Mechanical fixes**, **figure audit**, **verify in data or code**, **suggested priority order**.
+
+Copy that shape. Find what is wrong, propose the replacement, and keep the weight on the argument and the
+flow rather than on a list of corrections. **Do not go past it and do not complicate it.**
 
 ---
 
-## Chat 5 — Sort & Slice — DONE 2026-09-17. Nothing was resubmitted, and nothing needed to be.
+## Non-negotiables
 
-**What closed it.** The tool fix asked for below is in, at `08157d3`, with its case in
-`scripts/test_slurm_status_tools.py`: `failed_tasks.py --emit-sbatch` prints a resubmission line
-for a FAILED task whose cause is registered in `scripts/fixed_causes.json`, and only when that
-entry's commit is an ancestor of the running checkout's HEAD. Both tests pass on the laptop —
-`scripts/test_slurm_status_tools.py` and `scripts/test_sns_zero_exclusion.py`, exit 0.
+- **`paper.tex` is never edited.** It is a read-only download from the author's Overleaf project and
+  nothing written into it reaches the paper. Read it for the voice and for line numbers. Everything you
+  write goes into `PAPER_REVISION_GUIDE_FINAL.md`.
+- **Never start a new file.** State goes in `RERUN_PLAN.md` (what gets run) or `NOISE_DESIGN.md` (what the
+  noise is). This document is the exception and it replaces itself rather than growing a sibling.
+- **No number from memory, and none from a document.** `RERUN_PLAN.md` records a great deal of analysis the
+  author did while editing the figures, and it is the best map you will get — but it is a dated claim, not
+  a fact, and it contains conclusions that were later withdrawn. Open the file under
+  `results/decisions_arc/` and confirm the number in your own session before it goes in a sentence.
+- **Never average across representations.** Representation is a measured factor. Every table is one
+  representation, named in its title.
+- **Never write an AI verdict into her documents.** Later it is indistinguishable from a measured result.
+- **If something is unverified, say so in the same sentence as the claim.**
+- **Banned words**: "arm", "stage", "retention area", "descriptor vector", "read-across". Say *noise
+  condition*; **AUC_norm**; **PDV**. The three measured datasets are the **assay datasets** in the paper,
+  never "validation" — that word collides with the early-stopping split inside every fold.
 
-**The 104 tasks do not need resending.** Three readings from the cluster's own results on
-2026-09-16 agree: `check_runs_landed.py --stage 1` says QM9 332 of 332 cells landed with nothing
-missing, partial or thin; a direct count over `results/anova_*_sns_*.csv` on ARC found 378 cells
-of model, condition and level with none under 9 replicates; and
-`results/decisions_arc_20260916/d0_coverage.csv` has 54 rows carrying `sns` and all 54 read `OK`,
-7 levels of 7 at 10 replicates of 10. A later submission covered the cells the failures lost.
-Pasting the lines would have written duplicate rows. `RERUN_PLAN.md` §13.29a STEP 6 carries the
-reading; §13.29a D8's "35 Sort & Slice cells short" is marked superseded there.
+### The phrasing rules, and they are hard rules
 
-**Point 6 below is half true.** The registry covers `gauche_rbf` as well, through the
-`gp-cap-noise-length-mismatch` entry at `c223ec3`. It does **not** cover the fifty laboratory
-tasks, and a test asserts a laboratory job is never matched by a QM9 cause. Their cause is still
-unknown — §13.28 found their output files simply gone.
+`~/Documents/ai_phrasing.rtf` is the author's own record of what she stripped out of this paper once. Read
+it. The pattern it identifies:
 
-> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
->
-> One representation, 104 failed tasks, and a cause that is already fixed and proved.
->
-> **1. What went wrong.** Methane, ammonia and water each carry exactly one Morgan
-> substructure, and it occurs in exactly one molecule, so none of them can ever reach a
-> top-1024 chosen by how often a substructure appears in training. Their vector comes out all
-> zeros, and the guard refuses to train on a molecule with no features. Measured over all
-> 132,480 QM9 molecules: **3 molecules, 0.0023 per cent**.
->
-> **2. The fix is in and tested.** Commit `62f1fe2`. Those molecules are dropped from **every**
-> representation, not just this one, so an ECFP4 job and a Sort & Slice job score the same
-> molecules. They are found by the property rather than by a list of three names, and the
-> featuriser is built on every run. Proved by `scripts/test_sns_zero_exclusion.py`. The guard
-> stays.
->
-> **3. It changes nothing already on disk.** This was checked in code on 7 September: the
-> exclusion removes molecules from the three split lists *after* the shuffle and the split,
-> and never re-splits. So a task whose sample never drew one of the three gives exactly the
-> same answer before and after the fix, and the tasks that did draw one crashed and wrote no
-> rows. **The screen's Sort & Slice results are comparable with the main grid's. Do not
-> re-run the screen for this.**
->
-> **4. What is left is the resubmission, and one tool stands in the way.** The 104 tasks are
-> indices 5, 11 and 17 of nearly every QM9 main-grid job. `failed_tasks.py --emit-sbatch`
-> prints nothing for them, because it refuses to print a resubmission for anything marked
-> failed, on the rule that resending an unfixed cause gets the same error. That rule is wrong
-> here. Teach it to print when the cause is fixed at a named commit, tied to the commit so it
-> cannot just be asserted, and add that case to `scripts/test_slurm_status_tools.py`. Fix it
-> once, prove it with the test, and resubmit. Do not ship the tool, run it, find a bug and
-> ship it again — that consumed a whole session.
->
-> **5. Wait for chat 1 to push the corrected time limits**, rebuild the scripts, then send
-> them. Never type a job array range by hand; the generators write the right range for each
-> script, and typing one has queued out-of-range tasks three times.
->
-> **6. The same tool fix unblocks chats 2 and 3.** Twenty `gauche_rbf` tasks and fifty
-> laboratory tasks are in the same position. Tell both chats when it is pushed.
->
-> Done when the 104 tasks are running, `failed_tasks.py --emit-sbatch` prints a command for a
-> fixed cause, and `check_runs_landed.py --stage 1` reports no Sort & Slice cell MISSING or
-> PARTIAL.
+- No "indicates that", "suggests that", "demonstrates that" — write "shows", or drop the connector and
+  state the thing.
+- No "emerged as" for a result — it "was", it "produced", it "achieved".
+- No "warranted investigation", no "The critical insight is", no "Several avenues emerge from these
+  findings", no "providing actionable guidance".
+- Remove the interpretive layer between the data and the conclusion. Give the finding, not a sentence about
+  the finding.
+
+Her own prose at `paper.tex:375–545` is the model: first person plural, one idea per sentence, nothing over
+30 words, plain connectives, informal where it works ("On the flip side", "At the end of the day"), no bold
+in body text, `\citet` when the authors are the subject and `\citep` otherwise. Six lines of `paper.tex` still carry a
+banned construction, checked 2026-09-17: 380 "demonstrates that", 383 "translates to", 460 "indicates
+that", 462 and 540 "suggests that", 493 "It appears that". An earlier note in this repository listed 264
+and 433 as well and neither carries one — do not repeat that pair. Copy her sentence shape from her prose
+and not the connector.
+
+She has a PhD in this. Never explain the chemistry or the statistics.
 
 ---
 
-## The last thing, after all five chats
+## PART A — THE RESULTS AND DISCUSSION
 
-Whoever gets there last runs the three completeness commands above and posts the output. If
-every one exits 0, every result the generators asked for is on disk. If any does not, the
-remaining work is named cell by cell and goes into section 13.27 as MISSING, PARTIAL or THIN
-with the resubmission line beside it.
+### The shape of the argument. It is the author's and it is not negotiable
 
-**Nobody declares this finished from a code change, a commit, or a job having been submitted.**
-Only from that output.
+1. **Broad.** How does the choice of model and the choice of representation affect accuracy, and how do
+   they affect noise robustness? Two different answers.
+2. **Deeper into models**, the neural variants in particular — does making a model probabilistic change how
+   noise hurts it. Plain network against Bayesian network against the variance head; forest against
+   quantile forest.
+3. **Noise conditions and the other datasets.** Do the conclusions about which models, which
+   representations and which pairings survive when the noise changes shape, and when the labels are real
+   measurements rather than computed ones?
+4. **Uncertainty.** How uncertainty and noise play together, how a model's way of estimating uncertainty
+   decides whether it survives noise at all, and which kind of noise it survives.
+
+**The takeaways are the paper. The figures and tables are the proof.** Explain briefly what the reader is
+looking at, then spend the words on why it matters. Keep numbers out of the running text — a number belongs
+in a sentence only when the sentence turns on it.
+
+### The seven questions
+
+`RERUN_PLAN.md` §7.0, at line 8540, holds Q1 to Q7 with the statistic that answers each, what it is
+computed over, and what the design had to supply. **Work most of them in naturally** rather than as
+headings; the author may put one or two as explicit questions.
+
+- Q1, whether robustness is decided by model, representation or their pairing, is movement 1 and is asked
+  outright.
+- Q3, what model choice buys at a realistic amount of error, is movement 2.
+- Q2, whether the kind of noise matters or only the amount, is the spine of movement 3 and is asked
+  outright, because it is the paper's differentiator.
+- Q5, Q6, Q4 and Q7 are movement 4, in that order. Q5 is whether a model gets less sure and was already
+  known. Q6 is whether uncertainty still ranks predictions by error. Q4 is whether it points at the
+  corrupted labels, and is the hard one. Q7 is whether it tracks some kinds of noise better than others,
+  and it is what makes Q4's answer interesting rather than negative.
+
+**Q4, Q5 and Q6 are three different questions and earlier drafts of this paper fused them.** §7.0 also
+records that Q4 is only defined for the three conditions that give some molecules more noise than others,
+so a table ranking all seven on the Q4 statistic would be ranking four undefined cells against three real
+ones.
+
+### The thing that has to carry through all four movements
+
+Most work in this area models label error as independent Gaussian noise. The author's claim is that doing
+so costs you conclusions, and the run supports a sharper version of that than "non-Gaussian matters".
+
+**Read `RERUN_PLAN.md` §14.17 and §14.17a before you decide how to phrase it, then re-derive every number
+from `results/decisions_arc/` yourself.** The shape recorded there is that changing the shape of an
+individual error costs little, while correlating errors within a scaffold family, or censoring at an assay
+limit, costs a great deal — and costs more on the assay datasets than on QM9. If that survives your own
+reading, the claim is about **independence and zero mean rather than Gaussianity**, which is stronger,
+because those are the two assumptions nobody tests. If it does not survive, say so and write what did.
+
+**A claim that the tail shape matters would be contradicted by her own table.** Check before you write it.
+
+`NOISE_DESIGN.md` §5.1e holds the measurement that makes a comparison between conditions fair — every
+dose-matched condition delivers the same expected amount of corruption, so a difference between two of them
+is a difference of pattern and not of size. That is what lets the comparison mean anything and it belongs
+in the argument.
+
+### Read these, in this order
+
+1. `results/decisions_arc/DECISIONS.md` — thirteen questions, each with the number that settles it and
+   whether it fired. This is the spine of the figure set: every figure exists because a decision fired.
+2. `results/decisions_arc/figures/captions.md` and `notes_for_the_text.md` — the generated captions, and
+   the findings the author ruled were sentences rather than pictures.
+3. `results/decisions_arc/what_is_missing.csv` — what cannot be said yet, in terms of the figure slot that
+   wanted it, each row marked `runnable` or `decision`. **Read it before writing "we did not measure"
+   about anything** — most of those rows are a design decision, not a queue to clear.
+4. `RERUN_PLAN.md`: §7.0 (the questions), §13.16 (the reporting levels), §14.5 (the figure slots), §14.7
+   (the tables), **§14.15, which overrides every earlier §14 subsection it disagrees with and lists four
+   claims this repository stated and then retracted**, **§14.17 and §14.17a** (what each noise condition
+   bought), §14.24 (the colour ranges and the F9 cut), **§14.25 (the live figure list)**.
+5. The figure code: `scripts/figlib_metrics.py` for what AUC_norm and the variance decomposition actually
+   compute — in particular that AUC_norm is integrated **per replicate** and then aggregated, which the
+   submitted paper's numbers are not; `scripts/figlib_decisions.py` for what each decision tests;
+   `scripts/figlib_figures.py` for what each figure draws; `scripts/run_paper_analysis.py` for what is
+   drawn at all.
+
+**Do not take `RERUN_PLAN.md` at face value.** It is a working log. §14.15 exists because of exactly that.
+If a claim lives only in prose in the plan, treat it as a lead and go to the results file.
+
+### The figures
+
+`RERUN_PLAN.md` §14.25 is the live list and it is the one to work from. Seven figures in the paper:
+
+| slot | file | what it answers |
+|---|---|---|
+| F1 | `F1_noise_conditions.png` | what each condition does to a label distribution — belongs with the Methods |
+| F2 | `F2_variance_decomposition.png` | model, representation, or the pairing |
+| F3 | `F3_model_by_representation.png` | which model on which representation |
+| F4a | `F4a_models_under_noise.png` | what label noise costs you |
+| R17 | `R17_variant_families_ecfp4_gaussian.png` | does making a model probabilistic help |
+| F6 | `F6_decomposition.png` | does noisy training make a model less sure |
+| F8 | `F8_assay_datasets_logd.png`, `_caco2.png`, `_herg.png` | does it hold on assay data |
+
+Additional files: F4b, F4c, R6 (two files), R9, R15 (two files), R18 (two files), R19. **F7 was cut on 13
+September and F9 on 16 September** (§14.24) — the author's calls, both recorded, neither to be reopened.
+R10 and R15b are sentences rather than figures and their text is in the guide's §L1.
+
+**⚠️ The consequence of cutting F9, written into `scripts/run_paper_analysis.py:579–581` and §14.24:** the
+uncertainty side of the paper is now one figure, F6, and one table, T6 — and the paper's title is about
+uncertainty. The Q4 result has to be carried in prose, from `notes_for_the_text.md` and T6. That is flagged
+as a thing to watch, not resolved. If your reading of the results says the paper needs a picture there,
+put the case to the author with what it would cost. Do not draw one on your own authority.
+
+**Deliver, for every figure in the paper, a complete LaTeX block ready to paste**: `\begin{figure}`,
+`\includegraphics[width=\textwidth]{<the exact file name above>}`, the caption, and the `\label` the text
+then references. Follow `paper.tex`'s convention — `htbp`, `\label{fig:...}`, `figure*` for full-width.
+F8 is three files and needs a decision about whether it is one figure with three panels or three figures;
+put that to the author.
+
+**The captions in `captions.md` are generated and several are far too long for a journal.** They were
+written to carry what was deliberately kept out of the figure titles — what a grey cell means, what a
+whisker is, what is deliberately not drawn. Those clauses exist because a reader would otherwise over-read
+the picture. Rewrite each in the author's voice, keep every factual clause, trim the rest, and say in your
+notes what you cut from each. Her caption style: one sentence naming what the figure shows and on what,
+then lettered panels `a)` `b)` `c)`, then the reading notes. The reference papers will tell you how long a
+caption in this literature actually runs — check.
+
+### The tables
+
+In `results/decisions_arc/tables/`, as both `.csv` and `.tex`. **Read the `.tex` files — do not retype a
+table.**
+
+T1 metrics, T2 noise conditions, T3 variance decomposition, T4 robustness (one file per dataset at ECFP4),
+T5 probabilistic transformations, T6 uncertainty, T7 rank transfer (one file per representation), T8
+pairings across datasets. T1 and T2 are Methods. The paper takes T1, T2, T4 at ECFP4, and T6; T3, T5, T7
+and T8 are additional files.
+
+**T4 and T7 exist once per dataset or representation by design** — averaging over either is the thing the
+whole figure set was rebuilt to prevent. The paper takes one of each and the rest are additional files.
+Where a table needs a column the generated one does not have, say so and name the script.
+
+### Flag what to cut. This is asked for explicitly
+
+> In fact, flag things that could be taken out. Things that don't contribute to the main points of my
+> argument and are making my paper more complex. I want a clear story. Not a bunch of random facts.
+
+Produce a short numbered list at the end: **what you would cut, what the paper loses, and what it was
+protecting against.** Candidates to weigh without deciding for her:
+
+- Six rank-transfer tables when the finding is one number.
+- R16, the decoupling figure — its own caption warns that part of what it shows is arithmetic, because
+  AUC_norm divides the clean baseline out. The finding is real and lives in §14.15b; the figure may be
+  doing it a disservice.
+- R18, the representation-against-representation scatter — it is the evidence for holding one
+  representation constant in the main text, which is a Methods decision rather than a result.
+- R15, the rank ladder — two charts to say the ranking barely moves.
+- R19, the depth conditions as a figure, when the matched-pair comparison is the finding and is a table.
+- Every sentence that reports a statistic nobody asked a question about.
+
+Anything you cut, say where it goes — additional file, or gone.
+
+---
+
+## PART B — THE INTRODUCTION
+
+`paper.tex:178–188`, six paragraphs. It is the part of the paper that survives best and the author expects
+it to change least. Three things force it anyway.
+
+**1. The Methods underneath it changed.** Six noise strategies became seven conditions, eleven noise levels
+became seven, the representation set changed, and the paper has an uncertainty subsection it did not have.
+Any sentence that sets up the old design has to move.
+
+**2. The claim has sharpened.** The Introduction currently sets representation choice up as the open
+question. Read the decomposition yourself and write the Introduction to motivate the question the paper can
+now answer.
+
+**3. The noise conditions need justifying, and this is most of the job.** Her words:
+
+> Actually the introduction will change a lot wrt noise conditions. I'll need to focus on a few papers that
+> I'm using to justify why I made the noise conditions the way I did. And I haven't seen other
+> cheminformatics papers do this so I do need an emphasis on this.
+
+### The reference audit
+
+**Read `NOISE_DESIGN.md` §3.1 to §3.6 and §4b in full.** §4b is a primary-source layer — verified verbatim
+quotes, each with a note saying what may and may not be claimed from it. §4a reconciles two earlier
+literature passes that disagreed and says which to trust. **`NOISE_DESIGN.md:638` is a list headed "Numbers that must NOT
+enter the paper" — read it before you quote anything and honour it.**
+
+What is there and what it is for:
+
+- **Krüger & Overington (2012)** rejected normality of bioactivity differences and fitted a Laplace. §3.1
+  warns that the paper never uses the words "heavy-tailed" or "Gaussian", so cite what they did, not what
+  it implies.
+- **Kalliokoski et al. (2013)**, 16,844 repeat pairs, could only fit a Gaussian after truncating. §3.1 also
+  carries the honest limitation: matching the real tail needs a Student-*t* with about one degree of
+  freedom, which has no finite variance and therefore cannot be dose-matched at all. **That limitation
+  belongs in the paper.**
+- **Kramer et al. (2012)** and §3.2: error does not depend on the measured value. This disposes of the
+  value-proportional and threshold strategies the submitted paper used, and it is why the outlier condition
+  selects at random rather than by size. The Introduction is where that premise gets stated.
+- **Bentz et al. (2013)** and §3.3: most measurement variance is between laboratories. This is the source
+  behind the grouped conditions and it is what the paper's sharpest finding rests on. The Introduction
+  never sets it up.
+- **Hayeshi et al. (2008)**, **Chen et al. (2017)**: inter-laboratory Caco-2.
+- **Svensson et al. (2025)** and §3.5: censoring is the most prevalent real mechanism, with a quarter to
+  two thirds of labels censored in industrial assays. The paper's worst result is under censoring, so the
+  Introduction should say it is the most common mechanism before the Results say it is the most damaging.
+- **Heid et al. (2023)** is already cited and §3.6 records exactly what they published, so the paper's
+  relationship to it can be stated precisely rather than gestured at.
+- **Alvarez Baron et al. (2025)**, **Niu et al. (2024)**, **Sato et al. (2018)**, **Wenlock et al. (2011)**,
+  **Prieto et al. (2010)**, **Avdeef (2019)** — assay-error anchors, each with its scope in §4b.
+
+On the uncertainty side, `RERUN_PLAN.md` §14.6 row 2 names four papers as the field standard that are not
+in `citations.bib`: Scalia et al. 2020, Hirschfeld et al. 2020, Tran et al. 2020, and the Kendall & Gal
+decomposition the Methods now gives as a display equation. `research_archive/f692d614/` holds three of them
+as PDFs.
+
+**The bibliography is in three places and they have drifted.** `citations.bib` carries 221 entries and
+`paper.tex` cites 51. `refs.bib` is untracked in git. `paper.tex` points `\bibliography` at
+`sn-bibliography`, which lives in the Overleaf project and is **not in this checkout** — so you cannot tell
+from here whether it holds a key. Report what is missing from the two local files and flag every key you
+add as needing an Overleaf check. `\citep{avalon}` is in neither: Gedeck, Rohde & Bartels, *J. Chem. Inf.
+Model.* 46(5):1924–1936, 2006. Run `python scripts/check_bib_and_docs.py` before you finish.
+
+### Two sentences that are now wrong
+
+- **`paper.tex:188`, the second of the three aims.** It promises to compare probabilistic models against
+  deterministic ones and to say whether their per-sample uncertainty tracks which labels were corrupted.
+  Both halves are measured now and the second has a conditional answer — it depends on the kind of noise.
+  The sentence promises a yes or no and the paper delivers something better than one.
+- **The Deng (2023) sentence at `paper.tex:186`.** It sets representation choice up as the open question.
+  Keep it, because it motivates the work, but do not lean on it as though the answer were expected.
+
+The Introduction is where a claim about the literature is easiest to write as a sentence about the claim.
+Write what the cited paper measured instead.
+
+---
+
+## What to leave as TODO, with the file that would settle it
+
+Mark these rather than guessing around them.
+
+- **Anything resting on QM9's heteroscedastic Gaussian process.** The lengthscale fix is commit `83228f3`,
+  pushed 13 September at 21:55, whose own message says 1,717 rows already on disk are a different fit and
+  are a resubmission. The results were harvested nine hours later, so those rows are probably a mixture of
+  pre-fix and post-fix fits. No number and no cross-condition comparison for that model until the author
+  establishes from the job logs which rows were fitted on which code. `d3_condition_spread.csv` gives it
+  the largest cross-condition spread of any model, which is the row most likely to be the artefact rather
+  than a finding. **Do not resolve this yourself and do not soften it.**
+- **Avalon wherever it depends on the two NN-α tuned settings**, which were ranked over five
+  representations and used on six.
+- **The fourteen combinations short a noise level** in `what_is_missing.csv`.
+- **Anything the uncertainty runs have not delivered** for a pair named in `uncertainty_pairs.json`.
+
+---
+
+## Not yours
+
+- **The abstract, the conclusion and the scientific-contribution statement.** The author is doing them last,
+  deliberately, because they come off the Results. Do not draft them, and do not write a Results paragraph
+  that only works once the conclusion exists. She may extend the chat to do them afterwards.
+- **The Methods.** Done, in Part One Rewritten of the same file. Read §M0 and the third-pass section before
+  you write a sentence about what was run. QM9 and the three assay datasets are two implementations of one
+  design and they differ in many load-bearing ways, so a flat sentence about "the study" is usually false
+  on one side. The guide gives the count as thirteen at line 84 and as "far more than twelve" in §4.5, so
+  read §M0 and count for yourself rather than quoting either.
+- **`paper.tex`.** Inert. Read it, never write it.
+
+---
+
+## What you owe back
+
+1. Replacement text for the Results and discussion, in the four-movement order, in the format of
+   `PAPER_REVISION_GUIDE.md`, into `PAPER_REVISION_GUIDE_FINAL.md`.
+2. Replacement text for the Introduction, paragraph by paragraph, marked against the `paper.tex` lines it
+   replaces.
+3. A LaTeX block and a trimmed caption for every figure in the paper, with its `\label`.
+4. The numbered cut list — what could come out and what the paper loses.
+5. A table of every reference added: key, what it supports, which `NOISE_DESIGN.md` or `RERUN_PLAN.md`
+   section it came from, and whether it is already in `citations.bib`, in `refs.bib`, or in neither — plus
+   the list of keys that can only be checked against the Overleaf bibliography.
+6. The style specification you extracted from the reference papers, so the author can see what you matched
+   the draft against.
+7. `python scripts/check_bib_and_docs.py` passing.
+8. One entry in `RERUN_PLAN.md` §14 recording what you settled and what you left open. **Do not start a new
+   file.**
+9. If a number in `RERUN_PLAN.md` is contradicted by the results, correct it there with the file the
+   correction came from, the way §14.15a does.
+
+---
+
+## The state of the repository, verified 2026-09-17
+
+Read in this session, from the files named. Re-check anything you are about to write from.
+
+**The experiments are in.** `results/decisions_arc/d0_coverage.csv` is built from the result files
+themselves and holds 1,565 combinations — one per dataset, model, representation and noise condition.
+1,551 are complete. All four datasets carry 109 complete combinations on each of Gaussian, grouped-wider
+and grouped-shifted, 18 to 24 on each of Laplace, outlier and Student-*t*, and 5 on censoring.
+
+**The fourteen that are short a noise level** are all on QM9: five `het_gp_rbf` under Laplace, outlier and
+Student-*t*, and nine `mlp_vbll_hetero` under the same three, missing only the clean level — which is what
+drops them from every AUC_norm figure, because the metric is a ratio to the clean score.
+
+**Two combinations carry a collapsed Gaussian-process fit** and the analysis filters them before any number
+is drawn. Per-combination detail is in `d0_coverage.csv` under `gp_collapsed`.
+
+**The uncertainty runs have landed on all four datasets**, seven conditions and seven models —
+`uncertainty_pairs.csv` holds 3,156 rows and `d7_q4.csv` holds 20,699.
+
+**The figures in `results/decisions_arc/` may be behind the code.** They are regenerated by
+`scripts/run_paper_analysis.py` on the cluster. Two commits landed after the set of 16 September at 22:04 —
+`87643a8` and `9d2cd2e` — and two more after the set of 17 September at 04:00 — `69815b6`, which fixes F4a
+drawing one panel under a caption that promised two, and `93fe179`. **Check the timestamp on the PNG
+against `git log` on the figure scripts before you write a caption from a picture.** The re-run is
+`sbatch slurm_scripts_analysis/run_paper_analysis.sh` and takes about sixteen minutes.
+
+**Sections 14.20, 14.21 and 14.22 each appear twice in `RERUN_PLAN.md`**, and
+`scripts/run_paper_analysis.py:581` cites §14.22 for the F9 cut when the record is in §14.24. Nothing was
+renumbered, because other documents cite those numbers. **§14.25 is the live figure list.**
+
+**The author runs every command.** There is no cluster access from this side. Anything needed from ARC is
+one block to paste, not a conversation, and several questions batched into one block. Prefer plain `sacct`,
+`squeue`, `ls` and `tail` over a script written five minutes ago. Code reaches the cluster only when she
+runs `bash scripts/pull_safely.sh` against a commit that is already pushed — a fix that is not pushed does
+not exist.
