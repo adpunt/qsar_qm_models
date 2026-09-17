@@ -624,7 +624,13 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     # see that a model's curve is a fact about the pairing and not about the
     # model (the author, 2026-09-16). NGBoost is the case that makes it: its
     # curve is the flattest on both and it starts far lower on ECFP4.
-    companions = [r for r in (second_rep,) if r and r in set(acc['rep'])]
+    # `acc` is filtered to ONE representation at line 586, so asking it whether
+    # it holds `second_rep` is always False and the companion panel could never
+    # be drawn -- while the caption below promised it. Ask the unfiltered frame,
+    # which is what the per-panel loop reads from.
+    available = set(accuracy[accuracy['dataset'] == dataset]['rep'].dropna())
+    companions = [r for r in (second_rep,)
+                  if r and r != rep and r in available]
     panes = [rep] + companions
     fig, axes = _fig(height=4.0, ncols=len(panes), sharey=True)
     axes = np.atleast_1d(axes).ravel()
@@ -652,16 +658,21 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                  f'noise — {C.dataset_label(dataset)}',
                  fontweight='bold', fontsize=9, x=0.01, ha='left')
     S.shared_legend(fig, axes[0], ncol=4)
+    # The two-panel sentences are only true when the companion panel drew. A
+    # caption that claims a panel the figure does not have is the failure this
+    # guard exists to stop.
+    two_panels = (f"One panel per representation, the same models and the same "
+                  f"noise on each, sharing a side axis. " if len(panes) > 1 else "")
+    why_two = ("Two panels rather than one because how far a model falls is a "
+               "property of the pairing and not of the model: the same curve "
+               "can start high on one representation and low on another while "
+               "keeping the same shape. " if len(panes) > 1 else "")
     caption('F4a', f"""
         What label noise costs you, on {title}. One line per model, the
         {len(keep)} most robust under {C.condition_label(reference_condition)}.
-        One panel per representation, the same models and the same noise on
-        each, sharing a side axis. Bottom axis: the amount of noise put into the
+        {two_panels}Bottom axis: the amount of noise put into the
         training labels, as a fraction of the clean training label spread. Side
-        axis: R2 on held-out molecules, median over the ten replicates. Two
-        panels rather than one because how far a model falls is a property of
-        the pairing and not of the model: the same curve can start high on one
-        representation and low on another while keeping the same shape. The dashed vertical line
+        axis: R2 on held-out molecules, median over the ten replicates. {why_two}The dashed vertical line
         marks the level every table in the paper reports at. There are no bands:
         eight overlapping ranges hid the lines, and the spread across replicates
         is in T4.""")

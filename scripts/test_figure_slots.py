@@ -376,6 +376,49 @@ def test_f2_draws_no_residual_bar(out):
           header or 'T3 wrote nothing')
 
 
+def test_f4a_draws_its_companion_panel(out):
+    """F4a is two panels and its caption says so, 2026-09-16 (87643a8).
+
+    The first cut asked `acc` -- already filtered to ONE representation --
+    whether it held the companion representation. It never did, so the second
+    panel could not be drawn on any data, while the caption went on promising
+    it. The run of 17 September shipped a one-panel F4a under a two-panel
+    caption. The guard is that the two travel together.
+    """
+    print('  F4a: the second panel and its caption')
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        FX.write_all(root)
+        accuracy, _, summary = _robustness_frames(root)
+        reps = sorted(set(accuracy['rep'].dropna()))
+        if len(reps) < 2:
+            check('the fixture carries two representations', False,
+                  ', '.join(reps))
+            return
+
+        FIG.CAPTIONS.clear()
+        FIG.f4_overview(accuracy, summary, out, reps[0], second_rep=reps[1])
+        said = FIG.CAPTIONS.get('F4a', '')
+        check('F4a promises its second panel', 'One panel per representation'
+              in said, said[:120])
+
+        # And the promise is withdrawn when there is nothing to put in it.
+        FIG.CAPTIONS.clear()
+        FIG.f4_overview(accuracy, summary, out, reps[0],
+                        second_rep='no_such_rep')
+        said = FIG.CAPTIONS.get('F4a', '')
+        check('F4a promises nothing when the second representation never ran',
+              'One panel per representation' not in said
+              and 'Two panels rather than one' not in said, said[:120])
+
+        # The primary is never its own companion.
+        FIG.CAPTIONS.clear()
+        FIG.f4_overview(accuracy, summary, out, reps[0], second_rep=reps[0])
+        said = FIG.CAPTIONS.get('F4a', '')
+        check('F4a does not draw one representation twice',
+              'One panel per representation' not in said, said[:120])
+
+
 def test_the_caches_actually_write(out):
     """Both caches were silently failing, so every re-run paid full price."""
     print('  the two caches')
@@ -493,6 +536,7 @@ def main():
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
         test_f2_draws_no_residual_bar(out)
+        test_f4a_draws_its_companion_panel(out)
         test_the_caches_actually_write(out)
         test_workers_change_the_speed_and_not_the_answer()
         test_kendall_says_what_it_used()
