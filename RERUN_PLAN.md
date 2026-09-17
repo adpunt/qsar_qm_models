@@ -12000,7 +12000,7 @@ Everything below is either fixed, or waiting on one of these six. Nothing else i
 |---|---|---|
 | B1 | **The Sort & Slice failures: THREE molecules, and they are methane, ammonia and water.** 48 QM9 main-grid tasks died on `ValueError: Sort & Slice produced an all-zero count vector for N`. Counted on 2026-09-07 over the 132,480 QM9 SMILES on the laptop, `SNS_DIM = 1024`: **3 of 132,480, 0.0023%** — `[H]C([H])([H])[H]`, `[H]N([H])[H]`, `[H]O[H]`. Each has exactly ONE substructure, occurring in exactly one molecule, so it can never reach a top-1024 by training frequency under any split. This is not a bug and not a Sort & Slice weakness at 1024: it is a top-k featuriser meeting the three smallest molecules in the set. It passed the screen because replicate 0's sample did not draw them. Reproduce: `python scripts/sns_zero_molecules.py --smiles-file .decomposition_controls_qm9_smiles.txt` | **the author** — three molecules is a Methods sentence, but WHICH sentence is a decision. See §13.23a |
 | ~~B2b~~ | ✅ **CLOSED 2026-09-07 — the risk is gone, not managed.** A cut on an array with a task running was all-or-nothing, and skipping those jobs left `qm92_ngboost` at 22 days, `qm92_gauche_rbf` at 17 and `qm91_ngboost` at 19 — which is the whole queue problem. It now cuts only the elements that have not started (`JobId=12986318_[7-35]`), so the running task keeps the limit it was admitted under. Needs a queue reading; the tool says so when it has none | done |
-| B2c | 🔴 **`gauche_rbf` HAS NEVER STARTED A TASK ON THE SCREEN.** Read off squeue 2026-09-07: `12971618`, eighteen tasks, queued since 2026-09-02 and not one has begun. It asks 1-18:59 on `medium`. This is why the screen reads 87% rather than done, and it is the same model that fails everywhere it DOES run. Two other screen arrays are part-stuck the same way — `qm90_mlp_bnn_full_mve` 16 of 18 queued, `qm90_dnn_bnn_full_variational` 10 of 18 | **the cluster** — `measure_walls.py` now names it and sizes it from the main grid |
+| ~~B2c~~ | ✅ **CLOSED 2026-09-17 — every cell this model was asked for has landed; see §13.27 D2x.** The text below is what was believed on 2026-09-07 and is kept for its job ids. 🔴 **`gauche_rbf` HAS NEVER STARTED A TASK ON THE SCREEN.** Read off squeue 2026-09-07: `12971618`, eighteen tasks, queued since 2026-09-02 and not one has begun. It asks 1-18:59 on `medium`. This is why the screen reads 87% rather than done, and it is the same model that fails everywhere it DOES run. Two other screen arrays are part-stuck the same way — `qm90_mlp_bnn_full_mve` 16 of 18 queued, `qm90_dnn_bnn_full_variational` 10 of 18 | **the cluster** — `measure_walls.py` now names it and sizes it from the main grid |
 | ~~B2b-old~~ | **One scontrol line in a hundred and fifty carries real risk, and it is worth reading before it is worth running.** A proposal is never below what a running task has already used, so nothing dies on the spot. But a running task whose new limit turns out to be too small dies LATER, and would not have under the old one. On 2026-09-07 that is exactly one job: `12980577` (`qm91_ngboost`), whose task `_4` has run 49.5 h against a longest FINISHED task of 18:03 — 2.7×, and still going, so it is an outlier nobody has explained. The proposal takes it from 19 days to 4. Every such line is marked `<-- RUNNING at …` now, and `--pending-only` drops them all: the queue problem is the work that has not started | **the author** — run the list with `--pending-only` first if you would rather not touch anything mid-flight |
 | B2 | **The walls are the queue problem, and the numbers are in.** `qm92_ngboost` asks 22 days; measurement says under four. `qm92_mlp_bnn_full_mve` asks 13 days 18 h against 8:38 measured. A three-week request fits almost no backfill gap, which is why they sit on `(Priority)` while four-hour jobs run past them. Cutting a TimeLimit on a pending job keeps its submit time, so it costs no queue position | **the cluster** — `python scripts/measure_walls.py --emit-scontrol`, then read the table before running the lines |
 | B3 | **Memory was settled on one data point that does not describe this pipeline.** The 61.2 GB figure behind the tiers came from a different run. The worst peak across ~1,400 completed tasks of THIS study is 4.1 GB. 64G is already 15.6× that and is the node ratio at 8 GB a core; 96G asks for 12 and waits. ⚠️ **The 4.1 GB was measured on the cluster on 2026-09-06, by the tool as it stood before the skipped-task fix.** A maximum cannot be lowered by including tasks that skipped, so the figure stands, but it has not been re-read since and the memory column of `measure_walls.py` is the place to confirm it | **the author** — the 64G floor is theirs and is untouched; whether the 96G tier drops to it is theirs too |
@@ -12012,7 +12012,7 @@ Everything below is either fixed, or waiting on one of these six. Nothing else i
 | C0 | 🔴 **FIVE JOBS MAY RUN OUT OF WALL CLOCK. Measured 2026-09-07, and this is the only irreversible failure in the study.** `scontrol` cannot raise a limit for its owner, so each needs the generator's wall raised and the unrun indices resubmitted — never a cut. Four of the five are the **quantile forest**, whose longest task is 20:52 across the whole study, and the generator is asking barely more than that.<br><br>`val_svm` **1.13×** — 0:54 against 1:00:00, laboratory censoring, `12986386`<br>`qm91_qrf` **1.29×** — 20:52 against 1-02:59, main grid, `12980589`, three replicates still to run<br>`qm92_qrf` **1.44×** — 20:52 against 1-05:59, deep run `12986325` AND censoring `12986344`<br>`qm90_qrf` **1.66×** — 2:25 against 3:59, screen, `12971607`<br><br>Everything else in the study has 4.9× or more. **The generator's wall rule for `qrf` is what is wrong, not these five job ids** — fix it there or the next submission repeats it | **the author** — see §13.23b |
 | ~~C0b~~ | ✅ **CLOSED 2026-09-17 (§13.27 D9). They ran, and every cell is on disk: 441 of 441**, counted from `results/decisions_arc/d0_coverage.csv` and `d7_q4.csv` against the generator's own seven models, three datasets, three representations and seven noise conditions. The text below is the state on 2026-09-07 and is kept for the record. ~~THE ENTIRE UNCERTAINTY EVIDENCE IS QUEUED AND HAS NEVER STARTED.~~ All twelve arrays, **378 tasks**, `12986390`–`12986401`, submitted 2026-09-06. Not one task has begun, and `unc_*` is its own pipeline so no other run can size its walls — the tool says "this model has run NOWHERE" for all twelve. Nothing about aleatoric-versus-epistemic exists yet, on either dataset. It is also the run whose pair list is still an open author decision (C4) | **the author** — C4 first, then let one array through to time it |
 | C1 | ✅ **CORRECTED 2026-09-07 — they were put back on 2026-09-04.** 25 laboratory tasks, all hERG, all six representations, from the missing-cache deaths of 2026-09-02. `scripts/slurm_jobs.py` labels `12975687` plus `12979965`–`12979969` "the 25 jobs lost to the missing cache", and the script-by-script list adds to exactly 25. The old FAILED rows under `12971620`–`12971638` can never change state; they are a record, not a queue, and resubmitting them would duplicate live work. **Check, do not resubmit:** `sacct -S 2026-09-03 -j 12975687,12979965,12979966,12979967,12979968,12979969 -X -n -P --format=JobID,JobName,State,Elapsed` | **the cluster** — the check above, §13.29a STEP 11 |
-| C2 | 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
+| ~~C2~~ | ✅ **CLOSED 2026-09-17 — every cell this model was asked for has landed; see §13.27 D2x.** The text below is what was believed on 2026-09-07 and is kept for its job ids. 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
 | ~~C2b~~ | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
 | C3 | **`scripts/lab_tasks_on_old_noise.py` has never been run.** The laboratory noise draw changed on 2026-09-04 (§3.3b); tasks that FINISHED before the pull wrote rows under the old draw and have to be replaced. Written for exactly this and named as outstanding in three separate messages | **the cluster** |
 | ~~C4~~ | ✅ **CLOSED 2026-09-17 (§13.27 D9).** The author took D3d option 4 on 2026-09-07 — `GP-Hetero` added, nothing removed — and its results are on disk on all three datasets. Kept for the record: **NARROWED 2026-09-07 (§13.27 D3c), and smaller than it reads.** This said the models that can measure the aleatoric/epistemic split per molecule are on neither list. **Three of the six queued models do measure it** — the quantile forest and the two variance-head networks, which the author added on 2026-09-01 for exactly this. The run as queued answers the question on two network architectures and a forest. What is still open is whether to ALSO run a model whose data-noise half varies per molecule from a noise head: `GP-Hetero`, `VBLL-Full-Hetero`, `MLP-VBLL-Full-Hetero`. Four options with their task counts are in §13.27 D3d; the recommendation is to run the 378 as they are, or to ADD `GP-Hetero` as a seventh model at 63 tasks, because the two swap options delete a measurement to buy one | **the author** |
@@ -12050,7 +12050,7 @@ measured on the same data by the depth run.
 **The wall rule is the fix.** Options 1 and 3 both need the generator changed, or the next
 submission asks 1-05:59 again.
 
-### 13.23c `gauche_rbf` — fix or drop
+### 13.23c `gauche_rbf` — fix or drop ✅ SETTLED: FIXED AND KEPT, see §13.27 D2x
 
 ⚠️ **SUPERSEDED 2026-09-07 by §13.27 D2.** The cause is one bug, fixed at `c223ec3` and
 proved by running the pipeline; it is not a property of the model at noise level 1.5, and the
@@ -12263,7 +12263,7 @@ answers it. **code** = I fix it.
 | | Thread | What it blocks | Owner |
 |---|---|---|---|
 | 🔴 **NEW** | **The corrected selector has never been run, so the ranking the author acted on is still the bad one** — The transcript opens by telling the author they are reading output from the pre-fix selector, and that the count behind "random forest is the most noise-tolerant" is inflated because two conditions held only two models. The fix landed in 57066ec and 364019f. Nothing later in the transcript shows the corrected reading being produced or read. | Any confirmation that the six deep-run models and the five censoring pairs are right. Command: python scripts/select_deep_run_pairs.py --results-dir results | cluster |
-| 🔴 **NEW** | **Both pair files still say provisional and were seeded from the unfinished screen, and the confirmation pass was never done** — deep_run_pairs.json and censoring_pairs.json were both seeded 2026-09-05 before the screen finished, and both carry a line telling the reader to re-read them against the finished screen and edit in place. Two of the six deep-run models rest on exactly the reading the transcript says was contaminated: random forest is there as most noise-tolerant on all three representations, and het_gp_rbf as least noise-tolerant on two of three, marked READ OFF ONE CONDITION. | The deep run 12986314-12986332 and both censoring runs are executing against a selection nobody has confirmed. Narrowing stays free; widening means resubmitting those indices. | **author** |
+| ✅ **CLOSED** | **Both pair files were seeded from the unfinished screen and said provisional** — settled by the author 2026-09-07 and widened 2026-09-10. Both now say `provisional: false` and carry a `settled` line: eight models on three representations for the deep run, five named pairs unchanged for censoring. `rf` survives; the reading that dropped it was taken at four models, not six (§13.28). | Nothing. Commits `d8f02d5` and `b376678` on `additional_reps`; reasons in §13.27 D4i, resubmissions in §13.18 submissions 10 and 11. | **author, answered** |
 | 🔴 **NEW** | **Three deferred decisions in 13.17 B have had their trigger fire and nobody read them off** — 13.17 B lists four decisions deferred with a rule and a trigger. Three fire when the screen lands: which models and representations go deep, which pairs censoring runs on, and which pairs the deep run uses on QM9 and the laboratory sets. The fourth, hERG's reporting level checked against a rank-flip table, fires when the re-run lands. The transcript says the screen is 18 of 19 models done. | Every table that quotes a deep-run or censoring result rests on an unconfirmed selection. | **author** |
 | 🔴 **NEW** | **The three levers for finishing sooner were offered and never chosen between** — The transcript names three ways to shorten the critical path and ends "Tell me which of those you want and I'll make the change." The author's next message changed the subject to failures and the offer was never answered. Lever one cuts censoring from ten replicates to three. Lever two drops gauche_rbf from the deep run. Lever three records that ngboost cannot be dropped because the generator refuses to build without it. | The finish date. Levers one and two together are the whole saving on the deep run and censoring. | **author** |
 | 🔴 **NEW** | **The censoring-replicate lever as offered contradicts what 13.14 already recommends** — The transcript calls cutting censoring from ten replicates to three the biggest single saving on the critical path. Section 13.14 already priced the same cut, put the saving at 270 runs out of 22,140, and recommends keeping ten because at any smaller number censoring carries a different error bar from the rest of the study. | The author cannot weigh lever one while the two accounts disagree about what it is worth. | **author** |
@@ -12275,7 +12275,7 @@ answers it. **code** = I fix it.
 | 🔴 **NEW** | **In the deep run and censoring most completed tasks are the selection gate exiting in seconds, so the done counts overstate progress** — The transcript found that qm92_dnn_bnn_full shows 36 completed tasks at one minute each because the pair is not in the selection file and the gate exits. measure_walls was fixed to count those separately. run_status still puts them in a done column, so QM9 deep run 364 done is mostly skips, not work. | Any honest reading of how far along the deep run and censoring actually are. | code |
 | 🔴 **NEW** | **The tools label the two uncertainty submissions the three and the four, which is the coined shorthand the author banned** — slurm_jobs.py names the two uncertainty submissions uncertainty, the three and uncertainty, the four. Those refer to condition counts, not array or task counts, and they read as codes. Every status output the author sees carries them. | Nothing technical. It is part of why the status output is unreadable. | code |
 | 🟠 **NEW** | **Nobody has checked whether 13033488 has already written a report from an incomplete grid** — The transcript flags an unexplained job in the queue and says to check what it is before it writes anything. The register identifies it as the author's own decision report and says check_runs_landed.py should be run before it. Neither says whether it has already written output, or whether that output has to be discarded, and one representation of six is missing from every replicate 1 to 9 of the main grid it reads. | Trusting anything under results/ written after that job ran. | cluster |
-| 🔴 | **gauche_rbf has never started a task on the screen and has no wall or memory to borrow** — 12971618, eighteen tasks, queued since 2026-09-02, not one started. It is the one model still missing from the screen, and because it has never completed a task anywhere, no measurement can size its wall or its memory. It also fails wherever it does run. | The screen's completeness, and 15 to 17 days of wall on three submissions. | **author** |
+| ✅ | ✅ **CLOSED 2026-09-17 — every cell this model was asked for has landed; see §13.27 D2x.** The text below is what was believed on 2026-09-07 and is kept for its job ids. **gauche_rbf has never started a task on the screen and has no wall or memory to borrow** — 12971618, eighteen tasks, queued since 2026-09-02, not one started. It is the one model still missing from the screen, and because it has never completed a task anywhere, no measurement can size its wall or its memory. It also fails wherever it does run. | The screen's completeness, and 15 to 17 days of wall on three submissions. | **author** |
 | 🔴 | **Two other screen arrays are part-stuck and no lever covers them** — Besides gauche_rbf, qm90_mlp_bnn_full_mve has 16 of 18 tasks still queued and qm90_dnn_bnn_full_variational has 10 of 18. Both appear in the transcript's squeue paste. The register records them inside the gauche_rbf row rather than as their own item, and nothing addresses them. | The screen reading the pair-file confirmation depends on. dnn_bnn_full_variational is also on the uncertainty pair list. | cluster |
 | 🔴 | **lab_tasks_on_old_noise.py has still never been run** — The laboratory noise draw changed on 2026-09-04. Tasks that finished before that pull wrote rows under the old draw and have to be replaced. The script was written for exactly this and the transcript names it as still outstanding. | Every laboratory result predating the pull is on the wrong noise draw and nobody knows which rows those are. | cluster |
 | ✅ | **CORRECTED 2026-09-07 — put back on 2026-09-04 as `12975687` and `12979965`–`12979969`.** All 25 are hERG, on all six representations, from the missing-cache deaths of 2026-09-02. Do NOT resubmit; check with `sacct` (§13.29a STEP 11). | One of three laboratory datasets in the breadth grid. | cluster |
@@ -12291,11 +12291,11 @@ answers it. **code** = I fix it.
 | 🔴 | **A5 / C4 — which pairs the uncertainty runs use, with the compute already queued** — Only one of the four settled uncertainty pairs can measure the aleatoric and epistemic split per molecule. qrf has both halves per molecule; NGBoost has no model half; the Gaussian process and the variational network each report one data-noise number per fit. The three models that have both — heteroscedastic_gp and the two variational networks with a noise head — are on neither uncertainty run's pair list, and the QM9 generator gives them -u True with no --oof-folds, so they write test rows whose injected noise is exactly zero. | 378 queued tasks — the whole of the uncertainty evidence, on both datasets. Nothing about aleatoric versus epistemic exists yet. | **author** |
 | 🔴 | **C0b — all twelve uncertainty arrays are queued and not one task has started** — 12986390-12986401, 378 tasks, submitted 2026-09-06. Not one has begun. unc_* is its own pipeline, so no other run can size its walls — the wall tool reports 'this model has run NOWHERE' for all twelve. It is also the run whose pair list is the open decision above. | Every uncertainty statistic, both the decomposition and the calibration ones. Also blocks measuring these walls at all, since nothing has completed to borrow from. | **author** |
 | 🔴 | **The three molecules Sort & Slice cannot represent** — Methane, ammonia and water each carry exactly one Morgan substructure occurring in exactly one molecule, so they can never reach a top-1024 by training frequency and get an all-zero vector, which the guard correctly refuses. Measured: 3 of 132,480 QM9 SMILES at SNS_DIM = 1024. Four options are written out — drop the three from every representation, drop them from Sort & Slice alone, raise SNS_DIM, or fold rather than slice — with option 1 recommended and option 2 explicitly not. | The failed QM9 main-grid tasks, and one representation of six in every replicate 1 to 9. Resubmitting before the cause is fixed gets the same exit in the same 33 seconds. | **author** |
-| 🔴 | **gauche_rbf — fix it or drop it** — Twelve failed tasks: eight on the main grid 12980590 and four on the deep run 12986326. The error is RuntimeError on out-of-fold scoring, at noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa — a property of the model at the top of the level ladder, not of one task or node. It also has never completed a task on the screen. It was added by the author for the per-molecule uncertainty requirement and carries the cleanest aleatoric separation in the roster, x17.2 against x1.5 epistemic. Note that commit c223ec3 has already fixed a cap_gp_training_set defect that produced this same class of guard refusal, so whether the twelve failures survive that fix has not been re-checked. | The screen's last missing model, and 15 to 17 days of wall on three submissions. Dropping it takes 17 days off both the deep run and censoring. | **author** |
+| ✅ | ✅ **CLOSED 2026-09-17 — every cell this model was asked for has landed; see §13.27 D2x.** The text below is what was believed on 2026-09-07 and is kept for its job ids. **gauche_rbf — fix it or drop it** — Twelve failed tasks: eight on the main grid 12980590 and four on the deep run 12986326. The error is RuntimeError on out-of-fold scoring, at noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa — a property of the model at the top of the level ladder, not of one task or node. It also has never completed a task on the screen. It was added by the author for the per-molecule uncertainty requirement and carries the cleanest aleatoric separation in the roster, x17.2 against x1.5 epistemic. Note that commit c223ec3 has already fixed a cap_gp_training_set defect that produced this same class of guard refusal, so whether the twelve failures survive that fix has not been re-checked. | The screen's last missing model, and 15 to 17 days of wall on three submissions. Dropping it takes 17 days off both the deep run and censoring. | **author** |
 | 🔴 | **The quantile forest's wall rule, and val_svm's** — qrf's longest task anywhere in the study is 20:52. The generator asks 1-02:59 on the main grid, 1-05:59 on the deep run and censoring, and 3:59 on the screen — 1.29x, 1.44x and 1.66x headroom against a measurement that is already the worst of fifteen tasks. val_svm in laboratory censoring is 1:00:00 against 0:54, 1.13x. Everything else in the study has 4.9x or more. scontrol cannot raise a limit for its owner, so this needs the generator's wall rule changed and the unrun indices resubmitted; three options are set out. | Five jobs that die at the wall with no partial credit and no row written. This is the only irreversible failure class in the study. | **author** |
 | 🔴 | **B3 — whether the 96G memory tier drops to 64G** — The tiers rest on a 61.2 GB figure that came from a different run. The worst peak across about 1,400 completed tasks of this study is 4.1 GB, so 64G is already 15.6x that and is the node ratio at 8 GB a core, while 96G asks for twelve cores' worth and waits. The 4.1 GB was measured before the skipped-task fix; a maximum cannot be lowered by including skipped tasks so the figure stands, but it has not been re-read since. | Backfill on every network and Gaussian process. The 64G floor itself is settled and untouched. | **author** |
 | 🔴 | **B2 — cutting the over-long walls on pending jobs** — qm92_ngboost asks 22 days against under four measured; qm92_mlp_bnn_full_mve asks 13 days 18 hours against 8:38 measured. A three-week request fits almost no backfill gap, which is why these sit on Priority while four-hour jobs run past them. Cutting a TimeLimit on a pending job keeps its submit time, so it costs no queue position. The tool now cuts only elements that have not started, so a running task keeps the limit it was admitted under. | Queue throughput on the deep run and both censoring runs — nothing is wrong with the science, the work simply does not start. | cluster |
-| 🔴 | **B2c — gauche_rbf has never started on the screen, and two screen arrays are part-stuck** — 12971618, eighteen tasks, queued since 2026-09-02, not one has begun. It asks 1-18:59 on medium. This is why the screen reads 87 per cent rather than done. Two other screen arrays are part-stuck the same way: qm90_mlp_bnn_full_mve with 16 of 18 queued and qm90_dnn_bnn_full_variational with 10 of 18. | Declaring the screen finished, and therefore confirming the deferred selection decisions in §13.17 B against a complete screen. | cluster |
+| ✅ | ✅ **CLOSED 2026-09-17 — every cell this model was asked for has landed; see §13.27 D2x.** The text below is what was believed on 2026-09-07 and is kept for its job ids. **B2c — gauche_rbf has never started on the screen, and two screen arrays are part-stuck** — 12971618, eighteen tasks, queued since 2026-09-02, not one has begun. It asks 1-18:59 on medium. This is why the screen reads 87 per cent rather than done. Two other screen arrays are part-stuck the same way: qm90_mlp_bnn_full_mve with 16 of 18 queued and qm90_dnn_bnn_full_variational with 10 of 18. | Declaring the screen finished, and therefore confirming the deferred selection decisions in §13.17 B against a complete screen. | cluster |
 | 🔴 | **C1 — 25 failed hERG laboratory tasks have never been resubmitted** — All hERG, all six representations, the missing-cache deaths of 2026-09-02. The cache is confirmed present and loading 1,415 molecules, so nothing further is wrong; nothing has put the tasks back. | One third of the laboratory breadth grid — every hERG cell of those 25 combinations. | cluster |
 | 🔴 | **C3 — scripts/lab_tasks_on_old_noise.py has never been run** — The laboratory noise draw changed on 2026-09-04 so that a molecule's corruption is a property of the molecule rather than of the fold it landed in. Tasks that finished before the pull wrote rows under the old per-fold draw and have to be replaced. The script exists, was written for exactly this, and prints the scancel for the running ones and an sbatch --array per script for the rest, putting the cancelled indices into the resubmission too. It is named as outstanding in three separate messages and in two sections of the plan. | Everything laboratory-side run before 2026-09-04 is superseded until this runs — the breadth grid 12971620-12971638, the hERG resubmits 12979965-12979969 and the stray 12975687. Any laboratory table built now mixes two noise draws. | cluster |
 | 🔴 | **C6 — the paper analysis job is running against an incomplete grid** — 13033488 paper_analysis is slurm_scripts_analysis/run_paper_analysis.sh, the author's own decision report. Sort & Slice is missing from every replicate 1 to 9 of the main grid, so one representation of six is absent from everything it reads. | Any number the decision report prints is on five representations, not six. check_runs_landed.py should be run before it rather than after. | code |
@@ -12329,7 +12329,7 @@ answers it. **code** = I fix it.
 
 | | |
 |---|---|
-| ✅ **`gauche_rbf` — the cause was a code bug and it is fixed.** `c223ec3`. Not a property of the model at high noise, which is what I said twice. `cap_gp_training_set` subsamples a Gaussian process to 5,000 molecules but returned only the count, so the out-of-fold pass got 5,000 rows against a noise record of 8,000 and the guard refused. It affected `gauche`, `gauche_rbf` AND `heteroscedastic_gp`. ⚠️ **The twelve failures have NOT been re-checked against the fix**, and the fix-or-drop question was being asked without it. Re-check before deciding anything about this model. |
+| ✅ **`gauche_rbf` — the cause was a code bug and it is fixed.** `c223ec3`. Not a property of the model at high noise, which is what I said twice. `cap_gp_training_set` subsamples a Gaussian process to 5,000 molecules but returned only the count, so the out-of-fold pass got 5,000 rows against a noise record of 8,000 and the guard refused. It affected `gauche`, `gauche_rbf` AND `heteroscedastic_gp`. ✅ **Re-checked 2026-09-17: they re-ran clean.** Every cell is complete on QM9 and on the three assay datasets, and the out-of-fold pass wrote rows for all 19 of the QM9 cells that run it. §13.27 D2x. |
 | ✅ **Sort & Slice — the exclusion is written.** `62f1fe2`. `split_qm9` drops the molecules the featuriser cannot represent from EVERY representation, found by the property rather than by a list of three SMILES, with the featuriser built on every run so an ECFP4 job and a Sort & Slice job score the same molecules. Proved by `scripts/test_sns_zero_exclusion.py`. ⚠️ **A consequence I did not flag: the screen's Sort & Slice rows were produced WITHOUT the exclusion** and the repaired main-grid rows will be produced with it, so the two are on different molecule sets. Any table putting them together, and the ranking that reads the screen, has to say so or the screen's Sort & Slice tasks have to be re-run. |
 | ✅ **The QM9 wall rule.** `62f1fe2`, `model_hours.json`, §13.24a. ⚠️ **The laboratory and uncertainty generators still use the old guesses**, so every laboratory resubmission still goes out over-asked. |
 
@@ -12384,8 +12384,14 @@ is which models the screen now puts in each slot, and it is not what the queue w
 
 **`rf` is no longer the most noise-tolerant model on any of the three representations.**
 That sentence is the one the earlier broken selector produced and it does not survive the
-corrected reading. Nothing has been changed in `deep_run_pairs.json` — it still says
-`provisional: true` and the deep run is executing against it.
+corrected reading.
+
+✅ **T02 CLOSED. The line above about `provisional: true` is stale and the reading at four
+models is superseded.** `rf` survives at six models; the reading that dropped it was taken at
+four (§13.28). The author settled the selection on 2026-09-07 and widened it on 2026-09-10.
+Both files now say `provisional: false` and carry a `settled` line. Commits `d8f02d5` (seventh
+model, `dnn_vbll_hetero`) and `b376678` (eighth, `mlp_vbll_hetero`) on `additional_reps`.
+§13.27 D4i and §13.18 submission 11 hold the reasons and the resubmission.
 
 ⚠️ Also unchecked: `mlp_bnn_full_mve` on chemberta reads auc_norm **0.9958**, the highest
 number in the whole screen, from a cell holding **2 of 7 conditions**. Whether auc_norm is
@@ -15967,8 +15973,8 @@ cancelled and resubmitted to `long` at walls computed from the fit count. All of
 from `squeue`, not from a command having been run. **One thing is left and it is a watch, not a
 task:** `12980588`, `qm91_mlp_bnn_full_mve`, was cut to 12:59 on a rate from 7 finished tasks of 18
 and could hit that wall. If an element returns TIMEOUT, raise the model's rate in
-`model_hours.json` from what it used and resubmit that element.
-
+`model_hours.json` from what it used and resubmit that element. **That watch is still open on
+2026-09-17 and has never been read; the block that reads it is at the end of this D1.**
 
 **How the "asks" column was got.** Not typed, and not read off a document. Each generator was
 run twice: once from the commit that was live when that submission went out, and once from the
@@ -16354,6 +16360,68 @@ raise this model in `model_hours.json` from what it actually used.
   whether they run at all; the numbers are here.
 - **`gauche_rbf`'s screen array, 12971618**, is in part 2 above at 15:59 and in part 3 at 64 GB.
   Chat 2 owns the rest of that model.
+
+##### Re-read 2026-09-17. Three things go stale, and one block asks all three
+
+D1 closed on 2026-09-07 and the cuts took. What follows is what changed in the ten days since,
+read off this checkout today, not carried forward from the paragraphs above.
+
+**Every generator still prices its wall from measurement.** Read today, in the code, not in a
+note: `slurm_scripts_qm9_rerun/generate_scripts.py:403` computes the hours from
+`model_hours.json` and grades the evidence behind each rate;
+`slurm_scripts_validation_rerun/generate_scripts.py:318` computes them from its own
+seconds-per-fit table; `slurm_scripts_uncertainty_rerun/generate_scripts.py:383` imports that
+table from the laboratory generator rather than keeping a second copy. Nothing has drifted back
+to a typed constant.
+
+**Every model on both grid pipelines still asks 64 GB.** Checked by calling the generator's own
+`memory_for()` on this laptop today: `rf`, `qrf`, `ngboost`, `gauche_rbf`,
+`heteroscedastic_gp` and `mlp_bnn_full_mve` all return `64G`. `heteroscedastic_gp` is worth the
+check because that name is not in `model_memory.json`'s list — it maps through
+`model_names.json` to `het_gp_rbf`, which is, and the generator canonicalises before it looks
+up. So submission 9 of 2026-09-14, the 78 heteroscedastic-process tasks, went out at the floor
+and not at the 96 GB default.
+
+**Two rates in `model_hours.json` are still lower bounds taken on 2026-09-07, and they are the
+walls nothing has revisited.**
+
+| model | what the file records | why it is a lower bound | what it costs |
+|---|---|---|---|
+| `ngboost` | 21.81 hours per 110 training runs, from a task **still running** at 49.97 hours, 0 tasks of 18 finished | an unfinished task's elapsed time is a floor, not a timing | the generator grades it `partial` and applies the 3.0× margin, which is where the main grid's 285:59 comes from |
+| `mlp_bnn_full_mve` | 1.12 hours per 110 training runs, 7 tasks of 18 finished | under the generator's half-the-array rule | its wall was cut to 12:59 on 2026-09-07 and one of its tasks was already 6:43 in at the time |
+
+Both were true on 2026-09-07. Ten days of cluster time have passed and neither entry has been
+re-read. If `12980577`'s long `ngboost` task has since ended, its rate becomes a measurement and
+every `ngboost` wall in the study drops; if any element of `12980588` came back TIMEOUT, that
+element wrote nothing and has to go again with the rate raised.
+
+###### The block. One paste, three answers
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+
+# 1. Did anything die at its wall after the cuts of 2026-09-07?
+sacct -S 2026-09-07 -X -n -P --format=JobID,JobName,State,Elapsed,Timelimit \
+  | grep TIMEOUT || echo 'no TIMEOUT since the cuts'
+
+# 2. The two rates that are still lower bounds: how many tasks have finished now,
+#    and what did the longest one take?
+sacct -j 12980577,12980588 -X -n -P --format=JobID,JobName,State,Elapsed \
+  | sort -t'|' -k4,4r
+
+# 3. What everything in the queue asks now, wall and memory. No head; the last
+#    run of this was truncated and hid the answer.
+squeue -u $USER -o "%.12i %.30j %.2t %.11M %.11l %.7m %R"
+```
+
+**What each answer means.** Block 1 printing nothing closes the `12980588` watch outright.
+Block 2's `ngboost` row, if it says COMPLETED, gives the hours to write into
+`model_hours.json` in place of 21.81 — take `measured_task_hours` from the Elapsed column,
+divide by 63 training runs and multiply by 110, set `completed_tasks` and `still_running: false`,
+and regenerate. Block 3's `%.7m` column must read `64G` on every pending row outside the
+uncertainty arrays, which keep 96 GB because no task of that pipeline has ever recorded a
+MaxRSS of its own.
+
 
 #### D2. What failed, why, and the line that puts it back — CHAT 2
 
@@ -17223,12 +17291,173 @@ thirds of the replicates are roughly thirds of the wall.
 **This is chat 1's to decide, not chat 2's.** The numbers are here because chat 2 measured them
 on `gauche_rbf`; whether `ngboost` and `qrf` get the same treatment is a wall decision.
 
+⚠️ **SUPERSEDED BY D2x, 2026-09-17 — chat 2 IS finished.** Both halves of the close condition below are met and the evidence is in D2x. The paragraph is kept because it is where the second half of the condition was written down.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
 `check_runs_landed.py --stage 1` and `--stage 2` report no `gauche_rbf` cell MISSING or PARTIAL
 **on both rows, the accuracy one and the out-of-fold one**. The second half of that is new; see
 D2k for why the first half alone was not enough.
+
+
+#### D2x. CHAT 2 IS CLOSED — measured 2026-09-17, ten days after D2 was written
+
+Every closing condition chat 2 was given is met. None of it is met by reasoning; each line
+below names the file the number came from.
+
+**Where the numbers come from, and why the cluster is not needed for them.**
+`results/decisions_arc/` holds the tables `scripts/run_paper_analysis.py` wrote on ARC from the
+real result files. `d0_coverage.csv` in that directory is the same frame `check_runs_landed.py`
+compares against — both build it by calling `figlib_load.coverage`. So the comparison replays on
+this laptop: build the expected set from the three generators, run it against that table. The
+counts below are that replay, not a reading of a document.
+
+**Nothing this model was asked for is absent.** One row of the table is one part of the run. A
+cell is one noise condition on one representation for this model. Seven noise levels are on the
+ladder for gaussian and for censoring, six for the other five conditions.
+
+| part of the run | cells asked of `gauche_rbf` | absent | short a noise level | short a replicate |
+|---|---|---|---|---|
+| the screen, QM9 | 19 | 0 | 0 | 0 |
+| the main grid, QM9 | 19 | 0 | 0 | 0 |
+| the deep run, QM9 | 19 | 0 | 0 | 0 |
+| the breadth grid, three assay datasets | 54 | 0 | 0 | 0 |
+| the assay depth run and censoring, three assay datasets | 30 | 0 | 0 | 0 |
+
+The same replay finds 14 cells short a noise level across the whole QM9 deep run. Five are
+`het_gp_rbf` and nine are `mlp_vbll_hetero`. That agrees cell for cell with §14.26's own reading
+of the same file, which is the cross-check that the replay is doing what the tool does. It finds
+51 absent cells on the assay depth run, all of them `dnn_vbll_hetero` and `mlp_vbll_hetero`.
+Neither set is this model.
+
+**1. The twenty failed tasks re-ran clean.** `auc_norm_qm9.csv` gives this model 28 rows on QM9,
+one per condition and representation, each built from 10 replicates. Its lowest clean $R^2$ on
+QM9 is 0.835 on ECFP4 and its highest is 0.906 on PDV. The out-of-fold pass — the thing that was
+failing — wrote rows for all 19 of the QM9 cells that run it, at every level on each condition's
+ladder and at all 10 replicates. Read off `unc_q5.csv`, which carries one row per condition,
+representation, noise level, replicate and uncertainty component. Its `fold` column is the replicate
+on QM9 and nothing else — `uncertainty_stats.py:674` sets it from `iteration`, and says at length
+why it used to be something else.
+
+**2. The screen's eighteen tasks ran.** Every QM9 cell holds 10 distinct replicate numbers. The
+main grid runs 9 of them, numbered 1 to 9. The screen runs the one numbered 0. Ten distinct
+numbers is the screen's replicate being there, and there is no other producer of it.
+
+**3. It stays in the deep run.** `deep_run_pairs.json` names it, and records the author's
+decision of 2026-09-07 with the reason: the reading picked `gauche` for the Gaussian-process
+slot on its position in a list rather than on a score, and `gauche` is the Tanimoto kernel,
+which is defined on binary fingerprints alone. Taking `gauche_rbf` out would leave the deep run
+with no Gaussian process on PDV or on ChemBERTa. `censoring_pairs.json` names it on PDV for the
+same reason. Chat 4 and chat 2 agree; nothing is left to reconcile.
+
+**4. Re-priced, and the old figure was never the cost.** A main-grid task is 7 noise levels by 9
+replicates, which is 63 training runs. It takes **3.96 hours** with the out-of-fold pass working,
+and a deep-run task takes **4.39 hours**. Both are in `model_hours.json` under
+`the_out_of_fold_pass_is_measured_2026_09_07`, timed off screen array 12971618. The 15 to 17 days
+this model was nearly dropped over was a request, and the queue refused it. Nobody should offer
+dropping it on a time argument again without those two numbers in the same sentence.
+
+##### D2x.a The one thing the resubmissions cost, and it is not a gap
+
+Every out-of-fold row of this model is on disk four times over. A
+Gaussian process fits at most 5,000 molecules (`GP_DEFAULTS['max_train_n']`), and QM9 trains on
+8,000, so one run of the pass writes 5,000 rows for one condition, representation, noise level
+and replicate. `unc_q5.csv` reports **20,000 rows** in each of those for this model at replicates
+1 to 9, and **15,000** at replicate 0 — four copies and three. A resubmission appends and does not
+replace (D2f), and this model was put back more times than any other.
+
+Two controls, both read off the same file and the same cell. `het_gp_rbf` is capped by the same
+rule and has been submitted once: it reports exactly **5,000**. `ngboost` is not capped and trains
+on all 8,000: it reports **16,000**, which is two copies. `qrf`, `dnn_vbll` and `mlp_bnn_full_mve`
+report 8,000, which is one.
+
+**No reported statistic is inflated by it.** Every uncertainty statistic is computed inside one
+condition, representation, noise level, replicate and split (`uncertainty_stats.CELL_COLS`), and
+the permutation band is drawn by shuffling inside that same set. Both halves therefore see the
+same number of rows, so the band is not narrowed by the copies. What the statistic is, is a
+number pooled over four fits of one replicate rather than one fit. That was not written down
+anywhere before this section.
+
+On the accuracy side the copies are already handled: `figlib_load.load_qm9` takes the median
+across copies of a cell, which is the rule §13.30a settled. This model has 107 cells whose copies
+disagree, of 901 in the study — `d0_duplicate_disagreements_qm9.csv`, the ARC run of 2026-09-13.
+Ninety-six of the 107 hold six copies and eleven hold four. The middle disagreement inside one of
+them is 0.0152 in $R^2$ and the largest is 0.0507. Every copy was fitted at the shared defaults,
+so this is not the tuned-against-default worry §13.30 raised. `dnn_vbll_hetero` has 281 such
+cells and `mlp_vbll_hetero` has 243, so this model is fourth and not exceptional.
+
+##### D2x.b The generator still asks 28:59:00 for a task that takes 3.96 hours
+
+Generated on this laptop today: `python generate_scripts.py --stage 1 --models gauche_rbf`
+writes `--time=28:59:00` and `--mem=64G` for the QM9 main grid, and prints
+`rate is a LOWER BOUND`. A main-grid task is 63 training runs and takes **3.96 hours** with the
+out-of-fold pass working (`model_hours.json`, timed off screen array 12971618). The request is
+about seven times the measurement.
+
+**Nothing outstanding runs on this model**, so this changes no queued job. It bites the next time
+anyone regenerates and resubmits `gauche_rbf`.
+
+**Where the 28 comes from.** Two things, and neither is the laptop floor — D2s took this model out
+of `LAPTOP_TIMED` and that held.
+
+- The rate in `model_hours.json` is **2.7132 hours per 110 training runs at ONE fit**, which is
+  what the entry says it is. `wall_hours()` multiplies it by **six full fits**, because a training
+  run here is the model plus five out-of-fold refits.
+- The grade is `partial`, on `completed_tasks: 7` of 18, so the margin is **3.0** rather than the
+  2.0 a measured rate gets.
+
+2.7132 × 63 × 6 ÷ 110 × 3.0 is 27.97 hours, which is the number on the script.
+
+**Raising `completed_tasks` would not make it schedulable.** It moves the margin from 3.0 to 2.0,
+so the request goes from 28:59:00 to about 18:59:00 — and 18:59:00 is the wall this queue refused
+twice, in both partitions, in D2t and D2w. The six-fit accounting is what carries the rest, and
+this model's own entry measures the out-of-fold pass at **2.52 times one fit**, not six: the inner
+fits are cut from four fifths of a capped training set and a Gaussian process is cubic in that
+count. `wall_hours()` already has that arithmetic as `cheap_fits`, and uses it only on the
+`unmeasured` branch.
+
+**So if this model is resubmitted, split the replicates, exactly as D2u and D2v did.** Three
+arrays of three replicates each at `5:59:00` is the shape this queue admitted on 2026-09-07.
+Whether `wall_hours()` should apply `cheap_fits` to the `partial` and `measured` branches as well
+is a generator change touching every model's wall, so it is chat 1's and the author's, not
+chat 2's. The numbers are here because chat 2 measured them on this model.
+
+##### D2x.c The block to paste — confirms the close from the tool itself
+
+Everything above is read from what the ARC analysis wrote. This runs `check_runs_landed.py`
+itself, which is what chat 2's closing condition names.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+
+# 1. The close condition, from the tool. Expect no gauche_rbf line in any of the four.
+cd $QSAR
+for s in 0 1 2; do
+  echo "--- stage $s"
+  python scripts/check_runs_landed.py --stage $s --verbose | grep -i gauche_rbf
+done
+python scripts/check_runs_landed.py --stage 2 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun | grep -i gauche_rbf
+
+# 2. What a task of this model really took, over every array it ran in.
+sacct -S 2026-09-06 -X -n -P --format=JobName,State,Elapsed,MaxRSS \
+  -j 12971618,12980590,12986326,12986345,13042879,13042880,13042881,13049860,13049861,13049862,13049863,13049869,13049875 \
+  | grep gauche_rbf | sort
+```
+
+**Block 1 printing nothing is the answer.** A `gauche_rbf` line would name a cell that is
+MISSING, PARTIAL or THIN, and there is none in the ARC tables.
+
+**Block 2 is for the record, and it is optional.** It prints what every task of this model
+actually took, over every array it ran in. Two uses: `completed_tasks` and
+`tasks_in_the_measured_array` in `model_hours.json` can be set truthfully from it, and the
+longest Elapsed is the number to argue any future wall from. Read D2x.b first — a truthful
+`completed_tasks` moves the request to about 18:59:00 and this queue has already refused that,
+so the entry is worth correcting for honesty rather than for throughput.
+
+⚠️ **D2w's "Chat 2 is not finished" paragraph above is superseded by this section.**
 
 
 #### D3. The laboratory datasets — logD, Caco-2, hERG — CHAT 3, filled 2026-09-07
@@ -17568,9 +17797,11 @@ there is no `_merged/coverage.csv` to read. The 441 confirms the arithmetic from
 
 #### D4. What the queued jobs are actually computing — CHAT 4
 
-**Filled 2026-09-07.** Three slots of six are in question, and the author has not answered
-yet. Nothing below is edited into `deep_run_pairs.json` or `censoring_pairs.json` until she
-does; both files still say `provisional: true`.
+**Filled 2026-09-07. ANSWERED — read D4i below before this table.** Three slots of six were
+in question. The author answered on 2026-09-07 and widened again on 2026-09-10, so the deep run
+is **eight models on three representations** and both files say `provisional: false`. The table
+below is what was ASKED, kept because the reading it quotes is what the answer was given
+against; it is not the current selection.
 
 | submission | computing now | the reading says | author's call |
 |---|---|---|---|
@@ -17934,6 +18165,49 @@ selection.** The named ones so far are `laplace` on ChemBERTa for `dnn_bnn_full_
 **Re-run on the cluster after the fix, 2026-09-07.** PARTIAL fell from 36 to 18, THIN from
 77 to 4, MISSING stayed at 33 and `59/113` is unchanged. Every row in the listing is now a
 combination `deep_run_pairs.json` names. The fix took.
+
+#### D4e2. The same check said nothing at all about the laboratory runs — fixed 2026-09-17
+
+`python scripts/check_runs_landed.py --stage 2`, typed with no other flags, printed two rows:
+QM9 and QM9 out-of-fold. It printed no row for the laboratory depth run, no row for laboratory
+censoring, and no row for the uncertainty runs.
+
+**Cause.** `check_assay` and `check_uncertainty` returned `None` when no `--validation-dir` or
+`--uncertainty-dir` was given, and `report` skips a `None` without printing a line. Those cells
+were neither landed nor missing, which is the state `assay_expected`'s own docstring says this
+tool exists to make impossible — the same failure D4e records, in the same file, one function
+along.
+
+**Fixed.** With no directory each of the two now returns a row counting every cell outstanding,
+with a note reading `NOT CHECKED` and the flag to pass. The exit code is 1 rather than 0. And
+if `$KIRBY` is set — `scripts/runenv.sh` exports it — the two directories are filled in from it,
+so the plain command on the cluster covers all four producers without either flag being typed.
+
+**What the check now asks for, generated on this laptop 2026-09-17.** One QM9 cell is one noise
+condition on one representation for one model. One laboratory cell is one dataset, model,
+representation and condition.
+
+| producer | cells | what makes that number |
+|---|---|---|
+| QM9 | 149 | 8 models x 3 representations x 6 noise conditions = 144, plus censoring's 5 named pairs |
+| QM9 out-of-fold | 76 | the 4 deep-run models also on `uncertainty_pairs.json` — `ngboost`, `gauche_rbf`, `dnn_bnn_full_mve`, `heteroscedastic_gp` — x 3 representations x 6 conditions = 72, plus the 4 censoring pairs whose model is on that roster |
+| laboratory | 231 | 3 datasets x 8 models x 3 representations x 3 depth-only conditions = 216, plus 5 censoring pairs x 3 datasets = 15 |
+| uncertainty runs | 441 | 7 models x 3 datasets x 3 representations x 7 conditions |
+
+**Two new guards, in `scripts/test_check_runs_landed_selection.py` — 19 checks, exit 0.**
+
+The first fails if a model named in `deep_run_pairs.json` or `censoring_pairs.json` has a
+spelling the job generator does not have. The expected set is the generator's own table
+INTERSECTED with the selection file, so a typo, or a model added to the file before it is added
+to the generator, drops out of the intersection in silence: that model is then queued nowhere
+and missed by nothing, and the check reports a complete deep run while it has never run. It is
+checked on both sides, `generator_labels` against the QM9 generator's `MODELS` and
+`validation_labels` against the laboratory generator's `MODELS_ALL`. Proved by renaming one
+entry to `mlp_bnn_full_variational_hetro`: the test goes red naming it.
+
+The second fails if `check_assay` or `check_uncertainty` returns nothing when handed no
+directory. Registered in `scripts/check_fixes_fail_when_removed.py`; putting `or not directories`
+back turns it red.
 
 #### D4f. Thirteen of the eighteen PARTIAL rows are one post-processing step, not lost jobs
 
@@ -19529,9 +19803,10 @@ already-chosen pairs. That block is the fix; its absence means the old selector.
 model count from the file named by `--out`; pointed at a new path it read 4 models against a queue
 of 6 and dropped `rf`, which does survive at six.
 
-**Both selection files still say `provisional: true`** — `deep_run_pairs.json` and
-`censoring_pairs.json`, and censoring's carries its own instruction to be re-read against the
-finished screen. Re-read both here and clear both flags.
+✅ **Both flags are already cleared** — `deep_run_pairs.json` and `censoring_pairs.json` both
+say `provisional: false` and carry a `settled` line (2026-09-07, widened 2026-09-10). Nothing
+to clear here. Re-reading the selector is still worth doing, as a check on a settled call
+rather than as a decision.
 
 Then, if a slot moves: **edit the file in place.** Narrowing is free and queued tasks pick it up
 when each starts. Widening means resubmitting the indices of whatever is added.
@@ -20364,31 +20639,30 @@ What has to be said somewhere, with these numbers:
 F3 (the model-by-representation grid), R6 and R18 already carry this. The obligation is on the
 TEXT: no sentence may read as though the ECFP4 ranking is the ranking.
 
-#### 14.11ab THE RESIDUAL BAR LEAVES F2, THE WHISKERS STAY — the author, 2026-09-16
+#### 14.11ab F2 KEEPS THE RESIDUAL BAR AND THE WHISKERS — the author, 2026-09-17
 
-**The decision.** F2 showed both a residual bar and a whisker on every bar. The author's ruling: one
-or the other, not both, and it is the whiskers that stay. Done in `scripts/figlib_figures.py`.
+**The decision, in the order it was made.** On 2026-09-16 the author ruled that showing a residual
+bar and a whisker on every bar was too much and chose the whiskers; the residual bar came out
+(`06133fc`). On 2026-09-17, having read the whiskers on the rendered figure, she reinstated it:
+*"the whiskers aren't as bad as I thought, they only call into question grouped, shifted."*
+**F2 now carries both, and that is the settled state.**
 
-**What changed.**
+Her reading is what the file says. Leave-one-replicate-out range on the model share for robustness,
+off `results/decisions_arc/anova_eta2.csv`: **1.3 percentage points under gaussian, 2.2 under
+grouped_wider, 8.0 under grouped_shifted.** Two of the three conditions have whiskers narrower than
+the line weight of the bar edge. Only grouped-shifted has whiskers that carry a warning, and the
+warning is true.
 
-- `FACTOR_COLUMNS` now lists three bars — model, representation, their pairing. `eta2_residual` is
-  gone from it.
-- The side axis stays at 0 to 100 per cent so the gap to 100 is visible rather than hidden by a
-  rescale. **Nothing was renormalised**: every share printed is the same number it was, a share of
-  the total variance.
-- The caption says the three bars do not sum to 100, says what the remainder is in words — the
-  variation between replicates of one identical configuration, same model, same representation, same
-  noise condition, same noise level, different seed — and points at T3 for the number.
-- The legend is three keys wide instead of four.
-- **T3 keeps the residual column.** That is where the ANOVA literature puts it (see below), and it is
-  what the paper cites when a reader wants the number.
-- `figlib_metrics.two_way_eta2` is untouched. The residual is still computed, is still what every
-  whisker is a jackknife over, and the guard that refuses a decomposition with one observation per
-  cell still bites.
+**What is in the figure.** Four bars per condition — model, representation, their pairing, the
+residual — each with its leave-one-replicate-out whisker. Side axis 0 to 100 per cent; the four
+shares sum to 100. Nothing is renormalised.
 
-**Guard.** `test_figure_slots.test_f2_draws_no_residual_bar` fails if the residual returns to
-`FACTOR_COLUMNS`, if the three factor bars change, or if T3 loses its residual column. All five
-figure test suites pass.
+**What survived the round trip.** The legend now sizes itself from `FACTOR_COLUMNS` instead of a
+hard-coded four, and `test_figure_slots.test_f2_carries_the_residual_and_the_whiskers` guards the
+pair: it fails if the residual leaves `FACTOR_COLUMNS`, if the four bars change, if
+`f2_variance_decomposition` stops passing a spread to the bars, or if T3 loses its residual column.
+The spread is the likelier thing to lose by accident, because `grouped_bars` takes it as a keyword
+and drops it without complaint.
 
 **Why the claim does not need the residual.** "Model choice matters more than representation choice
 for noise robustness" compares two terms. The residual is a third term and does not enter it. Off
@@ -20433,6 +20707,26 @@ convention as well as on the crowding.
 **The assay datasets have no residual at all** — five scaffold folds are a partition of one dataset,
 not repeats of an experiment. F8 and T4 carry no residual and no whisker, and Limitations already
 says so.
+
+#### 14.11ac TWO CHATS IN ONE CHECKOUT — damage done and repaired, 2026-09-17 ✅ CLOSED
+
+**Resolved.** The owning session rewrote `test_f4a_draws_its_companion_panel` from scratch and it passes; `figlib_figures.py` came back with the F4a second panel intact, so nothing was lost there either. My failing stub is gone. The whole slot suite is green. **Kept for the rule at the bottom, which still stands.**
+
+**What happened.** While another chat was adding `test_f4a_draws_its_companion_panel` to
+`scripts/test_figure_slots.py`, I rewrote a block of that file by slicing between two function
+names. Their function sat inside the slice and was deleted, and it was never staged, so no git blob
+held it. They rewrote it. Separately, that session's commits reverted my F2 change mid-edit, so the
+residual bar had to be restored twice.
+
+**The whole-file revert was the worse move, and got away with it.** I ran
+`git checkout dddcbf8 -- scripts/figlib_figures.py` to undo my own change to F2, which reverts the
+WHOLE file. Had that session held uncommitted work there it would have gone, unrecoverably and
+undetectably. It did not, this time.
+
+**The rule this breaks.** Two chats in one checkout is the hazard, not the slicing. A whole-file
+`git checkout -- <path>` and a slice-based rewrite are both safe alone and both destructive when
+another chat is mid-edit in the same working tree. **Read the file immediately before writing it,
+and never revert a whole file to undo one hunk — edit the hunk back.**
 
 #### 14.12 WHERE EVERY FIGURE AND TABLE GOES — a recommendation, 2026-09-14
 
@@ -21119,3 +21413,49 @@ guide).
 
 14 slots. More PNG files than that appear on disk because F8 writes one per dataset and R6, R15 and
 R18 write one per condition or representation pair.
+
+#### 14.26 THE FIGURES ON DISK ARE OLDER THAN THE FIGURE SCRIPTS — 2026-09-17
+
+Every PNG, `captions.md` and `DECISIONS.md` in `results/decisions_arc/` was written on 16 September at
+22:04. Two commits to the figure scripts landed after it the same evening:
+
+| commit | time | what it changes |
+|---|---|---|
+| `87643a8` | 22:54 | F4a gains a PDV panel; R16 becomes one panel per noise condition; legends group by family |
+| `9d2cd2e` | 23:22 | F3 goes from one colour range to two (§14.24); F9 is cut (§14.24) |
+
+So `F4a_models_under_noise.png`, `F3_model_by_representation.png` and `R16_decoupling_ecfp4.png` on disk
+are the pre-commit drawings, the captions describe those drawings, and
+`F9_uncertainty_finds_noise_ecfp4_gaussian.png` is on disk for a figure the current code no longer draws.
+`scripts/run_paper_analysis.py` has to be re-run before a caption or a number is taken from any of them.
+Flagged in `HANDOFF.md` at the head of the Results handoff's figures section.
+
+**Two coverage counts here are stale.** `results/decisions_arc/d0_coverage.csv`, read 2026-09-17, holds
+**1,565 rows**, one per dataset-model-representation-condition. §14.11e's "1,474 of 1,553" at line 19642 is
+the 12 September file. **14 rows are short at least one noise level**: five `het_gp_rbf` on QM9 under
+Laplace, outlier and Student-$t$, and nine `mlp_vbll_hetero` on QM9 under the same three conditions
+missing the clean level alone, which is what drops them from every AUC_norm figure. Two cells carry a
+collapsed Gaussian-process fit, unchanged.
+
+**Three section numbers are used twice in this file** — 14.20, 14.21 and 14.22. `run_paper_analysis.py:581`
+says the F9 cut is "Recorded in RERUN_PLAN.md 14.22"; it is in §14.24. Nothing is renumbered here, because
+other documents cite these numbers. §14.25 is the live figure list.
+
+#### 14.22 THE METHODS ARE REWRITTEN — 2026-09-16
+
+Twenty-five agents, one writing each subsection from the fourth-pass findings and the code, one breaking
+every number in each draft against the file it claimed to read, one rewriting from what broke, and one
+reading all eight together. It found 21 places where two subsections could not both be true, said the same
+thing twice, or each left something to the other. All 21 are applied, with one more found by hand.
+
+**The text is in `PAPER_REVISION_GUIDE_FINAL.md`, "PART ONE REWRITTEN — METHODS".** The old §M0 to §M7 now
+carry a superseded note and are kept only for their notes on why a passage was cut and which published
+paper the judgement came from.
+
+**Six subsections where the paper has five**, because uncertainty quantification becomes its own. The
+NoiseInject subsection is deleted on the author's call and the package moves to the availability statement,
+which also gains the two study repositories — neither was linked anywhere in the paper.
+
+**Nothing here changes what runs.** The one item that touches the cluster is unchanged from §14.21: whether
+the NN-$\alpha$ hyperparameter sweep is re-run. The author settled it on 2026-09-16 — it is not re-run, and
+the Methods states which parameters each of the two searches covered.

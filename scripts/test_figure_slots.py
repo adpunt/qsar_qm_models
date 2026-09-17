@@ -341,22 +341,28 @@ def test_a_whisker_is_never_negative(out):
     check('F2 drew', path is not None and Path(path).exists(), str(path))
 
 
-def test_f2_draws_no_residual_bar(out):
-    """The author chose the whiskers over the residual bar, 2026-09-16.
+def test_f2_carries_the_residual_and_the_whiskers(out):
+    """Both, and the author settled it twice.
 
-    Both in one figure was the thing she rejected, so the residual must not
-    creep back into FACTOR_COLUMNS -- and the whiskers must not quietly go with
-    it, because then the figure carries neither.
+    She dropped the residual bar on 2026-09-16 and reinstated it on 2026-09-17,
+    so this guards the pair: neither the fourth bar nor the spread may leave F2
+    without her word. Losing the spread is the likelier accident -- grouped_bars
+    takes it as a keyword and drops it without complaint.
     """
-    print('  F2 carries the whiskers and not the residual')
+    print('  F2 carries four bars AND the whiskers')
     drawn = [column for column, _ in FIG.FACTOR_COLUMNS]
-    check('no residual bar', 'eta2_residual' not in drawn, ', '.join(drawn))
-    check('the three factor bars are still there',
-          drawn == ['eta2_model', 'eta2_rep', 'eta2_interaction'],
+    check('the residual is one of the bars', 'eta2_residual' in drawn,
           ', '.join(drawn))
+    check('all four factor bars are there',
+          drawn == ['eta2_model', 'eta2_rep', 'eta2_interaction',
+                    'eta2_residual'], ', '.join(drawn))
 
-    # The residual is still COMPUTED -- it is what the whiskers are a jackknife
-    # over, and T3 prints it. Dropping the bar must not drop the column.
+    source = Path(FIG.__file__).read_text()
+    body = source[source.index('def f2_variance_decomposition'):
+                  source.index('# F3 -- Q1 continued')]
+    check('F2 still passes a spread to the bars', "spread='spread'" in body,
+          'no spread= in f2_variance_decomposition')
+
     anova = pd.DataFrame([{
         'dataset': 'qm9', 'condition': 'gaussian',
         'outcome': 'Robustness (AUC$_{norm}$)', 'eta2_model': 49.5,
@@ -365,8 +371,8 @@ def test_f2_draws_no_residual_bar(out):
         'eta2_interaction_spread': 1.7, 'eta2_residual_spread': 2.6,
         'n_models': 13, 'n_reps': 6, 'n_replicates': 10}])
     path = FIG.f2_variance_decomposition(anova, out)
-    check('F2 still draws with the residual column present in the data',
-          path is not None and Path(path).exists(), str(path))
+    check('F2 drew with both', path is not None and Path(path).exists(),
+          str(path))
 
     import figlib_tables as T
     T.t3_variance(anova, out)
@@ -535,7 +541,7 @@ def main():
         test_guards_still_bite(out)
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
-        test_f2_draws_no_residual_bar(out)
+        test_f2_carries_the_residual_and_the_whiskers(out)
         test_f4a_draws_its_companion_panel(out)
         test_the_caches_actually_write(out)
         test_workers_change_the_speed_and_not_the_answer()
