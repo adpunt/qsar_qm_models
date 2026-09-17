@@ -18757,20 +18757,30 @@ are running** — `save_results` refuses to append to a file whose header differ
 would kill every task now in the queue.
 
 
-**35 are Sort & Slice at three or four replicates of ten**, on `grouped_shifted` and
+**35 were Sort & Slice at three or four replicates of ten**, on `grouped_shifted` and
 `grouped_wider`, every model. That is the zero-vector crash of chat 5: methane, ammonia and water
 carry one Morgan substructure each, so their vector came out all zeros and the guard refused to
-train. Fixed at `62f1fe2`, which is registered in `scripts/fixed_causes.json` with its commit, so
-the resubmission tool will now print for it.
+train. Fixed at `62f1fe2`, which is registered in `scripts/fixed_causes.json` with its commit.
+
+⚠️ **SUPERSEDED 2026-09-17. Those 35 are full and there is nothing to paste for them.** The
+coverage file written from the cluster's results on 2026-09-16,
+`results/decisions_arc_20260916/d0_coverage.csv`, has 54 rows of model and condition carrying
+`sns` and every one reads `OK` — 7 levels of 7, 10 replicates of 10. The author's own
+`check_runs_landed.py --stage 1` run the same day reported QM9 332 of 332 landed, nothing
+missing, partial or thin, and a direct count over `results/anova_*_sns_*.csv` on ARC found 378
+cells with none under 9 replicates. A later submission covered what the failed tasks lost.
+§13.29a STEP 6 carries the full reading.
 
 ```bash
 cd $QSAR
 python scripts/failed_tasks.py --emit-sbatch
 ```
 
-Paste the lines it prints. It prints nothing for a cause that is not registered as fixed, and it
-checks the commit is an ancestor of this checkout's HEAD before it prints — a document cannot
-declare a fix.
+It prints nothing for a cause that is not registered as fixed, and it checks the commit is an
+ancestor of this checkout's HEAD before it prints — a document cannot declare a fix. **Its lines
+come from `sacct`, which cannot see the disk.** Check each one against
+`check_runs_landed.py --stage 1 --verbose` before pasting it; a line for a cell that has landed
+writes a duplicate row, not a missing one.
 
 **The three depth-only conditions on QM9 are thin for a third reason, and it is queue position.**
 `laplace`, `outlier_p10` and `student_t_nu5` have a robustness number for 2 or 3 of the 19 models,
@@ -19058,8 +19068,10 @@ cd $QSAR && python scripts/failed_tasks.py --sacct-file /tmp/sacct_0907.psv --sh
 
 Write down the total under FAILED for the main grid. Three sections of this document give
 three different numbers for Sort & Slice — 48, 51 and 58 — and this command is the only thing
-that measures it. **It prints no sbatch lines** by design: it refuses to resubmit an unfixed
-cause, and these causes are now fixed. Step 6 derives the lines instead.
+that measures it. **It does print sbatch lines now** for a cause registered as fixed in
+`scripts/fixed_causes.json` whose commit is an ancestor of the checkout's HEAD. That count is
+how many tasks exited non-zero, not how many cells are absent; STEP 6 gives the disk reading for
+Sort & Slice, which is that none are.
 
 ---
 
@@ -19161,30 +19173,38 @@ exactly the line not to run. If its wall needs cutting, cut it to the generator'
 
 ---
 
-#### STEP 6 — Put back the Sort & Slice failures. READ THE OUTPUT BEFORE RUNNING THE LINES.
+#### STEP 6 — Sort & Slice. NOTHING TO RESUBMIT. Do not paste the lines this step used to print.
 
-The cause is fixed and pushed. Derive the indices; do not type them.
+**Every Sort & Slice result the generators asked for is on disk.** Measured, not reasoned, from
+the cluster's own results on 2026-09-16:
+
+- `check_runs_landed.py --stage 1 --verbose`, pasted by the author from ARC:
+  **QM9 332 of 332 cells landed, 0 missing, 0 partial, 0 thin.**
+- A direct count over `results/anova_*_sns_*.csv` on ARC: **378 cells of model, condition and
+  level; 0 of them under 9 replicates.**
+- `results/decisions_arc_20260916/d0_coverage.csv`, the coverage file the figure run wrote from
+  those same results: **54 rows of model and condition carry `sns`, and all 54 read `OK`** — 7
+  levels of 7, 10 replicates of 10. The 14 QM9 rows that are not `OK` are `het_gp_rbf` and
+  `mlp_vbll_hetero`, no Sort & Slice among them.
+
+The 104 failed tasks were real and their cause was real. A later submission covered the cells
+they lost. `sacct` cannot see that — it records that a task exited non-zero, and nothing about
+what is on disk today.
+
+**What this step used to do, and why it is gone.** It derived one `sbatch` line per model from
+`sacct`, almost every index 5, 11 or 17. Pasting them now recomputes cells that exist and appends
+a second copy of each row, into a file set the figure loader is already resolving by median
+across **11,935 duplicate rows in 4,938 cells**. `failed_tasks.py` prints the same lines from the
+`sns-all-zero-vector` entry in `scripts/fixed_causes.json`, and since `08157d3` it prints the
+warning above them and names the command that settles it:
 
 ```bash
-cd $QSAR/slurm_scripts_qm9_rerun
-sacct -S 2026-09-02 -j "$(seq -s, 12980573 12980591)" -X -n -P --format=JobID,JobName,State \
-| awk -F'|' '$3 ~ /^FAILED/ {split($1,a,"_"); m=$2; sub(/^qm91_/,"",m);
-      s[m]=(s[m]==""?a[2]:s[m]","a[2])}
-     END {for (m in s) printf "sbatch --account=stat-cadd --partition=long --array=%s%%5 qm9_s1_%s.sh\n", s[m], m}'
+cd $QSAR
+python scripts/check_runs_landed.py --stage 1 --verbose
 ```
 
-**Good result:** one sbatch line per model, and almost every index is 5, 11 or 17 —
-representation is `index mod 6` and Sort & Slice is position 5. Read them, then run them.
-
-A failed job wrote rows for every replicate that did not draw one of the three molecules, and a
-resubmission appends more. The figure script keeps the last row per combination, so the
-resubmitted numbers win — but both copies sit in the file, which is why Step 13 runs
-`copy_zero_rows.py` with `--dry-run` first.
-
-**Which replicates drew one of the three is not checked** — it was derived on a laptop copy of
-129,428 molecules against 132,480 on the cluster, and a different dataset length gives a
-different permutation. The code prints what it dropped on every run; read that line on the first
-resubmitted job rather than assuming three.
+Resend a Sort & Slice line only if that command reports a `sns` cell MISSING, PARTIAL or THIN.
+On 2026-09-16 it reported none.
 
 ---
 

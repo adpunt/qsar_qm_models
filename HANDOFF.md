@@ -526,7 +526,27 @@ is left, because they are three different amounts of work.
 
 ---
 
-## Chat 5 — Sort & Slice
+## Chat 5 — Sort & Slice — DONE 2026-09-17. Nothing was resubmitted, and nothing needed to be.
+
+**What closed it.** The tool fix asked for below is in, at `08157d3`, with its case in
+`scripts/test_slurm_status_tools.py`: `failed_tasks.py --emit-sbatch` prints a resubmission line
+for a FAILED task whose cause is registered in `scripts/fixed_causes.json`, and only when that
+entry's commit is an ancestor of the running checkout's HEAD. Both tests pass on the laptop —
+`scripts/test_slurm_status_tools.py` and `scripts/test_sns_zero_exclusion.py`, exit 0.
+
+**The 104 tasks do not need resending.** Three readings from the cluster's own results on
+2026-09-16 agree: `check_runs_landed.py --stage 1` says QM9 332 of 332 cells landed with nothing
+missing, partial or thin; a direct count over `results/anova_*_sns_*.csv` on ARC found 378 cells
+of model, condition and level with none under 9 replicates; and
+`results/decisions_arc_20260916/d0_coverage.csv` has 54 rows carrying `sns` and all 54 read `OK`,
+7 levels of 7 at 10 replicates of 10. A later submission covered the cells the failures lost.
+Pasting the lines would have written duplicate rows. `RERUN_PLAN.md` §13.29a STEP 6 carries the
+reading; §13.29a D8's "35 Sort & Slice cells short" is marked superseded there.
+
+**Point 6 below is half true.** The registry covers `gauche_rbf` as well, through the
+`gp-cap-noise-length-mismatch` entry at `c223ec3`. It does **not** cover the fifty laboratory
+tasks, and a test asserts a laboratory job is never matched by a QM9 cause. Their cause is still
+unknown — §13.28 found their output files simply gone.
 
 > Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
 >
