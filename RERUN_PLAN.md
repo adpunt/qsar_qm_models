@@ -19206,6 +19206,10 @@ python scripts/check_runs_landed.py --stage 1 --verbose
 Resend a Sort & Slice line only if that command reports a `sns` cell MISSING, PARTIAL or THIN.
 On 2026-09-16 it reported none.
 
+**Stage 2 cannot be short of Sort & Slice.** `deep_run_pairs.json` lists three representations —
+`ecfp4`, `pdv`, `chemberta` — so the deep run and censoring never build it. Sort & Slice exists
+in the main grid alone, and the main grid is full.
+
 ---
 
 #### STEP 7 — Put back the Gaussian-process failures. READ THE OUTPUT.
