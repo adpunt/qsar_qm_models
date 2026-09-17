@@ -283,7 +283,12 @@ CONDITION_LABELS = {
     'grouped_wider': 'Grouped, wider',
     'grouped_shifted': 'Grouped, shifted',
     'censoring': 'Censoring',
-    'student_t_nu5': 'Student-$t$ ($\\nu$=5)',
+    # PLAIN TEXT, NOT MATHTEXT. `$t$` and `$\\nu$` render in matplotlib's own
+    # math font, which has no bold, so in a bold panel title the letters came
+    # out lighter and in a different typeface from everything around them (the
+    # author, 2026-09-17). The Greek letter is a literal character in the same
+    # font as the rest of the label.
+    'student_t_nu5': 'Student-t (\u03bd=5)',
     'outlier_p10': 'Outlier (10%)',
     'laplace': 'Laplace',
 }
@@ -362,17 +367,42 @@ ANOVA_FACTOR_COLORS = {
 }
 
 #: Variants of one family share a colour; MODEL_MARKERS separates them.
+#: FOUR GROUPS, AND THE COLOUR FAMILY FOLLOWS THE GROUP. The author's layout,
+#: 2026-09-17: the ensembles that bag or boost trees in cool colours, the two
+#: neural architectures in their own warm families, and the three that belong to
+#: none of those -- SVM, the Gaussian process and NGBoost -- in a fourth. The
+#: legend is laid out in these groups, one per column, so a reader looking for
+#: "the other forest" finds it directly above or below.
+#:
+#: NGBoost moves OUT of the tree colours. It boosts trees, but every result in
+#: this study has it behaving unlike RF, QRF, XGBoost and LightGBM -- top by
+#: AUC_norm at every representation while near last on clean accuracy -- and a
+#: colour that groups it with them argues the opposite.
+MODEL_GROUPS = [
+    ('Trees', ['rf', 'qrf', 'xgboost', 'lgb']),
+    ('NN-α family', ['dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve', 'dnn_vbll',
+                     'dnn_vbll_hetero']),
+    ('NN-β family', ['mlp', 'mlp_bnn_full', 'mlp_bnn_full_mve', 'mlp_vbll',
+                     'mlp_vbll_hetero']),
+    ('Other', ['svm', 'gauche', 'gauche_rbf', 'het_gp_rbf', 'ngboost']),
+]
+
 MODEL_COLORS = {
+    # Trees -- cool
     'rf': '#0072B2', 'qrf': '#0072B2',
-    'xgboost': '#56B4E9', 'lgb': '#009E73', 'ngboost': '#D55E00',
+    'xgboost': '#56B4E9', 'lgb': '#009E73',
+    # NN-alpha -- amber
     'dnn': '#E69F00', 'dnn_bnn_full': '#E69F00', 'dnn_bnn_last': '#E69F00',
     'dnn_vbll': '#E69F00', 'dnn_vbll_hetero': '#E69F00',
     'dnn_bnn_full_mve': '#E69F00',
+    # NN-beta -- pink
     'mlp': '#CC79A7', 'mlp_bnn_full': '#CC79A7', 'mlp_bnn_last': '#CC79A7',
     'mlp_vbll': '#CC79A7', 'mlp_vbll_hetero': '#CC79A7',
     'mlp_bnn_full_mve': '#CC79A7',
+    # Everything else -- greys and plum, and NGBoost joins them
     'svm': '#999999',
     'gauche': '#882255', 'gauche_rbf': '#882255', 'het_gp_rbf': '#882255',
+    'ngboost': '#44546A',
 }
 
 #: For the uncertainty figures, where several variants of one family appear
@@ -572,7 +602,7 @@ DATASET_LABELS = {
     'qm9': 'QM9 (HOMO–LUMO gap)',
     'logd': 'logD',
     'caco2': 'Caco-2',
-    'herg': 'hERG K$_i$',
+    'herg': 'hERG K\u1d62',
 }
 
 #: The word for a repeat is not the same on the two sides, and the two must be

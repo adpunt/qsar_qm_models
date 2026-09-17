@@ -515,9 +515,11 @@ def _note_for_the_text(out, heading, sentence):
     """
     if not sentence:
         return
-    # `out` IS the figures directory here. Appending 'figures' to it made
-    # figures/figures/notes_for_the_text.md on the last run -- my bug.
-    path = Path(out) / 'notes_for_the_text.md'
+    # BESIDE THE CSVs, NOT INSIDE figures/. It is text for the paper, not a
+    # picture, and burying it under the figures made it look like an artefact of
+    # one (the author, 2026-09-17). `out` is the figures directory, so this goes
+    # one level up, next to DECISIONS.md and the decision tables.
+    path = Path(out).parent / 'notes_for_the_text.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text() if path.exists() else '# Findings that are one sentence\n'
     if heading not in existing:

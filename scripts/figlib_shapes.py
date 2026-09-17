@@ -98,12 +98,41 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
                 handles.append(handle)
                 labels.append(label)
     if group_by_family and labels:
-        roster = [C.model_label(m) for m in C.MODEL_ORDER]
-        rank = {name: i for i, name in enumerate(roster)}
-        order = sorted(range(len(labels)),
-                       key=lambda i: (rank.get(labels[i], len(rank)), i))
-        handles = [handles[i] for i in order]
-        labels = [labels[i] for i in order]
+        # ONE COLUMN PER FAMILY, reading top to bottom. matplotlib fills a
+        # multi-column legend COLUMN-major, so a flat list of grouped entries
+        # lands exactly this way -- provided every column holds the same number
+        # of rows. Shorter families are padded with invisible handles so the
+        # columns stay aligned and "the other forest" is directly above or
+        # below (the author, 2026-09-17).
+        from matplotlib.lines import Line2D
+        by_label = dict(zip(labels, handles))
+        columns, seen = [], set()
+        for _, members in C.MODEL_GROUPS:
+            column = [C.model_label(m) for m in members]
+            column = [name for name in column
+                      if name in by_label and name not in seen]
+            seen.update(column)
+            if column:
+                columns.append(column)
+        leftover = [name for name in labels if name not in seen]
+        if leftover:
+            columns.append(leftover)
+        if columns:
+            rows = max(len(column) for column in columns)
+            blank = Line2D([], [], linestyle='none', marker='none')
+            handles, labels = [], []
+            for column in columns:
+                for position in range(rows):
+                    if position < len(column):
+                        handles.append(by_label[column[position]])
+                        labels.append(column[position])
+                    else:
+                        handles.append(blank)
+                        labels.append('')
+            ncol = len(columns)
+            # Already in column-major order, so the permutation below must not
+            # run over it again.
+            group_by_family = 'done'
     if extra:
         handles += [h for h, _ in extra]
         labels += [l for _, l in extra]
@@ -113,7 +142,7 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
     rows = -(-len(handles) // ncol) if ncol > 1 else len(handles)
 
     def colmajor(items):
-        if ncol <= 1:
+        if ncol <= 1 or group_by_family == 'done':
             return list(items)
         out = []
         for c in range(ncol):
@@ -125,7 +154,8 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
 
     legend = fig.legend(colmajor(handles), colmajor(labels), loc='lower center',
                         bbox_to_anchor=(0.5, 0.005), ncol=ncol, frameon=False,
-                        fontsize=8, columnspacing=1.2, handletextpad=0.4)
+                        fontsize=8, columnspacing=1.9, handletextpad=0.5,
+                        labelspacing=0.5)
     # Reserve exactly the band the legend occupies, and no more. Reserving a
     # fixed fraction per row left a hand's width of white between the axes and
     # a five-row key.

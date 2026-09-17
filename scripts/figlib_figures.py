@@ -533,7 +533,7 @@ def f3_model_by_representation(summary, output_dir, conditions,
         S.title(ax, 'abcdefg'[index], C.condition_label(condition))
     if image is not None:
         bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
+        bar.set_label(G.metric_label(value), fontsize=8)
         bar.ax.tick_params(labelsize=7)
     return S.save(fig, Path(output_dir) / 'F3_model_by_representation.png')
 
@@ -654,9 +654,8 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         S.title(ax, 'ab'[index], C.rep_label(held))
         if index == 0:
             ax.set_ylabel(G.metric_label('r2'))
-    fig.suptitle(f'Models across {C.condition_label(reference_condition)} '
-                 f'noise — {C.dataset_label(dataset)}',
-                 fontweight='bold', fontsize=9, x=0.01, ha='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
     S.shared_legend(fig, axes[0], ncol=4)
     # The two-panel sentences are only true when the companion panel drew. A
     # caption that claims a panel the figure does not have is the failure this
@@ -698,9 +697,8 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                      colours=C.CONDITION_COLORS, legend=False)
         ax.set_ylabel(G.metric_label('r2'))
         ax.set_xlabel(LEVEL_AXIS)
-        ax.set_title(f'{C.model_label(focus_model)} across noise conditions — '
-                     f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
-                     fontweight='bold', fontsize=9, loc='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
         ax.spines[['top', 'right']].set_visible(False)
         S.shared_legend(fig, ax, ncol=3)
         caption('F4b', f"""
@@ -743,12 +741,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                       column_labeller=lambda c: ('Clean R²' if c == 'clean'
                                                  else C.condition_label(c)))
     bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
-    bar.set_label(f'{G.metric_label("auc_norm")}  ({lo:g}\u2013{hi:g})',
-                  fontsize=8)
+    bar.set_label(G.metric_label('auc_norm'), fontsize=8)
     bar.ax.tick_params(labelsize=7)
-    ax.set_title(f'Robustness by model and noise condition — '
-                 f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
-                 fontweight='bold', fontsize=9, loc='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
     caption('F4c', f"""
         Robustness ({G.metric_label('auc_norm')}) by model and noise condition on
         {C.dataset_label(dataset)} at {C.rep_label(rep)}, models ordered by
@@ -859,14 +855,16 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
             # representation has to be on the panel because every grid in this
             # study is one representation and pooling them is the defect the
             # whole guard exists for.
-            name = f'{C.dataset_label(dataset)}, {C.rep_label(rep)}'
-            if len(group) > 1:
-                S.title(ax, 'abc'[datasets.index(dataset)], name)
-            else:
-                ax.set_title(name, fontweight='bold', fontsize=9, loc='left')
+            # A PANEL title, which is the kind that stays (the author,
+            # 2026-09-17). When the datasets are split into separate files each
+            # keeps its letter, so the three read as panels a, b and c of one
+            # figure rather than as three unrelated grids. The representation is
+            # in the caption, not repeated on every panel.
+            S.title(ax, 'abc'[datasets.index(dataset)],
+                    C.dataset_label(dataset))
         if image is not None:
             bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-            bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
+            bar.set_label(G.metric_label(value), fontsize=8)
             bar.ax.tick_params(labelsize=7)
         suffix = f'_{group[0]}' if layout == 'split' else ''
         written.append(S.save(
@@ -1047,11 +1045,13 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9',
     ax = axes[0]
     ax.set_xlabel(f'Clean {G.metric_label("r2")} (no noise added)')
     ax.set_ylabel(G.metric_label('auc_norm'))
-    fig.suptitle(f'Clean accuracy against robustness — {title}',
-                 fontweight='bold', fontsize=9, x=0.01, ha='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
     # NOTHING WRITTEN OVER THE POINTS. The correlations are in the caption, one
-    # per panel, where they can be read without covering the data.
-    S.shared_legend(fig, axes[0], ncol=4)
+    # per panel, where they can be read without covering the data. The key gets
+    # a wider band than the default: at thirteen models in four family columns
+    # the entries were touching (the author, 2026-09-17).
+    S.shared_legend(fig, axes[0], ncol=4, margin=0.30)
     caption('R16', f"""
         Clean accuracy against robustness on {title}, one panel per noise
         condition and one point per model in each. Bottom axis: R2 with no noise
@@ -1198,9 +1198,8 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
     # and every panel in this study is ONE representation and pooling them is
     # the defect the guard exists for; a figure that does not say which one it
     # is cannot be checked.
-    fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
-                 f'{C.condition_label(condition)}',
-                 fontsize=9, fontweight='bold', x=0.01, ha='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
     S.shared_legend(fig, axes[0], ncol=2)
 
     # WRITTEN AFTER THE PANELS, because it carries what each panel found. Those
@@ -1529,10 +1528,10 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
                 linewidth=2.0, zorder=4))
             drawn += 1
     bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
-    bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
+    bar.set_label(G.metric_label(value), fontsize=8)
     bar.ax.tick_params(labelsize=7)
-    ax.set_title(f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
-                 fontweight='bold', fontsize=9, loc='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
 
     caption('R6', f"""
         Robustness ({G.metric_label(value)}) of every model at every
@@ -1732,9 +1731,8 @@ def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
     # words across three panels ran into each other and said nothing three
     # times (the author, 2026-09-14).
     axes[len(use) // 2].set_xlabel(LEVEL_AXIS)
-    fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
-                 f'{C.condition_label(condition)}',
-                 fontsize=9, fontweight='bold', x=0.01, ha='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
 
     caption('R17', f"""
         Does making a model probabilistic change how label noise hurts it, on
@@ -1801,9 +1799,8 @@ def r18_representation_against_representation(summary, output_dir, a, b,
     # NOTHING WRITTEN ON THE PANEL. The correlation and the reading of the
     # diagonal are in the caption (the author, 2026-09-13); see RERUN_PLAN.md
     # 14.11k for whether the number belongs in the figure at all.
-    ax.set_title(f'{C.rep_label(a)} / {C.rep_label(b)} — '
-                 f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
-                 fontweight='bold', fontsize=9, loc='left')
+    # NO FIGURE TITLE. A journal caption carries what this is; a title
+    # above it says the same thing twice (the author, 2026-09-17).
     ax.spines[['top', 'right']].set_visible(False)
     S.shared_legend(fig, ax, ncol=4)
 
@@ -1876,8 +1873,10 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
                           vmin=lo, vmax=hi)
         S.title(ax, 'abcdef'[index], C.rep_label(rep))
     if image is not None:
-        bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(f'{G.metric_label(value)}  ({lo:g}\u2013{hi:g})', fontsize=8)
+        # More room between the panels and the key. At pad 0.02 the colour bar
+        # sat on the rightmost column's labels (the author, 2026-09-17).
+        bar = fig.colorbar(image, ax=list(axes), fraction=0.024, pad=0.055)
+        bar.set_label(G.metric_label(value), fontsize=8, labelpad=8)
         bar.ax.tick_params(labelsize=7)
 
     named = ', '.join(C.condition_label(c) for c in show if c != 'gaussian')
