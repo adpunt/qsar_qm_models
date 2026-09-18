@@ -81,6 +81,12 @@ _LATEX_ESCAPE = {'&': r'\&', '%': r'\%', '#': r'\#', '_': r'\_'}
 _MATH = re.compile(r'(\$[^$]*\$)')
 
 
+#: What a cell with no value prints as in the LaTeX fragment. `---` is the
+#: em dash in the Springer class, which is what the target journal's tables
+#: use. The CSV keeps the real NaN.
+MISSING_CELL = '---'
+
+
 def latex_safe(value):
     """One cell or column name, safe to paste into a tabular.
 
@@ -138,8 +144,15 @@ def write(table, output_dir, name, caption='', where=None, index=False,
     output_dir.mkdir(parents=True, exist_ok=True)
     table.to_csv(output_dir / f'{name}.csv', index=index)
     try:
+        # A MISSING CELL PRINTS AN EM DASH, NOT `NaN`. The journal's tables use
+        # a dash for a cell with no value and say in the footnote what absence
+        # means; `NaN` is a pandas repr that reads to a referee as a failed
+        # calculation rather than a combination that was never run. The CSV
+        # above is written first and keeps the real NaN, so nothing downstream
+        # of it has to parse a dash back.
         body = latex_frame(table).to_latex(
             index=index, escape=False, float_format=float_format,
+            na_rep=MISSING_CELL,
             column_format='l' + 'c' * (len(table.columns) - 1))
     except Exception:                                          # pragma: no cover
         body = ''

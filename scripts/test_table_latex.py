@@ -39,6 +39,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,7 +47,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import figlib_tables as T  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLES = ROOT / 'results' / 'decisions_arc' / 'tables'
+def _tables_dir():
+    """The newest harvest's tables directory, whatever it is called.
+
+    `run_paper_analysis.py` writes to a dated directory, and this was pinned to
+    the undated `results/decisions_arc/tables`, which no longer exists. The
+    check then printed "not here, so the generated fragments are NOT checked"
+    and passed, so the one test that catches an uncompilable fragment had
+    quietly stopped testing anything. Take the newest directory that has a
+    `tables` in it, and prefer `tables_latex_fixed` where a harvest has one.
+    """
+    results = ROOT / 'results'
+    if not results.is_dir():
+        return results / 'decisions_arc' / 'tables'
+    harvests = sorted((d for d in results.glob('decisions_arc*') if d.is_dir()),
+                      key=lambda d: d.name, reverse=True)
+    for harvest in harvests:
+        for name in ('tables_latex_fixed', 'tables'):
+            if (harvest / name).is_dir():
+                return harvest / name
+    return results / 'decisions_arc' / 'tables'
+
+
+TABLES = _tables_dir()
 
 #: A `%` anywhere that is not already escaped comments out the rest of the line.
 _BARE_PERCENT = re.compile(r'(?<!\\)%')
@@ -135,6 +158,32 @@ def check_write_round_trip():
     print('  write: a frame with all four hazards produces a clean fragment')
 
 
+def check_missing_cells_are_dashes():
+    """A cell with no value prints an em dash, and the CSV keeps the real NaN.
+
+    `NaN` in a printed table reads to a referee as a calculation that failed
+    rather than as a combination that was never run, and the journal's tables
+    use a dash with the reason in the footnote. The CSV is what every other
+    reader of these tables uses, so it must not carry the dash.
+    """
+    table = pd.DataFrame([
+        {'Model': 'RF', 'Sort & Slice': 0.961, 'Outlier (10%)': np.nan},
+        {'Model': 'LightGBM', 'Sort & Slice': np.nan, 'Outlier (10%)': 0.603},
+    ])
+    with tempfile.TemporaryDirectory() as tmp:
+        T.write(table, tmp, 'TX_missing', caption='a table with gaps in it')
+        text = (Path(tmp) / 'TX_missing.tex').read_text()
+        back = pd.read_csv(Path(tmp) / 'TX_missing.csv')
+    assert 'NaN' not in text, 'the LaTeX fragment still prints NaN'
+    assert text.count(T.MISSING_CELL) == 2, (
+        f'expected two em dashes in the fragment, found '
+        f'{text.count(T.MISSING_CELL)}')
+    assert back['Outlier (10%)'].isna().sum() == 1, (
+        'the CSV lost its NaN and got a dash instead')
+    assert not audit(text, 'TX_missing'), 'the dashed fragment will not compile'
+    print('  missing cells: em dash in the .tex, real NaN kept in the .csv')
+
+
 def check_on_disk():
     """Every generated fragment, if the results are here."""
     if not TABLES.is_dir():
@@ -160,6 +209,7 @@ def main():
     print(__doc__.split('\n')[0])
     check_latex_safe()
     check_write_round_trip()
+    check_missing_cells_are_dashes()
     check_on_disk()
     print('OK')
     return 0

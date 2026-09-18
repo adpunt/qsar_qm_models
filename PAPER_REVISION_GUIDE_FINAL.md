@@ -128,16 +128,34 @@ On QM9 no representation sees stereochemistry: all six are built from the stereo
 
 **Still open in this subsection.**
 
-- Re-establish the hERG Ki molecule count from KIRBy/tests/data_cache/chembl_herg_ki.csv and make the Dataset subsection and this subsection agree (1,482 against 1,415).
-- Confirm the empty merges.txt in the cached DeepChem/ChemBERTa-77M-MTR checkout, or reword the sentence to rest on the measured collision counts alone.
-- Re-run scripts/sns_zero_molecules.py to re-establish the three dropped molecules of 132,480 QM9 SMILES before the number goes to the journal.
+- ~~Re-establish the hERG Ki molecule count~~ **SETTLED 2026-09-18, and 1,415 is right.** See below.
+- ~~Re-run scripts/sns_zero_molecules.py~~ **DONE 2026-09-18. Three of 132,480, and the densities too.** See below.
 
 **For the author.**
 
 - MHG-GNN and enantiomers is now measured, not a TODO. I ran KIRBy's create_mhg_gnn on the two alanine SMILES and the achiral one in this session: the embedding is 1,024 features wide, and the largest difference in any one feature between the enantiomers was 5.15, against 10.73 between one enantiomer and achiral alanine. So the assay-side count is five representations giving a pair of enantiomers one point and MHG-GNN giving two. That also settles the width on the assay side, which no file stated: it is 1,024 features there too.
 - The hERG Ki count in this subsection is 1,415 molecules and paper.tex:203 says N = 1,482 compounds. 1,415 is what results/chemberta_collisions.csv counted and what KIRBy/tests/data_cache/chembl_herg_ki.csv holds. The Dataset subsection's number has to be re-established from that same cache file before either goes to the journal.
-- Two numbers here come from code comments rather than from a file I re-ran. Three molecules of 132,480 QM9 SMILES is the comment at scripts/process_and_train.py:1220-1221, recording a 2026-09-07 count by scripts/sns_zero_molecules.py; re-running that script would re-establish it. The 1.3% and 4.7% densities are the comment at models/model_defaults.py:466-471.
-- The empty merges file is still sourced to the comment at scripts/process_and_train.py:1404-1410, not to the checkpoint. The collision counts in results/chemberta_collisions.csv are consistent with it. Opening merges.txt in the cached DeepChem/ChemBERTa-77M-MTR checkout would close it.
+- **The three numbers that came from code comments have been re-established by running the code.** I ran
+  `scripts/sns_zero_molecules.py` on the 132,480 QM9 SMILES in this session: **three molecules** get an
+  all-zero Sort \& Slice vector at SNS_DIM = 1024, and they are methane, ammonia and water, each of which
+  has exactly one substructure. The 2026-09-07 comment at `scripts/process_and_train.py:1220-1221` is right.
+- **The two densities are right as well, to the decimal the text prints.** Fitting the vocabulary on an 80\%
+  training split with the pipeline's own generator settings and measuring over every molecule gives a mean
+  of 14.1 of 1,024 features non-zero on QM9, which is **1.38\%**, and 47.7 of 1,024 on hERG K$_i$, which is
+  **4.66\%**. The comment at `models/model_defaults.py:466-471` says 1.3\% and 4.7\% and the text says the
+  same. If you want the text to carry two decimals instead of one, those are the values.
+- **The empty merges file is now sourced to the checkpoint itself, not to a code comment.** I opened
+  `~/.cache/huggingface/hub/models--DeepChem--ChemBERTa-77M-MTR/snapshots/66b895cab8.../merges.txt` in this
+  session. It holds one line, `#version: 0.2 - Trained by \`huggingface/tokenizers\``, and no merge rules at
+  all, while `vocab.json` beside it holds 591 entries. So the tokenizer performs no byte-pair merges and
+  every token comes straight from that vocabulary, which is exactly what the sentence in the text says.
+- **The hERG K$_i$ count is 1,415 and `paper.tex:203`'s N = 1,482 has to change.** The cached file
+  `KIRBy/tests/data_cache/chembl_herg_ki.csv` holds 1,415 rows and 1,415 distinct SMILES. I then ran KIRBy's
+  own two steps on it in this session — `standardise_smiles`, which keeps the largest fragment and
+  canonicalises, and the median dedupe on the standardised SMILES that
+  `alternative_data_noise_robustness.py:1141` applies. **Neither step removes anything on the current
+  cache**: 1,415 in, 1,415 standardised, 1,415 after the dedupe. The Dataset subsection and this subsection
+  should both say 1,415.
 - The breaker's two line-number corrections check out: pyAvalonTools.GetAvalonFP is at scripts/process_and_train.py:1600, and KIRBy's PDV nan_to_num is at src/kirby/representations/molecular.py:995.
 - I disagree with one part of the Sort & Slice correction. On the three assay datasets the fold vocabulary is fitted on that fold's fitted rows (alternative_data_noise_robustness.py:3571-3581), which is what I wrote. On QM9 the featuriser is fitted inside split_qm9 from the training molecules of the replicate's split, and the guide at line 1642 says the 10,000-molecule subset is identical across noise levels within a replicate, so the vocabulary does not depend on the noise level. My sentence says it that way.
 - The Avalon reference is now in `citations.bib`, appended 2026-09-18 under the key `avalon` as Gedeck, Rohde and Bartels (2006), and the sentence above cites it. `refs.bib` still has no Avalon entry and its only Gedeck line is 1550, as a co-author of Kramer et al. If Overleaf's `sn-bibliography` already carries the paper under a different key, use that key rather than adding a second entry.
@@ -2051,8 +2069,18 @@ sixteen in `tables_latex_fixed/` were regenerated on 2026-09-18 from the same CS
 specification asks for. **That is a structural check and not a compile** — there is no LaTeX toolchain on
 this laptop, so the first real proof is Overleaf.
 
+Those fragments also carry the em-dash change. **`NaN` now prints as `---` in the LaTeX and stays a real
+`NaN` in the CSV**, which is 1,243 cells across the sixteen. A dash with the reason in the caption is what
+the journal's tables do, and `NaN` reads to a referee as a calculation that failed rather than as a
+combination that was never run. The T4 caption below already carries that reason and needs no change.
+`scripts/test_table_latex.py` has a case for it. **If you would rather keep `NaN`, it is the one constant
+`MISSING_CELL` at the top of `scripts/figlib_tables.py`.**
+
 Nothing was overwritten. The broken originals are still in `tables/` and the CSVs beside them are unchanged,
-because the defect was never in the data.
+because the defect was never in the data. **That directory is also how I know the check works**: the audit
+in `scripts/test_table_latex.py` finds 24 problems across the originals and none across the regenerated
+sixteen. Until this session it found neither, because it was pointed at `results/decisions_arc/tables`, which
+was deleted, and a missing directory made it print a line and pass.
 
 **Once the fix is on the cluster the next harvest writes correct fragments itself and this second directory
 stops being needed.** It is not there yet: it needs the commit to be pushed and
