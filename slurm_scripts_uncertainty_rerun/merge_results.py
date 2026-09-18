@@ -84,10 +84,26 @@ def expected_conditions(explicit=None):
     """
     if explicit:
         return list(dict.fromkeys(explicit)), 'named on the command line'
+    # EVERY script, not the first one that has a list.
+    #
+    # The uncertainty work goes out as TWO submissions: the three conditions the
+    # QM9 screen runs, then censoring and the three depth-only ones, asked for by
+    # name. Returning on the first script meant the coverage grid was built from
+    # whichever generation wrote that file last. On 2026-09-17 that produced a
+    # report of 189 expected cells over 441 task files: 7 models x 3
+    # representations x 3 datasets x 3 conditions, when all seven conditions had
+    # run. The other 252 cells were streamed into uncertainty.csv and then left
+    # out of the report, so real results read as absent.
+    found, sources = [], []
     for sh in sorted(HERE.glob('unc_*.sh')):
         m = re.search(r'^CONDS=\((.*?)\)$', sh.read_text(), re.M)
         if m and m.group(1).split():
-            return m.group(1).split(), f'read from {sh.name}'
+            for c in m.group(1).split():
+                if c not in found:
+                    found.append(c)
+            sources.append(sh.name)
+    if found:
+        return found, f'read from {len(sources)} generated unc_*.sh'
     settled = json.loads(NOISE_CONDITIONS_FILE.read_text())
     return ([c['name'] for c in settled['stage_1_full_grid']],
             f'the main grid ({NOISE_CONDITIONS_FILE.name})')
@@ -371,6 +387,20 @@ def main():
           f"{'uncertainty.parquet' if args.parquet else 'uncertainty.csv'}")
 
     # ---- coverage ---------------------------------------------------------
+    # A CONDITION THAT PRODUCED ROWS IS ALWAYS REPORTED, whatever the job scripts
+    # on disk say. The scripts are regenerated between submissions and the later
+    # generation overwrites the earlier, so they are not a reliable record of
+    # what was asked for -- but a task directory only exists because a task ran.
+    # Without this, data that is on disk and was streamed into uncertainty.csv is
+    # simply absent from the report, which reads as "never ran" (2026-09-17: 252
+    # of 441 cells).
+    seen_conditions = [c for c in dict.fromkeys(k[3] for k in cov)
+                       if c not in conditions]
+    if seen_conditions:
+        print(f"  NOTE {len(seen_conditions)} condition(s) produced rows but were not in the "
+              f"expected list ({conditions_source}): {', '.join(seen_conditions)}. "
+              f"Reporting them as well.")
+        conditions = list(conditions) + seen_conditions
     rows = []
     for ds in datasets:
         for model, model_reps in model_reps_pairs:
