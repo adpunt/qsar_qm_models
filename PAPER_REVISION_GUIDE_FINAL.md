@@ -1058,9 +1058,29 @@ Replaces `paper.tex:375–568` entirely. The heading becomes **Results and discu
 and there is no standalone Discussion — two of the three Journal of Cheminformatics papers in the reference
 set do it that way and the third calls its closing section "Discussion and conclusions".
 
-Seven subsections in four movements, in the author's order. About 2,450 words of prose, which sits inside the
-2,000–3,000 the reference set gives for a study of this size; `Kolmar & Grulke (2021)`, the closest paper in
-the set to this one, runs about 3,200.
+Seven subsections in four movements, in the author's order.
+
+🔴 **It is 4,192 words of prose and that is too long.** The reference set gives 2,000 to 3,000 words for a
+study of this size, and `Kolmar & Grulke (2021)`, the closest paper in the set to this one, runs about
+3,200. The earlier draft was 2,450 and fitted; this one carries the author's four Q1 conclusions, the
+model-against-representation comparison in §R4 and the censoring result in §R6, none of which were in the
+paper text before, and all of which she asked for. **Nothing has been cut to make room, because what to drop
+is hers to decide and not mine.**
+
+Where the fat is, longest paragraph first, and each of these is one paragraph doing two jobs:
+
+| where | length | what it holds |
+|---|---|---|
+| §R1 paragraph 5 | 10 sentences | which representation the tables hold, *and* the grouped-shifted residual result — two findings in one paragraph, and the cleanest split in the section |
+| §R7 paragraph 2 | 9 sentences | the three conditions under which the question is defined, *and* the censoring answer |
+| §R4 paragraph 3 | 8 sentences | already marked below as one over the ceiling, with the sentence to cut named |
+| §R5 paragraph 3 | 8 sentences | the correlated condition's cost, *and* the anchoring of the noise levels against real assay error |
+
+Cutting those four back to six sentences each would take about 450 words off and leave 3,750. Getting to
+3,200 means losing a finding, and the two candidates are §R3, which reports that probabilistic machinery
+buys no robustness, and §R7, which reports a direction and not a number. **Both are yours.**
+
+Word count by subsection: §R1 792, §R2 868, §R3 347, §R4 613, §R5 440, §R6 786, §R7 346.
 
 Subheadings are noun phrases in sentence case, which is what the target journal uses. Declarative-sentence
 headings are the Nature Machine Intelligence convention and do not travel.
@@ -1130,7 +1150,7 @@ journal's results sections and is the single clearest difference from Nature.
 > first piece of guidance the study offers. If the labels may be noisy, and there is no way to know in
 > advance how noisy, then effort is better spent choosing the model than choosing the representation.
 
-**Word count 618, five paragraphs of 8, 5, 6, 7 and 9 sentences. Numbers in text: 3, 0, 4, 5, 2.**
+**792 words, five paragraphs of 8, 5, 5, 6 and 10 sentences. Numbers in text: 3, 0, 4, 5, 2.**
 
 **Numbers behind it, all recomputed from the 16 September harvest this session:**
 
@@ -1267,7 +1287,7 @@ strategies that no longer exist.
 > detriment of a normalised metric, and the alternative of an unnormalised slope carries the opposite defect,
 > since a model with more accuracy to lose then loses more of it by construction.
 
-**Word count 713, six paragraphs of 7, 8, 5, 6, 6 and 4 sentences. Numbers in text: 4, 5, 3, 6, 5, 2.**
+**868 words, six paragraphs of 7, 6, 5, 6, 6 and 4 sentences. Numbers in text: 4, 5, 3, 6, 5, 2.**
 
 **Paragraphs 2, 4 and 5 are the author's second, third and fourth Q1 conclusions.** All three were in working
 notes and in none of the paper text until this pass. Every number below was recomputed this session from the
@@ -1369,7 +1389,7 @@ worth having and is what §R3's Gaussian-process sentence rests on.*
 > for the uncertainty estimate they provide rather than for robustness. The extra output terms they carry
 > are what makes the decomposition question under \emph{Uncertainty under label noise} answerable at all.
 
-**Word count 345, three paragraphs of 5, 6 and 4 sentences. Numbers in text: 0, 3, 1.**
+**347 words, three paragraphs of 4, 7 and 5 sentences. Numbers in text: 0, 3, 1.**
 
 *From `d10_probabilistic.csv`, 153 comparisons, each a signed-rank test paired on the replicate within one
 representation and one condition. Recomputed here: plain → Bayesian, first architecture 9 significantly up of
@@ -1445,7 +1465,7 @@ that *independence and zero mean* are the assumptions that fail, and they are th
 > noise level along the bottom. So the condition decides how much accuracy is lost and the model decides who
 > loses least, and those are separate facts.
 
-**Word count 545, five paragraphs of 5, 6, 7, 2 and 4 sentences. Numbers in text: 2, 1, 1, 4, 2.**
+**613 words, five paragraphs of 4, 7, 8, 3 and 4 sentences. Numbers in text: 2, 1, 1, 4, 2.**
 *The third paragraph is one sentence over the ceiling; the sentence to cut if it has to come down is "Neither
 is a matter of how the individual errors are distributed."*
 
@@ -1569,7 +1589,7 @@ p = 7.6 × 10⁻⁶, seven models over six conditions at ECFP4, from `d3_kendall
 > guidance travels between datasets and a specific model-and-representation pairing does not, so a pairing
 > chosen on one endpoint should be re-checked on the next rather than carried over.
 
-**Word count 320, three paragraphs of 5, 4 and 5 sentences. Numbers in text: 1, 2, 2.**
+**440 words, three paragraphs of 4, 6 and 8 sentences. Numbers in text: 1, 2, 2.**
 
 *Rank transfer from `d9_rank_agreement.csv`: 83 rows, median ρ 0.356, 20 of 83 with p < 0.05. By dataset:
 logD 0.568, Caco-2 0.306, hERG 0.290. By representation it runs from −0.001 at Sort & Slice to 0.600 at
@@ -1621,7 +1641,7 @@ referee expects, and the third is the hard one.
 >
 > Before any of that can be read, most of the roster has to be excluded, and which models are excluded is
 > itself a result. Seven of the thirteen models that emit an uncertainty have one of the two components fixed
-> at a single number per fit. NGBoost fits one distribution and has no term for its own ignorance at all; the
+> at a single number per fit. NGBoost fits one distribution and has no term for its own ignorance at all, and the
 > plain Bayesian networks and the Gaussian processes predict a mean and a global observation noise, so their
 > data-noise term does not vary between molecules. A slope through a constant column describes the fit and
 > not the molecules, so no line is drawn for those and the support flags are printed in
@@ -1649,7 +1669,7 @@ referee expects, and the third is the hard one.
 > the point: a decomposition that works and an uncertainty that is useful are not the same property, and
 > neither follows from being robust.
 
-**Word count 690, six paragraphs of 5, 7, 6, 5, 5 and 4 sentences. Numbers in text: 0, 5, 1, 0, 2, 2.**
+**785 words, six paragraphs of 5, 7, 5, 4, 4 and 5 sentences. Numbers in text: 0, 5, 1, 0, 2, 2.**
 
 *The last sentence of the second paragraph is the author's own, written out in `RERUN_PLAN.md` under "Q7 —
 the one sentence, for the Results text", and placed where that note asks for it.*
@@ -1754,7 +1774,7 @@ result.
 > to find bad labels in a training set. Censoring is the one case where it may be, and we cannot yet say
 > whether the improvement there is larger than chance.
 
-**Word count 240, two paragraphs of 6 and 6 sentences. Numbers in text: 1, 1.**
+**346 words, two paragraphs of 6 and 9 sentences. Numbers in text: 1, 1.**
 
 *The three conditions where the question is defined are grouped-wider, outlier and censoring:
 `_CONSTANT_SCALE_STRATEGIES = ('uniform', 'grouped_shifted')` in `NoiseInject/noiseInject/core.py:84` gives
