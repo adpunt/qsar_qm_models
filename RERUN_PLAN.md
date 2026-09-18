@@ -11951,6 +11951,59 @@ conditions, counts and array ranges only.
 
 ### 13.23 🔴 THE OPEN REGISTER — everything known to be wrong, 2026-09-07
 
+#### 13.23y ✅ The paper text was rewritten to `PAPER_HOUSE_STYLE.md`, 2026-09-18
+
+Every block of paper text in `PAPER_REVISION_GUIDE_FINAL.md` was rewritten against the 122 rules: the six
+Methods subsections and the two statements below them, the four Introduction blocks, §R1 to §R7, the seven
+figure captions and the three table captions. Twelve passes read the whole of it, one per class of defect —
+coined names, bare property claims, counts and units, how many numbers are in the prose, hedging and voice,
+sentence and paragraph shape, figure pointers, captions, block architecture, nulls and exclusions, QM9
+against the assay sets, and AUC_norm with the noise anchor and the uncertainty block. They returned 427
+findings. A rewrite then went section by section, a check compared each rewrite against what it replaced for
+lost numbers, lost citation keys and lost claims, and a second pass cut the Results back to length.
+
+**What moved.**
+
+| | before | after |
+|---|---|---|
+| Results prose | 4,192 words | 4,488 words |
+| Results sentences carrying a decimal | 15% overall, 28% in §R5 | 0 to 12% in every subsection |
+| Longest Results sentence | 58 words | 54 words |
+| Paragraphs outside three to seven sentences | 6 | 0 |
+| Methods prose, the six subsections | 4,776 words | 5,246 words |
+| Trailing "(Fig. N)." pointers | 0 | 0 |
+
+The Results went to 5,625 words under the rewrite before the cut brought it back, because the standard
+demands sentences the draft did not have: the four AUC_norm sentences and what the metric cannot show, the
+direction of good at each metric's first comparison, an orienting sentence before each figure and table, the
+raw pair beside each derived number, the joining sentence between blocks and a closing sentence a reader can
+act on. The cut took the per-cell grid values out of the prose instead, which is where the reference papers
+keep them and is also rule 6 of the house-style set.
+
+**Three things the pass found that were wrong rather than badly worded, each checked in a file.**
+
+1. **Six configurations are set aside from the variance decomposition, not five.** `scripts/figlib_config.py`
+   `VARIANT_MODELS` holds `dnn_bnn_full_mve`, `mlp_bnn_full_mve`, `dnn_vbll_hetero`, `mlp_vbll_hetero`,
+   `het_gp_rbf` and `gauche`. Five train under a different likelihood from the model they vary and the sixth
+   ran on ECFP4 alone. Nineteen minus six is the thirteen base models, which is the count everything else in
+   the guide uses. §R1 now says six.
+2. **`d7_q6.csv` is 1,003 rows with a named condition, not 1,076.** Recomputed on 2026-09-18: 95.1 per cent
+   positive and 5.2 per cent above 0.3, against the 1,076 / 95.0 / 4.9 the guide carried. §R6's last
+   paragraph now prints the recomputed figures. The gap is the 55 blank-condition rows of §13.23z, which the
+   cell iterator had been counting more than once.
+3. **Censoring did run on QM9 at ECFP4, in the robustness grid.** `auc_norm_qm9.csv` has five QM9 censoring
+   rows, three at PDV and two at ECFP4 — the random forest at 0.817 and the heteroscedastic Gaussian process
+   at 0.813. The guide's tables section said censoring ran at PDV alone on the computed property; that is
+   true of the **uncertainty runs** and false of the grid, and the paragraph now says which. The T6 decision
+   is unaffected, because the uncertainty runs really do have censoring at PDV alone on QM9.
+
+**One rule left unsatisfied, and it is the author's to settle.** §R4's 0.127 and 0.095 are each a median
+taken across the computed property and the three measured endpoints together, and the standard forbids a
+central value computed across datasets. The three ways out and what each costs are written into
+`PAPER_REVISION_GUIDE_FINAL.md` above the Results, under the length table. Every other cross-dataset number
+in the Results is either a count of wins or a rank test, which the rule allows.
+
+
 #### 13.23z ✅ 55 rows of `d7_q6.csv` carried no noise condition — found and fixed 2026-09-18
 
 `d7_q6.csv` is 1,058 rows of one correlation between predicted uncertainty and out-of-fold error, keyed by
