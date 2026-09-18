@@ -445,7 +445,9 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
                         ha='center', va='bottom', fontsize=5.5,
                         style='italic', color='#777777', rotation=90)
     axes[-1].set_xlabel('Noise condition')
-    S.shared_legend(fig, axes[0], ncol=len(FACTOR_COLUMNS))
+    # BESIDE THE PANELS, not beneath them: four short factor names cost a
+    # whole band of height under a two-panel figure (the author, 2026-09-18).
+    S.shared_legend(fig, axes[0], side=True)
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
     n_reps_less = max(n_reps - 1, 0)
@@ -690,10 +692,12 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                      colours=C.CONDITION_COLORS, legend=False)
         ax.set_ylabel(G.metric_label('r2'))
         ax.set_xlabel(LEVEL_AXIS)
-    # NO FIGURE TITLE. A journal caption carries what this is; a title
-    # above it says the same thing twice (the author, 2026-09-17).
+        # NO FIGURE TITLE. A journal caption carries what this is; a title
+        # above it says the same thing twice (the author, 2026-09-17).
         ax.spines[['top', 'right']].set_visible(False)
-        S.shared_legend(fig, ax, ncol=3)
+        # BESIDE THE CHART. Six condition names under a single wide panel
+        # pushed the lines into the top half (the author, 2026-09-18).
+        S.shared_legend(fig, ax, side=True)
         caption('F4b', f"""
             Whether the KIND of noise matters or only the amount, for
             {C.model_label(focus_model)} on {C.dataset_label(dataset)} at
@@ -1852,6 +1856,15 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
     G.declare(frame, 'R19', fixed={'dataset': dataset},
               varies=('model', 'rep', 'condition'))
 
+    # ONE COLUMN LIST FOR EVERY PANEL. It used to be derived per panel, from
+    # the conditions THAT panel had, while `sharex=True` gave all three one
+    # x-axis -- so a panel with five conditions drew five columns onto an axis
+    # scaled for the four of the last panel, and the fifth column's numbers
+    # landed outside the grid and on top of the colour bar (the author,
+    # 2026-09-18). Same failure as the seven-group panel over a six-group axis
+    # in F2. A condition a panel does not have is now a grey cell, which is what
+    # it is.
+    columns = [c for c in show if c in set(frame['condition'])]
     lo, hi = C.auc_range(dataset)
     fig, axes = _fig(height=C.grid_height(len(models), len(reps)),
                      nrows=len(reps), sharex=True)
@@ -1860,9 +1873,7 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
     for index, (ax, rep) in enumerate(zip(axes, reps)):
         panel = frame[frame['rep'] == rep]
         image, _ = S.grid(ax, panel, 'model', 'condition', value,
-                          row_order=models,
-                          column_order=[c for c in show
-                                        if c in set(panel['condition'])],
+                          row_order=models, column_order=columns,
                           vmin=lo, vmax=hi)
         S.title(ax, 'abcdef'[index], C.rep_label(rep))
     if image is not None:

@@ -72,7 +72,7 @@ LEGEND_MARGIN = 0.09
 
 
 def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
-                  group_by_family=True):
+                  group_by_family=True, side=False):
     """ONE legend, below the whole figure, reading left to right.
 
     Per-panel legends inside the axes cover the data -- with nineteen models
@@ -83,6 +83,12 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
 
     matplotlib fills a multi-column legend column-major, so the handles are
     permuted first or the list reads down instead of across.
+
+    `side=True` puts the key to the RIGHT of the axes in one column instead of
+    underneath. That suits a short key on a wide chart -- four noise conditions,
+    four variance terms -- where a strip below costs height the lines need and
+    the entries end up further from the marks they label (the author,
+    2026-09-18). A nineteen-model key stays underneath.
 
     `group_by_family` puts the entries in roster order -- forests, then boosted
     trees, then the kernel methods, then each neural family -- rather than in
@@ -151,6 +157,15 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
                 if i < len(items):
                     out.append(items[i])
         return out
+
+    if side:
+        legend = fig.legend(handles, labels, loc='center left',
+                            bbox_to_anchor=(1.0, 0.5), ncol=1, frameon=False,
+                            fontsize=8, handletextpad=0.5, labelspacing=0.6)
+        # Reserve the strip on the right instead of the band underneath.
+        used = margin if margin is not None else 0.80
+        fig.tight_layout(rect=[0, 0, min(used, 0.92), 1])
+        return legend
 
     legend = fig.legend(colmajor(handles), colmajor(labels), loc='lower center',
                         bbox_to_anchor=(0.5, 0.005), ncol=ncol, frameon=False,
@@ -342,11 +357,16 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
 
     table = frame.pivot_table(index=rows, columns=columns, values=value,
                               aggfunc='median')
+    # A REQUESTED ROW OR COLUMN THAT THE DATA DOES NOT HAVE IS KEPT, EMPTY.
+    # Dropping it made each panel of a shared-axis figure a different width:
+    # R19's first panel drew five columns onto an axis scaled for the four of
+    # its last panel, and the fifth column's numbers landed outside the grid and
+    # over the colour bar (the author, 2026-09-18). An absent combination is a
+    # grey cell that says so, which is the whole point of having one.
     if row_order:
-        table = table.reindex([r for r in row_order if r in table.index])
+        table = table.reindex(list(row_order))
     if column_order:
-        table = table.reindex(
-            columns=[c for c in column_order if c in table.columns])
+        table = table.reindex(columns=list(column_order))
 
     data = table.to_numpy(dtype=float)
     if vmin is None or vmax is None:

@@ -17,6 +17,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 
+import matplotlib.pyplot as plt                                 # noqa: E402
 import numpy as np                                              # noqa: E402
 import pandas as pd                                             # noqa: E402
 
@@ -27,6 +28,7 @@ import figlib_decisions as D                                    # noqa: E402
 import figlib_figures as FIG                                    # noqa: E402
 import figlib_fixtures as FX                                    # noqa: E402
 import figlib_guard as G                                        # noqa: E402
+import figlib_shapes as S                                       # noqa: E402
 import figlib_metrics as M                                      # noqa: E402
 import figlib_uncertainty as U                                  # noqa: E402
 
@@ -240,6 +242,61 @@ def test_contingent_figures(out):
         check('R15b draws nothing for a model that was never run',
               FIG.r15b_rank_against_level_by_rep(accuracy, out, 'no_such_model',
                                                  'gaussian') is None)
+
+
+def test_panels_that_share_an_axis_stay_the_same_width(out):
+    """A requested column the data lacks is an EMPTY cell, never a dropped one.
+
+    R19 drew five columns in its first panel onto an x-axis scaled for the four
+    of its last, because `grid()` filtered `column_order` down to the columns
+    that panel happened to have. The fifth column's numbers landed outside the
+    grid and on top of the colour bar. The same failure is recorded for F2 --
+    "a seven-group panel over a six-group axis, so every bar in it was labelled
+    as its neighbour" -- so the guard belongs in the shape, not in one figure.
+    """
+    print('  a grid keeps the rows and columns it was asked for')
+    frame = pd.DataFrame([
+        {'model': 'rf', 'condition': 'gaussian', 'v': 0.96},
+        {'model': 'rf', 'condition': 'laplace', 'v': 0.97},
+        {'model': 'svm', 'condition': 'gaussian', 'v': 0.94},
+    ])
+    wanted_rows = ['rf', 'ngboost', 'svm']
+    wanted_columns = ['gaussian', 'student_t_nu5', 'laplace']
+    fig, ax = plt.subplots()
+    try:
+        _, table = S.grid(ax, frame, 'model', 'condition', 'v',
+                          row_order=wanted_rows, column_order=wanted_columns,
+                          vmin=0.8, vmax=1.0)
+    finally:
+        plt.close(fig)
+
+    check('every requested column is present, in order',
+          list(table.columns) == wanted_columns, list(table.columns))
+    check('every requested row is present, in order',
+          list(table.index) == wanted_rows, list(table.index))
+    check('a combination with no data is empty, not dropped',
+          bool(np.isnan(table.loc['ngboost', 'student_t_nu5']))
+          and bool(np.isnan(table.loc['svm', 'laplace'])))
+    check('the values that exist are untouched',
+          table.loc['rf', 'gaussian'] == 0.96
+          and table.loc['rf', 'laplace'] == 0.97)
+
+    # And two panels built from different slices come out the same shape, which
+    # is the property the shared x-axis needs.
+    one = frame[frame['model'] == 'rf']
+    two = frame[frame['model'] == 'svm']
+    shapes = []
+    for slice_ in (one, two):
+        fig, ax = plt.subplots()
+        try:
+            _, got = S.grid(ax, slice_, 'model', 'condition', 'v',
+                            row_order=wanted_rows,
+                            column_order=wanted_columns, vmin=0.8, vmax=1.0)
+        finally:
+            plt.close(fig)
+        shapes.append(got.shape)
+    check('two panels of different data are the same shape',
+          shapes[0] == shapes[1] == (3, 3), shapes)
 
 
 def test_guards_still_bite(out):
@@ -543,6 +600,7 @@ def main():
         test_a_whisker_is_never_negative(out)
         test_f2_carries_the_residual_and_the_whiskers(out)
         test_f4a_draws_its_companion_panel(out)
+        test_panels_that_share_an_axis_stay_the_same_width(out)
         test_the_caches_actually_write(out)
         test_workers_change_the_speed_and_not_the_answer()
         test_kendall_says_what_it_used()
