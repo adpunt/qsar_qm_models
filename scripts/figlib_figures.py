@@ -588,6 +588,13 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     summ = summary[(summary['dataset'] == dataset) & (summary['rep'] == rep)]
     summ = summ[summ['condition'].isin(rankable)]
 
+    # BASE MODELS BEFORE THE TOP-N IS TAKEN, AND THAT ORDER MATTERS. The panels
+    # drop the variant models (14.11k), but this ranking did not, so a variant
+    # could take one of the N slots and then be filtered out of the drawing --
+    # leaving N-1 lines under a caption built from len(keep), which says N. On
+    # the 2026-09-17 harvest GP (het.) took slot 8 at ECFP4 and the figure drew
+    # seven models while the caption promised eight. Rank what will be drawn.
+    summ = C.cross_model(summ, 'F4a ranking')
     order = (summ[summ['condition'] == reference_condition]
              .sort_values('auc_norm', ascending=False)['model'].tolist())
     order = order or C.sort_models(acc['model'].unique())

@@ -337,6 +337,17 @@ CASES = [
   "",
   [sys.executable, f"{QSAR}/scripts/test_check_runs_landed_selection.py"]),
 
+ # No --validation-dir made check_assay return None, and report() skips a None
+ # without printing a line, so `check_runs_landed.py --stage 2` typed with no flags
+ # said nothing at all about the laboratory depth run or censoring.
+ ("a producer with no directory is NOT CHECKED, not absent",
+  f"{QSAR}/scripts/check_runs_landed.py",
+  "    gen = _generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')\n"
+  "    if gen is None:\n        return None\n",
+  "    gen = _generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')\n"
+  "    if gen is None or not directories:\n        return None\n",
+  [sys.executable, f"{QSAR}/scripts/test_check_runs_landed_selection.py"]),
+
  # The deep run appends a second clean block to the file the screen wrote, so a
  # target row written by the screen matches the OLDER block. Judged against the
  # newest block alone it reads as a seed divergence.

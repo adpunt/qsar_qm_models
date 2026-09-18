@@ -23,8 +23,15 @@ WHAT EACH STATISTIC IS FOR, IN ONE LINE EACH
                          assumes it was hidden.
   q4_error_ratio         THE answer to Q4. Does dividing the out-of-fold error
                          by the predicted uncertainty rank corrupted labels
-                         better than the error alone? `auc_delta` is the gain.
-  permutation_null       The band every Q4 number is read against.
+                         better than the error alone? `rho_delta` and
+                         `auc_delta` are the gain; a delta of zero means the
+                         uncertainty added nothing.
+  permutation_null       The band. ⚠️ It is computed PER STATISTIC, and reading
+                         a gain against the error's band is the defect fixed on
+                         2026-09-17 -- see `q4` below and
+                         scripts/test_q4_band_is_about_the_uncertainty.py.
+                         The gain's band is NOT centred on zero, so the gain is
+                         read against the band and never against zero.
   q5_mean_uncertainty    Does noisier training make a model less sure? A
                          POPULATION statement, and it carries a column saying so.
   q6_error_ranking       Does the uncertainty rank the error against the CLEAN
@@ -119,7 +126,18 @@ def drawable(df, component):
 # The statistics
 # ---------------------------------------------------------------------------
 
-def q4(df, permutations=200, where='Q4'):
+#: Which permutation bands `q4` computes, and the column prefix each gets.
+#: `delta_noise_spearman` is unprefixed because it is THE answer and the rest of
+#: the code reads `outside_null`. `delta_auc` is registered in
+#: `uncertainty_stats.STATISTICS` and is NOT here: RERUN_PLAN.md 14.6 row 1 names
+#: it as the enrichment figure's trigger, but each null is another pass of
+#: permutations over every cell, and this pass is already the expensive one. Pass
+#: `nulls=DEFAULT_NULLS + (('delta_auc', 'aucdelta_'),)` when row 1 is decided.
+DEFAULT_NULLS = (('delta_noise_spearman', ''),
+                 ('error_noise_spearman', 'error_'))
+
+
+def q4(df, permutations=200, where='Q4', nulls=None):
     """The answer to Q4, with its null band attached to every row.
 
     A Q4 number without its permutation band is not readable: `auc_delta` of
@@ -135,15 +153,57 @@ def q4(df, permutations=200, where='Q4'):
     answer = unc.q4_error_ratio(oof)
     plain = unc.q4_plain_correlation(oof)
     if permutations:
-        null = unc.permutation_null(oof, statistic='error_noise_spearman',
-                                    n_permutations=permutations)
-        keys = [c for c in unc.PERM_GROUP_COLS if c in answer.columns
-                and c in null.columns]
-        answer = answer.merge(
-            null[keys + ['null_lo', 'null_hi', 'p_value', 'observed',
-                         'observed_inside_null', 'null_kind']],
-            on=keys, how='left')
-        answer['outside_null'] = ~answer['observed_inside_null'].fillna(True)
+        # TWO BANDS, AND THEY ANSWER DIFFERENT QUESTIONS.
+        #
+        # Until 2026-09-17 only the first was computed, and `outside_null` --
+        # the column D7, `uncertainty_pairs` and T6's "Outside null" all read --
+        # was its verdict. That band is for `error_noise_spearman`, the
+        # correlation between the out-of-fold error and the injected noise, with
+        # the uncertainty nowhere in it. So "the uncertainty finds clipped
+        # labels better than the error alone, outside the permutation band" was
+        # reported off a test that never looked at the uncertainty. Under
+        # censoring it fires almost everywhere for a reason that is arithmetic:
+        # a clipped label IS a large error. 2,311 of the 5,932 firing folds were
+        # outside on the LOW side, where the error tracks the noise LESS than
+        # chance, and those counted as firing too.
+        #
+        # `delta_noise_spearman` is the gain -- ratio minus error -- so its null
+        # is centred on zero when the uncertainty adds nothing, whatever the
+        # condition does to the error. That is the band the Q4 claim needs, and
+        # `outside_null` now carries it. The error band is kept under its own
+        # name because it is a real precondition: if the error does not track
+        # the noise at all, no ranking built on it can.
+        keys = None
+        for statistic, prefix in (nulls or DEFAULT_NULLS):
+            null = unc.permutation_null(oof, statistic=statistic,
+                                        n_permutations=permutations)
+            if not len(null):
+                continue
+            keys = [c for c in unc.PERM_GROUP_COLS if c in answer.columns
+                    and c in null.columns]
+            take = ['null_lo', 'null_hi', 'p_value', 'observed',
+                    'observed_inside_null', 'null_kind']
+            answer = answer.merge(
+                null[keys + take].rename(
+                    columns={c: f'{prefix}{c}' for c in take}),
+                on=keys, how='left')
+            # A CELL THAT COULD NOT BE MEASURED IS NOT A CELL THAT FIRED.
+            # `permutation_null` writes `observed_inside_null=False` when the
+            # statistic comes back NaN -- no draws, a constant target, too few
+            # molecules -- and negating that turned "never measured" into
+            # "outside the band". On the 17 September harvest that was 2,417 of
+            # the 5,932 folds marked as firing: no observed value and no band.
+            # Require both ends of the comparison to exist.
+            measured = (answer[f'{prefix}observed'].notna()
+                        & answer[f'{prefix}null_lo'].notna()
+                        & answer[f'{prefix}null_hi'].notna())
+            answer[f'{prefix}outside_null'] = measured & ~answer[
+                f'{prefix}observed_inside_null'].fillna(True)
+        if 'outside_null' in answer.columns:
+            # Which SIDE, because "outside the band" is not a finding on its
+            # own -- below it means the uncertainty made the ranking worse.
+            answer['adds_signal'] = (answer['outside_null']
+                                     & (answer['observed'] > answer['null_hi']))
     if len(plain):
         keys = [c for c in unc.CELL_COLS if c in answer.columns
                 and c in plain.columns]
@@ -399,17 +459,31 @@ def load(sources, dataset_name=None, strict=True, where='per-molecule rows',
 # The cache, because this pass is the expensive one
 # ---------------------------------------------------------------------------
 
+#: Bumped whenever a cached statistic changes MEANING rather than value. The
+#: fingerprint below is built from the input files and the settings, so a change
+#: to the analysis code itself is invisible to it -- and the job script passes
+#: `--cache-dir`, so a fix to a statistic would have been silently overridden by
+#: a cache hit on the old one. That is exactly what would have happened to the
+#: 2026-09-17 Q4 band fix. Bump this with any such change.
+#:
+#:   1  2026-09-17  `outside_null` moves from the error's band to the gain's,
+#:                  gains `adds_signal`, and stops counting unmeasured cells.
+STATS_CACHE_GENERATION = 1
+
+
 def _stats_fingerprint(files, **settings):
-    """What the answers depend on: the files, and the settings that change them.
+    """What the answers depend on: the files, the settings, and the code.
 
     The file list carries each path's size and modification time, so a task
     landing a new file or rewriting an old one invalidates the cache without
     anyone remembering to. `spec_hash` is in there too: a spec change changes
-    what the statistics mean.
+    what the statistics mean. And so is `STATS_CACHE_GENERATION`, because a
+    change to what a statistic MEANS changes nothing the other two can see.
     """
     import hashlib
     h = hashlib.sha256()
-    h.update(f'{C.spec_hash()}|{sorted(settings.items())}'.encode())
+    h.update(f'{C.spec_hash()}|{STATS_CACHE_GENERATION}|'
+             f'{sorted(settings.items())}'.encode())
     for path in sorted(str(f) for f in files):
         st = Path(path).stat()
         h.update(f'{path}|{int(st.st_mtime)}|{st.st_size}'.encode())

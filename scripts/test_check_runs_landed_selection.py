@@ -94,6 +94,8 @@ def main():
 
     checks += check_the_laboratory_runs_are_counted()
     checks += check_every_uncertainty_condition_is_counted()
+    checks += check_every_model_the_files_name_is_expected()
+    checks += check_a_producer_with_no_directory_is_not_skipped()
 
     print(f'OK: {checks} checks. The completeness check counts only the '
           f'combinations deep_run_pairs.json names, and it counts every '
@@ -202,6 +204,95 @@ def check_every_uncertainty_condition_is_counted():
           f'condition; {per_condition * len(first)} in the first submission, '
           f'{per_condition * len(second)} in the second, {total} expected cells')
     return 3
+
+
+def check_every_model_the_files_name_is_expected():
+    """Every model in the two selection files must reach the expected set.
+
+    WHAT THIS CATCHES. `qm9_expected` builds its set from the GENERATOR's MODELS
+    table and then INTERSECTS it with `deep_run_pairs.json`. A model named in the
+    file under a spelling the generator does not have -- a typo, or a model added
+    to the file before it was added to the generator -- drops out of the
+    intersection in silence. It is then queued nowhere and missed by nothing, so
+    the check reports a complete deep run while that model has never run. The
+    same holds on the laboratory side, where `validation_labels` is matched
+    against the generator's MODELS_ALL.
+    """
+    deep = json.loads((ROOT / 'deep_run_pairs.json').read_text())
+    censoring = json.loads((ROOT / 'censoring_pairs.json').read_text())
+    n = 0
+
+    want, _ = K.qm9_expected(2)
+    have_m = {m for _, _, m in want}
+    for label in deep['generator_labels']:
+        if C.canonical_model(label, 'qm9') not in have_m:
+            raise SystemExit(
+                f'FAIL: deep_run_pairs.json names {label} and QM9 stage 2 '
+                f'expects no cell for it. The QM9 job generator has no such key, '
+                f'so the intersection dropped it without a word.')
+    n += 1
+    have_r = {r for _, r, _ in want}
+    for rep in deep['representations']:
+        if C.canonical_rep(rep) not in have_r:
+            raise SystemExit(
+                f'FAIL: deep_run_pairs.json names representation {rep} and QM9 '
+                f'stage 2 expects no cell on it')
+    n += 1
+    for model, rep in censoring['generator_pairs']:
+        cell = ('censoring', C.canonical_rep(rep), C.canonical_model(model, 'qm9'))
+        if cell not in want:
+            raise SystemExit(
+                f'FAIL: censoring_pairs.json names {model} x {rep} and QM9 '
+                f'stage 2 expects no censoring cell for it')
+    n += 1
+
+    assay, _ = K.assay_expected(2)
+    have_am = {m for _, m, _, _ in assay}
+    for label in deep['validation_labels']:
+        if C.canonical_model(label, 'validation') not in have_am:
+            raise SystemExit(
+                f'FAIL: deep_run_pairs.json names {label} on the laboratory side '
+                f'and the depth run expects no cell for it. The laboratory job '
+                f'generator has no such name in MODELS_ALL.')
+    n += 1
+    return n
+
+
+def check_a_producer_with_no_directory_is_not_skipped():
+    """No --validation-dir must not mean the laboratory runs vanish.
+
+    WHAT THIS CATCHES. `check_assay` and `check_uncertainty` returned None when
+    no directory was passed, and `report` skips a None without printing a line.
+    So `python scripts/check_runs_landed.py --stage 2` typed with no flags -- the
+    spelling every document gives -- said nothing whatever about the laboratory
+    depth run, censoring or the uncertainty runs, and still exited on the QM9
+    counts alone. Neither landed nor missing is the one state this tool exists to
+    make impossible.
+    """
+    n = 0
+    for name, call, expected in (
+            ('assay accuracy', lambda: K.check_assay(None, stage=2),
+             len(K.assay_expected(2)[0])),
+            ('uncertainty runs', lambda: K.check_uncertainty(None), None)):
+        row = call()
+        if row is None:
+            raise SystemExit(
+                f'FAIL: {name} with no directory returned None, and report() '
+                f'skips a None, so those cells are counted nowhere')
+        if 'NOT CHECKED' not in row['note']:
+            raise SystemExit(
+                f'FAIL: {name} with no directory must say NOT CHECKED and name '
+                f'the flag; its note reads {row["note"]!r}')
+        if row['missing'] != row['want'] or row['ok']:
+            raise SystemExit(
+                f'FAIL: {name} with no directory must count every cell '
+                f'outstanding, not {row["ok"]} of {row["want"]}')
+        if expected is not None and row['want'] != expected:
+            raise SystemExit(
+                f'FAIL: {name} with no directory expects {row["want"]} cells '
+                f'against the {expected} it expects with one')
+        n += 1
+    return n
 
 
 if __name__ == '__main__':

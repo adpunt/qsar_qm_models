@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -312,11 +313,26 @@ def assay_expected(stage):
 
 def check_assay(directories, stage=1):
     gen = _generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')
-    if gen is None or not directories:
+    if gen is None:
         return None
     want, note = assay_expected(stage)
     if not want:
         return None
+    # NOT CHECKED IS NOT ABSENT, ADDED 2026-09-17. With no --validation-dir this
+    # returned None, and `report` skips a None silently, so
+    # `check_runs_landed.py --stage 2` printed nothing at all about the
+    # laboratory depth run or censoring: neither landed nor missing, which is the
+    # exact state assay_expected's own docstring says this tool exists to make
+    # impossible. The laboratory results are written into the KIRBy checkout, so
+    # there is no directory inside this repository to default to. Say which flag
+    # is missing and count the cells as outstanding, so the exit code is 1.
+    if not directories:
+        return {'name': 'assay accuracy', 'want': len(want), 'ok': 0,
+                'missing': len(want), 'partial': 0, 'thin': 0,
+                'examples': sorted(want),
+                'note': ('NOT CHECKED -- no --validation-dir given. These land '
+                         'in the KIRBy checkout: pass '
+                         '--validation-dir $KIRBY/results/validation_rerun')}
     frame = L.load_assay_accuracy(directories)
     if frame is None:
         return {'name': 'assay accuracy', 'want': len(want), 'ok': 0,
@@ -344,7 +360,7 @@ def check_assay(directories, stage=1):
 def check_uncertainty(directories):
     gen = _generator('unc',
                      'slurm_scripts_uncertainty_rerun/generate_scripts.py')
-    if gen is None or not directories:
+    if gen is None:
         return None
     # ALL SEVEN CONDITIONS, not the main grid's four. The uncertainty runs went
     # out as two submissions -- the three the QM9 screen runs, then censoring and
@@ -357,6 +373,14 @@ def check_uncertainty(directories):
     conditions = list(gen.KNOWN_CONDITIONS)
     want = {(d, m, r, c) for d in gen.DATASETS for m in gen.MODELS
             for r in gen.REPS for c in conditions}
+    # Same hole as check_assay above, same fix, 2026-09-17.
+    if not directories:
+        return {'name': 'uncertainty runs', 'want': len(want), 'ok': 0,
+                'missing': len(want), 'partial': 0, 'thin': 0,
+                'examples': sorted(want),
+                'note': ('NOT CHECKED -- no --uncertainty-dir given. These land '
+                         'in the KIRBy checkout: pass --uncertainty-dir '
+                         '$KIRBY/tests/results/uncertainty_rerun')}
     merged = L.load_merged_uncertainty(directories)
     cover = merged.get('coverage')
     if cover is None or not len(cover):
@@ -434,6 +458,20 @@ def main(argv=None):
     p.add_argument('--verbose', action='store_true',
                    help='list every incomplete cell, not just a count')
     args = p.parse_args(argv)
+
+    # $KIRBY is what scripts/runenv.sh exports and is where the laboratory runner
+    # writes: the job scripts `cd tests` and pass a relative --results-root, so
+    # the grid and the depth run land in <KIRBy>/results/validation_rerun and the
+    # uncertainty runs in <KIRBy>/tests/results/uncertainty_rerun. Reading it
+    # means the ordinary command on the cluster covers all four producers
+    # without the operator remembering two paths.
+    kirby = os.environ.get('KIRBY')
+    if kirby and not args.validation_dir:
+        args.validation_dir = [str(Path(kirby) / 'results' / 'validation_rerun')]
+    if kirby and not args.uncertainty_dir:
+        args.uncertainty_dir = [
+            str(Path(kirby) / 'tests' / 'results' / 'uncertainty_rerun'),
+            str(Path(kirby) / 'results' / 'uncertainty_rerun')]
 
     print(f'checking against the generators\' own rosters, stage {args.stage}')
     results = [check_qm9(args.qm9_dir, args.stage),

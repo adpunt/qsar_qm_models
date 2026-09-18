@@ -561,13 +561,22 @@ def standout_pairs(qm9_summary, assay_summary, condition='gaussian',
                      fired=False, says=says))
 
 
-def uncertainty_pairs(q4, statistic='rho_ratio', sigma=None):
+def uncertainty_pairs(q4, statistic='rho_delta', sigma=None):
     """Which pairs are best at FINDING the corrupted labels. Raw numbers.
 
     One row per model and representation: the statistic, the permutation band it
     is read against, and whether it cleared the band. No derived score. The
     author asked whether any pair is unusually good at this the way the boosted
     trees are unusually good on Sort & Slice for robustness.
+
+    ⚠️ THE STATISTIC AND THE BAND HAVE TO BE THE SAME QUANTITY, AND UNTIL
+    2026-09-17 THEY WERE NOT. This printed `rho_ratio` beside `null_lo` and
+    `null_hi` from the band for `rho_error`, and took `clears_the_band` from
+    that band -- so the column said "the uncertainty found the bad labels" while
+    the test underneath it said "the error tracks the injected noise", which
+    under censoring is true by construction. `rho_delta` is the gain the
+    uncertainty adds, and `adds_signal` requires the band to be cleared from
+    ABOVE (figlib_uncertainty.q4).
     """
     if q4 is None or not len(q4) or statistic not in q4.columns:
         return {}, _verdict('U', 'Which pairs find the corrupted labels?',
@@ -580,15 +589,18 @@ def uncertainty_pairs(q4, statistic='rho_ratio', sigma=None):
         frame = frame[frame['sigma'] == sigma]
     keys = [c for c in ('dataset', 'model', 'rep', 'condition', 'sigma')
             if c in frame.columns]
+    fires = 'adds_signal' if 'adds_signal' in frame.columns else 'outside_null'
     table = (frame.groupby(keys, dropna=False)
              .agg(statistic_median=(statistic, 'median'),
                   null_lo=('null_lo', 'median'),
                   null_hi=('null_hi', 'median'),
-                  folds_outside_null=('outside_null', 'sum'),
+                  folds_above_null=(fires, 'sum'),
                   folds=(statistic, 'size'))
              .reset_index()
              .sort_values('statistic_median', ascending=False))
-    table['clears_the_band'] = (table['folds_outside_null']
+    table['statistic'] = statistic
+    table['band_is_for'] = statistic
+    table['clears_the_band'] = (table['folds_above_null']
                                 >= 0.5 * table['folds'])
     clear = table[table['clears_the_band']]
     if len(clear):
@@ -944,7 +956,21 @@ def d7_uncertainty_option(q4, q6, support):
         return {}, _verdict('D7', 'Which F7 option runs?', False,
                             'no out-of-fold uncertainty rows yet')
     table = q4.copy()
-    outside = table.get('outside_null')
+    # `adds_signal` is `outside_null` AND on the upper side, on the band for the
+    # GAIN rather than for the error (figlib_uncertainty.q4). Before 2026-09-17
+    # `fires` was `outside_null` on the error's band, so a cell fired when the
+    # out-of-fold error tracked the injected noise -- which under censoring is
+    # arithmetic, because a clipped label is a large error -- and fired equally
+    # when it tracked it LESS than chance. `outside_null` is still read as a
+    # fallback so an older harvest still loads, and says so.
+    outside = table.get('adds_signal')
+    if outside is None:
+        outside = table.get('outside_null')
+        if outside is not None:
+            print('  D7: this harvest has no `adds_signal` column, so the '
+                  'verdict is read off `outside_null` from an older run. That '
+                  'band is for the error alone and NOT for the uncertainty; '
+                  're-run the uncertainty pass before quoting it.')
     have_band = outside is not None and outside.notna().any()
     table['fires'] = outside.fillna(False) if have_band else False
 
@@ -966,7 +992,10 @@ def d7_uncertainty_option(q4, q6, support):
             option='undecided', band_computed=False)
 
     censoring = table[table['condition'].astype(str).str.startswith('censoring')]
-    row1 = bool(censoring['fires'].any()) if len(censoring) else False
+    # A MAJORITY OF FOLDS, NOT ANY ONE. `.any()` over every fold of every cell
+    # meant one fold out of 2,415 decided which figure the paper carried, and
+    # with 200 permutations a 2.5% tail fires by chance roughly that often.
+    row1 = (bool(censoring['fires'].mean() >= 0.5) if len(censoring) else False)
 
     row2 = False
     q6_summary = pd.DataFrame()
@@ -979,11 +1008,14 @@ def d7_uncertainty_option(q4, q6, support):
     row3 = bool(len(table) and not table['fires'].any())
 
     if row1:
+        share = float(censoring['fires'].mean())
         option, says = '7B', (
-            'Censoring: the uncertainty finds clipped labels better than the '
-            'error alone, outside the permutation band. F7 is the enrichment '
-            'curve (7B) and it goes in the main text -- it is the strongest '
-            'possible answer to the paper\'s own title (row 1).')
+            f'Censoring: dividing the out-of-fold error by the predicted '
+            f'uncertainty ranks the clipped labels better than the error '
+            f'alone, above the permutation band on the GAIN, in '
+            f'{share:.0%} of folds. F7 is the enrichment curve (7B) and it '
+            f'goes in the main text -- it is the strongest possible answer to '
+            f'the paper\'s own title (row 1).')
     elif row2:
         option, says = '7A', (
             'The uncertainty ranks the error against the clean label well above '

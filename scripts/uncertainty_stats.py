@@ -1274,11 +1274,66 @@ def _stat_unc_noise_spearman(arrays, use_cached, unc=None):
     return _spearman(unc, np.abs(eps))
 
 
+def _stat_delta_noise_spearman(arrays, use_cached, unc=None):
+    """THE GAIN. How much dividing by the uncertainty adds over the error alone.
+
+    This is what question 4 asks and it is the only one of the four that is a
+    statement about the UNCERTAINTY. The other three can each be large for
+    reasons that have nothing to do with it:
+
+      * `error_noise_spearman` is large whenever the injected noise shows up in
+        the error, which under censoring it must -- a clipped label is a large
+        error by construction. Nothing about the model's uncertainty is
+        involved.
+      * `ratio_noise_spearman` inherits all of that, because the error is its
+        numerator.
+      * `uncertainty_noise_spearman` is near zero by design and is reported so
+        that nobody assumes it was hidden.
+
+    Under permutation this one is centred on zero when the uncertainty adds
+    nothing, whatever the condition does to the error, so a band around it is
+    readable across conditions that damage the labels by very different amounts.
+    """
+    return (_stat_ratio_noise_spearman(arrays, use_cached, unc=unc)
+            - _stat_error_noise_spearman(arrays, use_cached))
+
+
+def _stat_delta_auc(arrays, use_cached, unc=None, top_frac=0.10):
+    """The same gain as `delta_noise_spearman`, on the enrichment AUC.
+
+    RERUN_PLAN.md 14.6 row 1 names `auc_delta` as the trigger for the enrichment
+    figure, so the trigger needs a band of its own. It is registered rather than
+    computed by default: each extra null is another pass of permutations over
+    every cell, and the uncertainty pass is already the expensive one. Ask for
+    it by name (`figlib_uncertainty.q4(..., nulls=(...))`) when row 1 is being
+    decided.
+    """
+    y, p, eps, cached = arrays
+    err = _error_from(arrays, use_cached)
+    size = np.abs(eps)
+    finite = size[np.isfinite(size)]
+    if not finite.size or np.unique(finite).size < 2:
+        return np.nan
+    threshold = np.quantile(finite, 1.0 - top_frac)
+    positive = size >= threshold
+    if positive.all():
+        positive = size > threshold
+    if positive.all() or not positive.any():
+        return np.nan
+    usable = np.isfinite(unc) & (unc > 0)
+    ratio = np.where(usable, err / np.where(usable, unc, 1.0), -np.inf)
+    return _auc(ratio, positive) - _auc(err, positive)
+
+
 STATISTICS = {
     # the runbook's headline: the cross-fitted error against the injected noise
     'error_noise_spearman': _stat_error_noise_spearman,
     # the same thing after dividing by the predicted uncertainty
     'ratio_noise_spearman': _stat_ratio_noise_spearman,
+    # the difference between those two -- the gain, and the answer to Q4
+    'delta_noise_spearman': _stat_delta_noise_spearman,
+    # the same gain on the enrichment AUC (RERUN_PLAN.md 14.6 row 1)
+    'delta_auc': _stat_delta_auc,
     # the plain correlation, for completeness
     'uncertainty_noise_spearman': _stat_unc_noise_spearman,
 }
@@ -1506,10 +1561,44 @@ def q5_mean_uncertainty(df, split=None, min_n=1, extra_group_cols=None):
                                  else np.nan)
         rec['mean_uncertainty_model_scale'] = float(u.mean()) if u.size else np.nan
         rec['label_scale'] = scale
+        # THE SPREAD OF THE LABELS THE MODEL WAS ACTUALLY SHOWN, at this level.
+        #
+        # `label_scale` above is the CLEAN training spread and is the same
+        # number at every level, so nothing here measured what the corruption
+        # did to the labels themselves. That matters for one condition and one
+        # only. Every other condition adds a draw to a label and widens the
+        # training distribution; censoring replaces everything past a limit with
+        # the limit and NARROWS it. Under censoring every model's predicted
+        # uncertainty falls as the clipped fraction rises, on every dataset, and
+        # the obvious reading is that the models are tracking a label
+        # distribution that really has become narrower. Without this column that
+        # reading could not be checked.
+        #
+        # The recorded label is the clean label plus the amount injected, which
+        # is how the error is built everywhere else in this module, so no new
+        # column is needed from the writer.
+        if {'y_true_clean', 'injected_noise'} <= set(cell.columns):
+            recorded = (pd.to_numeric(cell['y_true_clean'], errors='coerce')
+                        + pd.to_numeric(cell['injected_noise'], errors='coerce'))
+            recorded = recorded[np.isfinite(recorded)]
+            clean = pd.to_numeric(cell['y_true_clean'], errors='coerce')
+            clean = clean[np.isfinite(clean)]
+            rec['recorded_label_sd'] = (float(recorded.std(ddof=1)) * scale
+                                        if recorded.size > 1 else np.nan)
+            rec['clean_label_sd'] = (float(clean.std(ddof=1)) * scale
+                                     if clean.size > 1 else np.nan)
+            rec['label_spread_ratio'] = (rec['recorded_label_sd']
+                                         / rec['clean_label_sd']
+                                         if rec.get('clean_label_sd') else np.nan)
+        else:
+            rec['recorded_label_sd'] = np.nan
+            rec['clean_label_sd'] = np.nan
+            rec['label_spread_ratio'] = np.nan
         rows.append(rec)
     out = pd.DataFrame(rows, columns=(
         _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'mean_uncertainty',
                      'median_uncertainty', 'sd_uncertainty',
+                     'recorded_label_sd', 'clean_label_sd', 'label_spread_ratio',
                      'mean_uncertainty_model_scale', 'label_scale']))
     if len(out):
         base = _base_cols(extra_group_cols)
@@ -1658,12 +1747,28 @@ def q7_group_correlated_error(df, split='train_oof', min_n=_DEFAULT_MIN_N,
         error = (cell['y_pred'].to_numpy(dtype=np.float64)
                  - cell['y_true_clean'].to_numpy(dtype=np.float64))
         finite = np.isfinite(error)
-        if 'canonical_smiles' not in cell.columns:
+        # `mol_id` FIRST, AND THAT IS THE WHOLE BUG. `load_uncertainty` builds a
+        # new frame and puts the SMILES on it under the name `mol_id`
+        # (see the loader, "out['mol_id'] = df['canonical_smiles']"), so this
+        # test for the writer's column name was False on every row that has ever
+        # been loaded. The statistic returned NaN 20,699 times out of 20,699 on
+        # the 2026-09-17 harvest, with the reason "no canonical_smiles on the
+        # row" recorded beside it -- which reads as a gap in the runs and is a
+        # rename in this file. The writer emits the column; nothing is missing.
+        smiles_column = next((c for c in ('mol_id', 'canonical_smiles')
+                              if c in cell.columns), None)
+        if smiles_column is None:
             rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
-                       reason='no canonical_smiles on the row')
+                       reason='no molecule identifier on the row')
             rows.append(rec)
             continue
-        scaffolds = _murcko(cell['canonical_smiles'].to_numpy()[finite])
+        identifiers = cell[smiles_column].to_numpy()[finite]
+        if not pd.notna(identifiers).any():
+            rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
+                       reason=f'{smiles_column} is empty on every row')
+            rows.append(rec)
+            continue
+        scaffolds = _murcko(identifiers)
         if scaffolds is None:
             rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
                        reason='rdkit is not importable here')
@@ -1671,6 +1776,7 @@ def q7_group_correlated_error(df, split='train_oof', min_n=_DEFAULT_MIN_N,
             continue
         err = error[finite]
         frame = pd.DataFrame({'scaffold': scaffolds, 'error': err})
+        frame = frame[pd.notna(frame['scaffold'])]
         frame = frame[frame['scaffold'] != '']
         n_groups = int(frame['scaffold'].nunique())
         total = float(np.var(frame['error'])) if len(frame) else np.nan

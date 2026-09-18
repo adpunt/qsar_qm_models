@@ -307,6 +307,23 @@ It is homoscedastic Gaussian noise at double dose, with no threshold behaviour a
 the pipeline stayed in Hartree the same cut would have caught *zero* molecules. Its entire
 character is an accident of a unit conversion.
 
+### What is NOT implemented, and why — 2026-09-16
+
+Separate from the table above, which retires things that were built. These are mechanisms that are
+real, are documented in §3, and have no code on either side. Listed so that the package's menu is a
+stated scope rather than an accident, and so the paper's limitations can name them.
+
+| Mechanism | What it would be | Why it is absent | Cost to add |
+|---|---|---|---|
+| **An asymmetric draw** | a third position on the shape axis, beside Gaussian, Laplace and Student-*t* | tested as a centred Gamma in `scripts/setting_selection_test.py` and never built, because it showed nothing at the reporting level (0.0016 R², p = 0.604) and the asymmetry story is carried by censoring and grouped-shifted, which are mechanisms with sources rather than chosen distributions | a shape entry on both injectors; no re-run, since nothing would be submitted |
+| **Lower-side censoring** | detection limits cutting from below, as saturation cuts from above | **already implemented on both sides** — `CensorSide::Lower` in Rust, `side='lower'` in `noiseInject`, and `censoring_lower_25` is a named condition in `condition_names.json`. Nothing submits it | none in code; it is a submission |
+| **Replicate disagreement** | the same molecule appearing twice with different labels | no condition produces it, and the hERG loader deliberately collapses duplicates to a median precisely to REMOVE it, because a dataset carrying replicate noise decays differently from one carrying injected noise (`load_chembl_herg` in the laboratory runner, and `RERUN_PLAN.md` 2.13) | a new targeting; it changes the number of rows, which no current condition does |
+| **Feature-keyed heteroscedasticity** | error tracking a molecular property — a poorly soluble compound measured less precisely | `hetero` and `valprop` were dropped because they keyed error on the MEASURED VALUE, which §3.2 refutes. Keying it on a FEATURE is a different mechanism and has never been tested | none — `grouped_wider` already accepts arbitrary `groups`, so binning on a descriptor gives it today. This is a documentation gap, not a code one |
+| **Qualified records dropped** | a `> 10 µM` row thrown away rather than clipped | censoring covers "recorded AT the limit"; this is the other half of the same assay behaviour and is a selection effect on the training set, not a perturbation of a label. Nothing in the design does selection | a new class of condition — it removes rows, so the dose axis does not apply |
+
+The first two are cheap and the third is the one a reviewer of a bioactivity paper is most likely
+to ask about.
+
 ---
 
 ## 3. The evidence
@@ -1008,6 +1025,54 @@ All six noise types implemented in Python and run against the real QM9 labels (1
 `data/QM9/raw/gdb9.sdf.csv`). Script: `scripts/test_noise_arms.py`.
 
 Every noise type landed within **±1.5%** of the requested dose at k = 0.2 and k = 0.5.
+
+### 5.1e ✅ CONFIRMED ON THE PRODUCTION RUN, and the panel that tells the conditions apart — 2026-09-16
+
+Everything above was measured on fixtures. This is the same two properties measured on the figure
+the paper will print, from the injector the pipeline runs
+(`results/decisions_arc/figures/F1_delivered_dose.csv` and `F1_group_share.csv`).
+
+**Dose matching holds in production.** At a requested amount of 0.3083 in the label's own units:
+
+| Condition | delivered (median) | off by |
+|---|---|---|
+| grouped_wider | 0.3083 | 0.0000 |
+| gaussian | 0.3088 | 0.0005 |
+| laplace | 0.3074 | 0.0009 |
+| grouped_shifted | 0.3066 | 0.0017 |
+| outlier_p10 | 0.3045 | 0.0038 |
+| student_t_nu5 | 0.3035 | 0.0048 |
+| *censoring* | *0.1408* | *not dose-matched, by construction* |
+
+Every dose-matched condition lands within 1.6% of the request, so a difference in outcome between
+two of them is a difference in pattern and not in amount. That sentence is the premise of the whole
+comparison and this is the measurement behind it.
+
+**And the group share is what separates them.** The spread of the group-mean errors divided by the
+spread of all the errors, on the same run:
+
+| Condition | group share |
+|---|---|
+| **grouped_shifted** | **0.781** |
+| laplace | 0.143 |
+| outlier_p10 | 0.139 |
+| censoring | 0.138 |
+| gaussian | 0.136 |
+| student_t_nu5 | 0.121 |
+| grouped_wider | 0.108 |
+
+0.781 is √0.62 to three figures, which is the ρ this design asks for, so the figure confirms the
+parameter rather than merely illustrating it. Everything else sits at 0.11–0.14, which is the
+finite-group-size floor for independent draws and not a condition property.
+
+**The consequence, and it is the reason the grouped pair exists.** `grouped_wider` is *structured* —
+whole scaffold families are measured three times worse — and yet its group share is 0.108, BELOW
+Gaussian's 0.136. Varying the width by group does not make the errors correlated; only a shared
+offset does. So the axis that the seven conditions actually span is not Gaussian against
+non-Gaussian, and it is not even structured against unstructured. **It is independent and zero-mean
+against correlated or biased.** Five of the seven are independent and zero-mean and behave alike;
+`grouped_shifted` is correlated and `censoring` is biased, and those two are the only ones that
+separate on any measured outcome (`RERUN_PLAN.md` §14.17).
 
 ### 5.1c ✅ The shape is a second axis for grouped-shifted, and both injectors now deliver on it
 
