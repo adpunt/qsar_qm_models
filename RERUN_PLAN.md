@@ -8548,7 +8548,7 @@ requirement is not met, that question cannot be answered and the run should not 
 |---|---|---|---|---|
 | **Q1** | Is noise robustness decided by the model, the representation, or their pairing? | Two-way variance decomposition, model × representation, reported as the share of variance each term explains, with the residual shown | One value per (model, representation, replicate) cell, **separately for each noise type** | ≥2 replicates per cell for the residual to be real; **≥6 for any paired follow-up test** (§13.1); one roster and one exclusion rule applied everywhere |
 | **Q2** | Does the *kind* of noise matter, or only the amount? | (a) Spread in accuracy across noise types at matched delivered amount; (b) paired signed-rank test, each type against Gaussian, per model, **not pooled** | Paired on the replicate, within one representation and one noise level | Delivered amount verified flat across types (§8 gate 1). Six replicates minimum, or no result can reach significance |
-| **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset. ✅ **All four settled, and every one is ON the shared ladder** (`NOISE_DESIGN.md` §6.4, which owns the ladder), so Q3 can be read at the settled level without interpolating: **QM9 1.0, logD 1.0, Caco-2 0.75, hERG 1.0**, as `models/model_defaults.py` `REPORTING_LEVELS` has them. Caco-2 was 0.2 for one day and is 0.75 since `82556a0` |
+| ~~**Q3**~~ | 🚫 **WITHDRAWN by the author, 2026-09-18: "this is irrelevant, remove this question".** Not answered and not to be reinstated. What it would have said, measured on 2026-09-18 and recorded only so nobody re-derives it: the best-minus-worst spread in R$^2$ across the 13 base models on QM9 under Gaussian noise NARROWS as the noise rises, 0.106 clean to 0.084 at level 1.5. The original text follows. ~~What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset. ✅ **All four settled, and every one is ON the shared ladder** (`NOISE_DESIGN.md` §6.4, which owns the ladder), so Q3 can be read at the settled level without interpolating: **QM9 1.0, logD 1.0, Caco-2 0.75, hERG 1.0**, as `models/model_defaults.py` `REPORTING_LEVELS` has them. Caco-2 was 0.2 for one day and is 0.75 since `82556a0` |
 | **Q4** | Can a model's uncertainty tell you which labels are bad? | **Two numbers, settled 2026-08-26, reported side by side under names that cannot be confused.** (a) The plain Spearman correlation between predicted uncertainty and the size of the injected noise, **within each noise level**, scored **out-of-fold** — near zero by design, because the scoring model never saw that molecule's draw and under an even condition every molecule gets the same amount. (b) The answer: take the out-of-fold error `\|y_clean + injected − y_pred\|`, which does track the noise, and ask whether dividing it by the predicted uncertainty ranks corrupted labels better than the error alone. Both with a permutation null | Per (dataset, model, representation, noise type, level) — never pooled | The noise **recorded**, not reconstructed (§5.2); out-of-fold scoring on scaffold groups; a zero-noise run of the same type to subtract. ✅ **All three now exist on both pipelines** (§3.1c). Built in `scripts/uncertainty_stats.py` |
 | **Q5** | Does noisy training data make a model less sure about new molecules? | Mean predicted uncertainty against noise level — a **population-level** statement, and it must be labelled as one | Per (model, representation, noise type), across levels | Uncertainty magnitudes on a fixed scale — needs the standardisation fix (§2.4), which currently makes them shrink as noise rises |
 | **Q6** | With noisy training data, does uncertainty still rank which predictions to trust? | Spearman correlation between predicted uncertainty and absolute error **against the clean label** | Per (model, representation, noise type, level) | Clean test labels retained alongside noisy ones. Free — every run already produces both |
@@ -18999,6 +18999,14 @@ python scripts/check_runs_landed.py --stage 1 --verbose
 It refuses to overwrite a clean row a job computed — it checks that one against the reference
 instead — and it will not run twice over the same file. **Queues nothing, costs nothing.**
 
+**RUN IT AFTER EVERY LANDING, NOT ONCE.** It can only fill a cell whose results file exists when
+it runs. On 2026-09-14 at 02:47 it filled 657 rows and skipped `mlp_bnn_full_variational_hetero`
+on laplace, outlier and student-t with "no results file", because that model's deep-run tasks were
+still queued. They landed afterwards, writing six noise levels and no clean one, and by 2026-09-18
+those nine cells were still empty and `what_is_missing.csv` was reporting them as work to submit.
+They were one command, not nine tasks. `results/zero_row_copies.csv` carries the date of the last
+real run; if it is older than the newest results file, the copy is behind.
+
 ###### The 11 clean rows that disagree, traced 2026-09-14
 
 The dry run copied nothing, offered 657 rows, checked 2,203 computed clean rows against the
@@ -21524,3 +21532,327 @@ model share is 1.3 percentage points under Gaussian and 2.2 under grouped-wider 
 grouped-shifted, so only one of the three conditions has whiskers that say anything. §14.11h's
 argument for the bar stands; `06133fc`'s removal is reverted; the guard is
 `test_f2_carries_the_residual_and_the_whiskers`.
+
+#### 14.29 THE RESULTS AND THE INTRODUCTION ARE DRAFTED — 2026-09-17, and three defects found on the way
+
+**The text is in `PAPER_REVISION_GUIDE_FINAL.md`, "PART FOUR".** Seven Results subsections in the author's
+four movements, the Introduction paragraph by paragraph against the `paper.tex` lines it replaces, a LaTeX
+block and a trimmed caption for each of the seven paper figures, the table wrappers, a six-item cut list, the
+fifteen-key reference audit, and the style specification extracted from nineteen reference papers. Nothing in
+it is a new file, per the standing rule.
+
+**Written against the harvest of 17 September at 23:20**, which landed while the drafting was in progress.
+Every number in it was recomputed in that session from `results/decisions_arc/`; nothing was taken from this
+plan on trust.
+
+##### Three defects in the figure and table code, all fixed and all with tests
+
+1. 🔴 **The Q4 permutation band was a band about the ERROR, not about the uncertainty.**
+   `figlib_uncertainty.q4` computed `permutation_null(statistic='error_noise_spearman')` — the correlation
+   between the out-of-fold error and the injected noise, with the uncertainty nowhere in it — and the
+   `outside_null` column it produced was read by `d7_uncertainty_option`, `uncertainty_pairs` and
+   `t6_uncertainty` as though it meant the uncertainty had contributed something. **§14.17d's table is
+   therefore measuring whether the error tracks the injected noise**, which under censoring is arithmetic: a
+   clipped label is a large error. Of the 5,932 folds it marked as firing, **2,417 had no observed value and
+   no band at all** (`permutation_null` writes `observed_inside_null = False` for a NaN statistic, and
+   negating that turns *never measured* into *fired*), **2,311 were outside on the low side** — the error
+   tracking the noise *less* than chance — and 1,204 were outside on the high side, which is 5.8% of 20,699
+   folds against a nominal 5% tail. §14.6 rows 1 and 3 already name `auc_delta` and `rho_delta` as the
+   quantities to test, so this was a deviation from this plan's own specification.
+   ✅ **Fixed**: `uncertainty_stats.STATISTICS` gains `delta_noise_spearman` (the gain, `rho_ratio` minus
+   `rho_error`) and `delta_auc`; `q4` computes the gain's band, keeps the error's band under
+   `error_outside_null` as the precondition it is, requires both ends of the comparison to exist, and adds
+   `adds_signal`, which requires the band to be cleared from above. `d7`'s trigger is a majority of folds
+   rather than `.any()`. Guard: `scripts/test_q4_band_is_about_the_uncertainty.py`, five checks.
+   🔴 **NOT YET RE-RUN, so no Q4 significance may be quoted.** §R7 of the guide is written around that.
+   **`notes_for_the_text.md`'s "can uncertainty find the corrupted labels" sentence must not be used** — it
+   is D7's old wording and it describes the wrong test.
+   ⚠️ **One thing the fix uncovered and the paper should carry**: the gain's null is not centred on zero,
+   because dividing by any imperfect uncertainty degrades the ranking on average. The gain is read against
+   the band and never against zero. And the room for a gain is small by construction — twelve settings swept
+   on 17 September gave a best gain of +0.009.
+
+2. 🔴 **Nine of the sixteen generated `.tex` fragments could not compile.** `Sort & Slice` added a column to
+   its row in T5, T6 and T8; `Outlier (10%)` commented out the end of its line, including the row's own `\\`,
+   in T2, T3 and all four T4s; and fourteen of the sixteen carried `R²`, `α`, `β`, `η`, `ρ`, `Δ`, `±`, `÷`,
+   `→` or `–`, which pdflatex cannot set. Only T1 was clean. None of it shows in the CSV.
+   ✅ **Fixed**: `figlib_tables.latex_safe` escapes outside `$…$` and leaves deliberate math untouched.
+   Guard: `scripts/test_table_latex.py`, which also audits whatever is on disk.
+   ⚠️ **Every cluster run overwrites the fragments until the fix is pulled.** The 23:20 run re-broke all
+   nine; they were regenerated locally a second time.
+
+3. 🔴 **T6 printed one representation as two and four datasets as four unlabelled rows.** It grouped on
+   `dataset` and then dropped the column, so each model-and-representation pair had four rows identical in
+   their first two columns and different in every number; and it called `rep_label` on the raw spelling, so
+   the laboratory runner's `MHG-GNN-pretrained` became a seventh representation beside `MHG-GNN`.
+   ✅ **Both fixed**: a labelled `Dataset` column, first, and `canonical_rep` before labelling.
+   **Open, and the author's**: T6 also takes a median across the seven noise conditions, which is the axis
+   the result lives on. Three options with their costs are in the guide's READ FIRST item 3.
+
+##### Two numbers in this plan that the 17 September harvest corrects
+
+- **§14.17a's assay row.** The grouped-shifted penalty reads logD −0.042, Caco-2 −0.105, hERG −0.094 on the
+  14 September harvest and **logD −0.035, Caco-2 −0.090, hERG −0.094 on 21, 20 and 19 pairs** on this one.
+  QM9 is −0.032 on both. The shape is unchanged; quote the newer figures.
+  Source: `auc_norm_qm9.csv`, `auc_norm_assay.csv`, pivoted on the pairs that ran all six dose-matched
+  conditions.
+- **§14.17c's censoring comparison** puts a five-pair median beside a hundred-pair one. Paired on the same
+  five pairs it is **−0.406 Caco-2, −0.308 hERG, −0.145 QM9, −0.101 logD**, which makes censoring look worse
+  on QM9 and logD than the unpaired version did. §14.17c's rule is unaffected and still holds: censoring ran
+  on five named pairs and no claim about which model resists it best can rest on it.
+
+**Everything else in §14.15, §14.17a and §14.17b reproduced exactly** — the ANOVA shares, the ten-to-one
+model-against-representation spread, Kendall's *W* at 0.937, the median rank transfer at 0.356, the
+−0.35 correlation between the accuracy and robustness rankings with zero overlap in the top ten, the dose
+matching within 1.6%, and the 0.781 group share.
+
+##### What the drafting settled, and what it left for the author
+
+Settled from the data: the four-movement order; which figure carries which paragraph; that the paper's
+differentiator is **independence and zero mean rather than Gaussianity**, which survives §14.17a's own table
+and is stronger than the Gaussianity claim would have been; and that the same axis runs through the
+uncertainty half, where the decomposition separates in 72% of decidable cells under plain independent noise
+and 53% under a shared scaffold offset, on the 237 pairs that ran all three full-grid conditions.
+
+Left open, each with its cost written out in the guide: whether F4b, R9 and T8 are promoted from the
+additional files (**F4b is the one I would promote** — the subsection carrying the novel claim currently has
+no figure); whether F8 is one figure or three; T6's shape; whether panel letters stay, given that none of the
+three Journal of Cheminformatics papers letters its panels and §14.27 settled that they do stay; and whether
+`NaN` becomes an em dash in the tables.
+
+⚠️ **D9 and §14.25 disagree and it is unresolved here.** D9 fires and its own verdict says *"T7 is promoted
+to a figure"*; §14.25 lists R9 under additional files.
+
+#### 14.30 SECOND PASS ON THE RESULTS — 2026-09-18, and five more defects
+
+The author read the first pass and rejected its Q1 framing. This records what changed and what was found.
+Full text in `PAPER_REVISION_GUIDE_FINAL.md`, "PART FOUR, SECOND PASS".
+
+**Q3 is WITHDRAWN** by the author — "this is irrelevant, remove this question". Marked in §7.0.
+
+##### Five defects, all fixed, all with tests
+
+1. 🔴 **`q7_group_correlated_error` has never produced a number.** It tests for a column named
+   `canonical_smiles`; the writer emits it, but `load_uncertainty` renames it to `mol_id`. The test was
+   False for every row ever loaded and the statistic returned NaN on **all 20,699 rows**, with the reason
+   "no canonical_smiles on the row" beside it — which reads as a gap in the runs. ✅ Fixed;
+   `scripts/test_q7_group_share_computes.py` also establishes that the statistic separates what it claims:
+   a per-scaffold offset scores 0.998 and a per-molecule draw 0.042. **This is the statistic the author's
+   noise-characterisation question needs**, see below.
+2. 🔴 **The uncertainty cache would have silently defeated the §14.29 band fix.** The job passes
+   `--cache-dir` and the fingerprint is built from the input files, the spec hash and the settings — not
+   from what a statistic means. ✅ Fixed: `figlib_uncertainty.STATS_CACHE_GENERATION` is in the fingerprint.
+   Bump it with any change of this kind.
+3. 🔴 **F4a drew seven models under a caption promising eight.** `f4_overview` ranked on the unfiltered
+   summary, so `GP (het.)` took slot 8 and `cross_model` then dropped it. ✅ Fixed — the ranking runs on the
+   base models. The eight are now NGBoost, RF, QRF, XGBoost, GP, LightGBM, SVM, VBLL-α.
+4. **F2's caption had its panels the wrong way round** — the figure is a) robustness, b) accuracy.
+   Corrected in the guide. Found by opening the PNG, which the first pass had not done.
+5. **F8's caption did not say it shows three of the seven conditions.** Corrected in the guide.
+
+##### Q1 — the first pass's framing was wrong and is replaced
+
+"The representation decides whether a model is usable and barely touches its robustness" is NGBoost's
+behaviour, not the roster's. What is measured, spread over the six representations under Gaussian noise,
+median over four datasets: **robustness depends on the representation about four times as much for the
+neural families (BNN-α 0.201, VBLL-α 0.158, VBLL-β 0.152) as for the trees, the Gaussian process and the
+SVM (NGBoost 0.042, SVM 0.044, GP 0.045, RF 0.045)**. NGBoost is the case where the ACCURACY depends on the
+representation most (0.148) while its robustness depends on it least — an example, not the finding.
+
+🔴 **"Tree-based models are a safer bet" is wrong as stated and the correction is a headline.** Median
+AUC_norm over the six representations: RF and QRF hold 0.86–0.96 on all four datasets, while **XGBoost falls
+to 0.709 and LightGBM to 0.603 on Caco-2** having looked indistinguishable from the forests on QM9
+(0.945, 0.944). **A study run on QM9 alone would have reported LightGBM as robust.** Bagging holds,
+gradient boosting does not — and NGBoost, which boosts under a distributional likelihood, holds.
+
+RF and QRF are the only two models whose robustness rank never falls below 8 of 13 across 24
+dataset-and-representation cells; every other model drops to 11, 12 or 13 somewhere.
+
+##### Q2 — now proved at every representation separately, and on accuracy as well as robustness
+
+Grouped-shifted against Gaussian, paired signed-rank, QM9, each representation on its own:
+**significant at all six**, −0.028 to −0.054 AUC_norm, and −0.023 to −0.047 R² on the accuracy side. No
+shape condition is significant at any representation on either outcome. Accuracy is recoverable per cell
+without a new run: **AUC_norm × clean R² is the trapezoidal mean of R² over the level ladder**, by the
+definition of the metric.
+
+🔴 **Honest limit for the paper: Laplace, outlier and Student-*t* ran on ECFP4, PDV and ChemBERTa only** —
+three of six representations, on all four datasets. "Shape does not matter" is established on three.
+
+##### Q5 — the finding the first pass missed
+
+All 52 dataset-and-model combinations have a positive uncertainty slope, in line with Kolmar. Two additions:
+the plain Bayesian networks sit at 0.03–0.06 on the assay datasets against ~0.6 for everything else, so a
+weight posterior alone barely registers corrupted labels; and the six dose-matched conditions are
+indistinguishable (QM9 column medians 0.99 to 1.13).
+
+🔴 **Under censoring the slope is NEGATIVE for every model on every dataset** — −0.24 to −0.35 on QM9,
+−0.34 to −0.72 on the assay sets — and monotone. Every model becomes steadily **more confident** as more
+labels are clipped. Censoring is the only condition that corrupts labels by reducing their dispersion, and
+every estimator in the roster is fitted to the dispersion of its training targets. Q6 degrades at the same
+time (0.071 under censoring against 0.17–0.19 elsewhere), so the magnitude goes the wrong way and the
+ordering gets worse together.
+
+⚠️ **The mechanism is a reading, not a measurement.** `label_scale` in `unc_q5.csv` is the CLEAN training
+spread and is constant across levels, so nothing on disk measures the compression. **One extra column — the
+standard deviation of the noised training labels per level — would make it a measurement.**
+
+##### Q7 — condensed
+
+§7.0 defines Q7 as Q4 and Q6 across conditions. The first pass answered it with the aleatoric/epistemic
+decomposition, which is Q5's machinery, without saying so. The answer is: uncertainty behaves the same way
+under every condition that adds a draw to a label and fails under the one that removes information from it —
+Q5 reverses sign under censoring, Q6 drops to 0.071. Q4 across conditions stays blocked by §14.29.
+
+##### 🔴 THE UNCERTAINTY RUNS ARE NOT COMPLETE ON QM9
+
+The laboratory roster is 21 model-and-representation pairs and all three assay datasets carry all 21 under
+all seven conditions. QM9 carries: Gaussian 19, grouped-wider 18, grouped-shifted 18, Laplace 9,
+outlier 9, Student-*t* 9, **censoring 3**. **60 of 147 QM9 cells are absent.** `uncertainty_pairs.json`
+exists so the two halves are comparable pair for pair, and under censoring they are not — 3 against 21.
+**No sentence may compare QM9 with the laboratory data under censoring.** Filling them is a submission
+decision; the missing pairs are listed in the guide.
+
+##### NEW — characterising real noise from the artificial conditions. The author's question, and it is live
+
+`q7_group_correlated_error` measures the scaffold-group structure of a model's error **without knowing the
+injected noise**, so it can be pointed at a real dataset. `F1_group_share.csv` supplies the calibration:
+grouped-shifted injects a group share of 0.781 and every other condition sits at 0.108–0.143, which is the
+finite-group-size floor rather than zero.
+
+**The read**: run it at noise level 0 on each assay dataset. The confound is that a model's error is
+group-correlated whenever it fits some scaffold families worse than others, which is not label noise.
+**QM9 breaks the confound** — its labels are computed and carry no measurement error, so QM9 at level 0
+measures pure model error. An assay dataset materially above QM9, same model, same representation, matched
+group sizes, is a candidate signature of group-correlated label error.
+
+**Claimable**: that an assay dataset's residuals carry more scaffold structure than model error alone
+accounts for, on a calibrated scale. **Not claimable**: a decomposition of real label error, or anything
+comparable to Bentz's 62%. Costs nothing beyond the §14.29 re-run, which recomputes it.
+
+#### 14.31 THIRD PASS — 2026-09-18, and one number from §14.30 corrected
+
+Full text in `PAPER_REVISION_GUIDE_FINAL.md`, "PART FOUR, THIRD PASS".
+
+##### 🔴 §14.30's "four times" is wrong and is withdrawn
+
+It was read off the Gaussian condition alone and it compared the worst neural model against the best
+non-neural one instead of comparing the two groups. Measured properly, as the median over the four datasets
+of the spread of AUC_norm across the six representations:
+
+| | Gaussian | Grouped, wider | Grouped, shifted |
+|---|---|---|---|
+| six neural models | 0.142 | 0.116 | 0.149 |
+| seven others | 0.045 | 0.053 | 0.070 |
+| ratio | **3.2** | **2.2** | **2.1** |
+
+**Write "two to three times", never four.** The direction holds under all three full-grid conditions.
+
+**And the seven non-neural models are not one group.** Under Gaussian noise the five stable ones sit at
+0.042 to 0.061 (NGBoost, SVM, GP, RF, QRF), the two gradient-boosted trees at 0.089 and 0.099, and the
+neural models from 0.107 up. Three groups, not two.
+
+##### Q2 answered at every representation, in the terms the question was asked
+
+Of the fifteen pairs of dose-matched conditions, how many differ on AUC_norm, paired on the model:
+ECFP4 6 of 15, PDV 5 of 15, ChemBERTa 5 of 15, and 2 of 3 testable at each of MHG-GNN, Avalon and
+Sort & Slice. **Every difference at every representation involves grouped-shifted.** Its change against
+Gaussian runs −0.028 (ECFP4), −0.034 (ChemBERTa), −0.035 (MHG-GNN), −0.037 (Sort & Slice), −0.042 (PDV),
+−0.054 (Avalon).
+
+**The one departure is at ECFP4**, where Gaussian and grouped-wider differ by 0.003 — about a fifth of the
+replicate spread, and not reproduced at any other representation. ECFP4 produces the extra difference, so
+it is the outlier rather than the rule.
+
+Only three pairs are testable at MHG-GNN, Avalon and Sort & Slice because Laplace, outlier and Student-*t*
+ran on ECFP4, PDV and ChemBERTa only. **The shape finding rests on three representations and four
+datasets.**
+
+##### ✅ The censoring mechanism is now measurable — §14.30 said it was not
+
+§14.30 recorded that nothing on disk could test whether censoring narrows the label distribution, because
+`label_scale` is the CLEAN spread and is constant across levels. **Fixed without touching the runner or
+repeating anything.** The recorded label is the clean label plus the injected amount, which is how the error
+is built everywhere else, so `q5_mean_uncertainty` now also writes `recorded_label_sd`, `clean_label_sd`
+and their ratio at every level. Guard: `scripts/test_recorded_label_spread.py`, which pins both directions
+on constructed data — additive noise takes the ratio 1.000 → 1.042 → 1.135 → 1.432, censoring takes it
+1.000 → 0.930 → 0.801 → 0.580. **After the re-run the censoring explanation becomes a measurement.**
+
+##### Q1's four conclusions, as the author stated them, with the evidence
+
+1. Robustness depends on the representation two to three times as much for the neural models as for the
+   forests, the Gaussian process and the SVM.
+2. NGBoost separates the two questions: its accuracy depends on the representation more than any other
+   model's (clean R² 0.706 to 0.865) and its robustness less (AUC_norm 0.967 to 0.982). It is 11th to 13th
+   of 13 for clean accuracy on **every** representation.
+3. Not all trees behave alike. Median AUC_norm over six representations: LightGBM 0.944 on QM9 and **0.603
+   on Caco-2**, XGBoost 0.945 and **0.709**, against RF 0.961 and 0.863 and QRF 0.956 and 0.903. **A study
+   on QM9 alone would have called LightGBM robust.** ✅ **And it does not depend on the condition** — the
+   two boosted trees are the bottom two of the seven on Caco-2 and hERG under Gaussian, grouped-wider AND
+   grouped-shifted, while sitting inside 0.04 of the forests on QM9 under all three. The depth conditions
+   cannot test it, having run on RF, SVM, GP and NGBoost only.
+4. RF and QRF are the most consistently robust across datasets, and their robustness rank never falls below
+   8 of 13 across 24 dataset-and-representation cells while every other model drops to 11, 12 or 13
+   somewhere. RF's median accuracy rank is 8 of 13 — rarely the best, never the worst.
+
+The representation median table the author asked for — seven non-neural models per cell, AUC_norm with
+clean R² beside it, per dataset, under Gaussian and grouped-shifted — is in the guide. Across those models
+the six representations span 0.022 on QM9 and 0.061 on Caco-2, while the models themselves span up to 0.300
+on Caco-2.
+
+##### The ECFP4 obligation of §14.11aa is discharged
+
+Three sentences in the first pass read as though the held representation's ranking was the ranking. All
+three are corrected in place, and the guide's §F lists them.
+
+#### 14.32 THE RESULTS-FLOW AUDIT — 2026-09-18, nineteen papers, and the rewrite it forced
+
+Nineteen reference papers read a second time, for how a results section is BUILT rather than how it is
+worded. Twelve readers mapped the ordered spine of each paper's results, one pass built a recommended order,
+and four more checked the drafted text against it. Full record in `PAPER_REVISION_GUIDE_FINAL.md`, "PART
+FOUR, FOURTH PASS".
+
+**The order is right.** All four checks agree the seven drafted subsections sit in the recommended order
+block for block, and each asks the question the template assigns it. Nothing in the sequence moved.
+
+**Nineteen blocking problems, all inside blocks, all now fixed in the drafted text.** Four clusters:
+
+1. 🔴 **AUC_norm appeared ZERO times in the drafted paper text.** It was carried by four paraphrases — "the
+   normalised area under the R² retention curve", "retained accuracy", "the retention column", "the
+   retention metric" — so a reader met one quantity under four names and could connect none of them to the
+   tables. That also breaks this project's own terminology rule. ✅ Defined once where the first figure is
+   introduced and named at every mention; ten uses now, no paraphrases.
+2. 🔴 **Eight quantities were derived multiples with no raw pair, four with no unit at all** — "five times
+   what the representation does", "ten times as widely", "three times that", "roughly a tenth", "several
+   times", "half as likely", "an order of magnitude". ✅ Every one is now a raw pair. **And "half as likely"
+   was WRONG**: it came from 78 of 109 against 58 of 110, which is about a fifth less often. Sentence
+   deleted, counts carry it.
+3. 🔴 **Three sentences claimed more than the evidence.** "The only ones that separate" — six pairs separate,
+   not five, and the working note four lines below said so. "Holds for every model on every dataset without
+   exception" — censoring ran on 3 of 21 pairs on QM9. "The explanation is" — nothing measured the
+   mechanism. ✅ All three corrected in place.
+4. 🔴 **The takeaways were missing from the text.** The brief says they are the paper's main point; the draft
+   had ONE guidance sentence at a block's end against the two apiece both target-journal benchmarks carry,
+   and the third pass's four conclusions had no drafted paper text at all. ✅ Three conditional guidance
+   sentences added, each closing the block that earned it.
+
+**One thing the reference papers wanted that was absent entirely.** Both halves of Kolmar & Grulke's results
+end by placing the injected noise against measured assay error in log units, so a reader sees which noise
+level is one unit of real error. The drafted Results had no such sentence and the only log-unit figures sat
+in the Introduction. ✅ Added to the assay block: pIC50 0.68 and pKi 0.54 log units, so a level of about 0.6
+is one unit of the error a laboratory already carries.
+
+**Placement rules the audit settled, and they apply to the abstract and conclusions too:**
+
+- **Guidance goes at the end of the block that earned it, one conditional sentence.** Both benchmark papers
+  in the target journal do this twice each. Never a recommendations block.
+- **No limitations paragraph.** None of the three target-journal papers has one; caveats are welded to the
+  claim sentence. The drafted Limitations should carry study-level scope only.
+- **Each finding is stated once, in its own block.** Repeating the headline once per block is the Nature
+  habit and does not travel.
+- **Relegate per-dataset repetition only.** Every noise condition, model and representation keeps a row in a
+  main-text table at one named representation; the additional files take per-replicate and per-fold values,
+  the per-molecule uncertainty statistics, and the figures for datasets not drawn.
+
+**Text after the rewrite**: sentence median 22 words, none over 40, none under 5, AUC_norm named 10 times,
+no TODO markers in paper text, no derived multiple without its raw pair.
