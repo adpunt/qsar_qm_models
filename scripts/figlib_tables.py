@@ -335,17 +335,53 @@ def t5_probabilistic(pairs, output_dir):
 # T6 -- uncertainty
 # ---------------------------------------------------------------------------
 
-def t6_uncertainty(support, q4, q6, slopes, output_dir):
-    """One row per model and representation, with the support flags.
+def t6_uncertainty(support, q4, q6, slopes, output_dir,
+                   dataset=None, rep=None, name='T6_uncertainty'):
+    """One row per model and NOISE CONDITION, with the support flags.
+
+    THE CONDITION IS A COLUMN, NOT A MEDIAN. Every number column here used to
+    be a median over the seven noise conditions, on the argument that the
+    support flags do not vary by condition -- which is true of the flags and of
+    nothing else in the table. Censoring is the one condition under which a
+    model becomes MORE certain as its labels are corrupted: the two component
+    slopes run -0.43 and -0.31 against +0.63 to +0.70 and +0.08 to +0.13 under
+    the other six, and not one cell separates the two components under it
+    against 78 of 109 under plain Gaussian noise. A median over seven
+    conditions with one of them reversed cancels the reversal out, so the table
+    disagreed with the paragraph of the Results that points at it.
+
+    `dataset` and `rep` narrow the table to one of each, which is what the
+    paper prints; passing neither writes the whole thing for an additional
+    file. Both are matched after `canonical_rep`, so either spelling works.
 
     A component flagged as one number per fit gets its flag printed and no
-    slope, because a slope through a constant is arithmetic about the fit rather
-    than a property of the molecules.
+    slope, because a slope through a constant is arithmetic about the fit
+    rather than a property of the molecules.
     """
     if support is None or not len(support):
         return None
-    table = support[['dataset', 'model', 'rep', 'aleatoric_support',
+    KEYS = ['dataset', 'model', 'rep', 'condition']
+
+    flags = support[['dataset', 'model', 'rep', 'aleatoric_support',
                      'epistemic_support']].drop_duplicates().copy()
+
+    # The conditions each combination actually ran, taken from the frames that
+    # carry one. A cross product would invent rows for the depth-only
+    # conditions on models that never ran them.
+    # A ROW WITH NO CONDITION IS DROPPED, NOT FOLDED IN. `d7_q6` carries 55
+    # rows whose condition is blank, and while every number here was a median
+    # over the conditions those rows joined silently into every one of them.
+    # What writes them is not yet established; until it is, a row that cannot
+    # say which condition it belongs to cannot be in a table whose rows ARE
+    # conditions.
+    seen = [f.dropna(subset=['condition'])[KEYS].drop_duplicates()
+            for f in (q6, q4, slopes)
+            if f is not None and len(f) and 'condition' in f.columns]
+    if not seen:
+        return None
+    table = pd.concat(seen, ignore_index=True).drop_duplicates()
+    table = table.merge(flags, on=['dataset', 'model', 'rep'], how='inner')
+
     table['Model'] = table['model'].map(C.model_label)
     # THROUGH `canonical_rep` FIRST. The uncertainty frames carry whatever
     # spelling the producing pipeline wrote, and the laboratory runner writes
@@ -362,14 +398,14 @@ def t6_uncertainty(support, q4, q6, slopes, output_dir):
     # different in every number, with nothing saying which was which. A reader
     # could not tell a QM9 row from a Caco-2 one, and neither could a sort.
     table['Dataset'] = table['dataset'].map(C.dataset_label)
+    table['Condition'] = table['condition'].map(C.condition_label)
 
     if q6 is not None and len(q6):
-        rho = (q6.groupby(['dataset', 'model', 'rep'])['rho_unc_vs_clean_error']
+        rho = (q6.groupby(KEYS)['rho_unc_vs_clean_error']
                .median().rename('ρ(uncertainty, error)'))
-        table = table.merge(rho, on=['dataset', 'model', 'rep'], how='left')
+        table = table.merge(rho, on=KEYS, how='left')
     if q4 is not None and len(q4):
-        keep = ['dataset', 'model', 'rep']
-        got = q4.groupby(keep)[['auc_error', 'auc_ratio', 'auc_delta']] \
+        got = q4.groupby(KEYS)[['auc_error', 'auc_ratio', 'auc_delta']] \
             .median().reset_index()
         # A MAJORITY OF FOLDS, ON THE GAIN'S BAND, ON THE UPPER SIDE.
         # `.any()` over `outside_null` printed True for every one of the 82
@@ -378,37 +414,65 @@ def t6_uncertainty(support, q4, q6, slopes, output_dir):
         # the uncertainty's contribution (figlib_uncertainty.q4).
         signal = 'adds_signal' if 'adds_signal' in q4.columns else None
         if signal:
-            fires = (q4.groupby(keep)[signal].mean() >= 0.5).rename(
+            fires = (q4.groupby(KEYS)[signal].mean() >= 0.5).rename(
                 'Uncertainty adds signal')
-            got = got.merge(fires, on=keep, how='left')
-        table = table.merge(got, on=keep, how='left')
+            got = got.merge(fires, on=KEYS, how='left')
+        table = table.merge(got, on=KEYS, how='left')
     if slopes is not None and len(slopes):
-        keep = [c for c in ('dataset', 'model', 'rep') if c in slopes.columns]
-        got = (slopes.groupby(keep)[['slope_aleatoric', 'slope_epistemic']]
-               .median().reset_index()
-               if {'slope_aleatoric', 'slope_epistemic'} <= set(slopes.columns)
-               else None)
-        if got is not None:
-            table = table.merge(got, on=keep, how='left')
+        want = ['slope_aleatoric', 'slope_epistemic']
+        if set(want) <= set(slopes.columns):
+            got = slopes.groupby(KEYS)[want].median().reset_index()
+            table = table.merge(got, on=KEYS, how='left')
 
-    ordered = ['Dataset', 'Model', 'Representation', 'aleatoric_support',
-               'epistemic_support']
+    if dataset is not None:
+        table = table[table['dataset'].astype(str).str.lower()
+                      == str(dataset).lower()]
+    if rep is not None:
+        target = C.canonical_rep(rep)
+        table = table[table['rep'].map(C.canonical_rep) == target]
+    if not len(table):
+        return None
+
+    order = {c: i for i, c in enumerate(C.SETTLED_CONDITIONS)}
+    table = table.assign(_c=table['condition'].map(
+        lambda c: order.get(c, len(order)))).sort_values(
+            ['Dataset', 'Model', 'Representation', '_c']).drop(columns='_c')
+
+    ordered = ['Dataset', 'Model', 'Representation', 'Condition',
+               'aleatoric_support', 'epistemic_support']
+    # The narrowed table has one value in the columns it was narrowed on, and a
+    # column of one repeated value is noise in a printed table. It stays in the
+    # caption instead.
+    ordered = [c for c in ordered
+               if not (dataset is not None and c == 'Dataset')
+               and not (rep is not None and c == 'Representation')]
     ordered += [c for c in table.columns if c not in ordered
-                and c not in ('dataset', 'model', 'rep')]
+                and c not in ('dataset', 'model', 'rep', 'condition',
+                              'Dataset', 'Representation')]
     table = table[ordered].rename(columns={
         'aleatoric_support': 'Aleatoric varies', 'epistemic_support':
         'Epistemic varies', 'auc_error': 'AUC (error alone)',
         'auc_ratio': 'AUC (error ÷ uncertainty)', 'auc_delta': 'Δ AUC',
         'slope_aleatoric': 'Aleatoric slope',
         'slope_epistemic': 'Epistemic slope'})
-    return write(table, output_dir, 'T6_uncertainty',
-                 'Uncertainty statistics per model and representation. The two '
-                 'support columns say whether each component varies per '
+
+    held = []
+    if dataset is not None:
+        held.append(C.dataset_label(dataset))
+    if rep is not None:
+        held.append(f'the {C.rep_label(C.canonical_rep(rep))} representation')
+    where = f' on {" and ".join(held)}' if held else ''
+    return write(table, output_dir, name,
+                 f'Uncertainty statistics per model and noise condition{where}. '
+                 'The two support columns say whether each component varies per '
                  'molecule or is one number per fit; a component that does not '
                  'vary has no slope, because a slope through a constant '
                  'describes the fit and not the molecules. Δ AUC is the gain '
                  'from dividing the error by the uncertainty; zero means the '
-                 'uncertainty added nothing.')
+                 'uncertainty added nothing. The condition is a column and not '
+                 'a median across conditions, because the two slopes reverse '
+                 'sign under censoring and a median over the seven would '
+                 'cancel that out.')
 
 
 # ---------------------------------------------------------------------------

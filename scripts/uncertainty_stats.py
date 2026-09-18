@@ -629,8 +629,9 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
     out['rep'] = rep
     cond = _pick(df, ['condition', 'noise_type', 'task_condition',
                       'strategy', 'task_strategy'])
+    from_name = _condition_from_name(Path(path).stem)
     if cond is None:
-        cond = _condition_from_name(Path(path).stem)
+        cond = from_name
         if cond is None:
             if strict:
                 raise UncertaintySchemaError(
@@ -639,6 +640,29 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
                     f"the noise type. Known: {sorted(_VALID_CONDITIONS)}")
             cond = 'unspecified'
     out['condition'] = cond
+    # A COLUMN THAT EXISTS AND IS BLANK IS NOT A COLUMN THAT IS ABSENT.
+    #
+    # The `unspecified` fallback above only fires when the condition column is
+    # missing altogether. `_pick` returns the COLUMN when it is present, so a
+    # file carrying a `condition` column that is empty on some rows passed those
+    # blanks straight through as NaN -- and `_cell_iter` groups with
+    # `dropna=False`, so each one became its own cell keyed on NaN. 55 rows of
+    # `d7_q6.csv` in the 16 September harvest are exactly this, all on QM9,
+    # across thirteen models and all six representations, and 54 of the 55 are
+    # combinations that appear under no named condition anywhere else. While the
+    # uncertainty table took a median over conditions they joined into every
+    # one of them at once and nothing complained.
+    blank = out['condition'].isna() | (
+        out['condition'].astype(str).str.strip().isin(['', 'nan', 'None']))
+    if blank.any():
+        filled = from_name if from_name is not None else 'unspecified'
+        if strict and from_name is None:
+            raise UncertaintySchemaError(
+                f"{path}: the condition column is blank on {int(blank.sum())} "
+                f"of {len(out)} rows and the file name does not name a known "
+                f"condition, so those rows cannot be told from any other noise "
+                f"type. Known: {sorted(_VALID_CONDITIONS)}")
+        out.loc[blank, 'condition'] = filled
     out['condition'] = out['condition'].map(
         _normalise_condition)
 

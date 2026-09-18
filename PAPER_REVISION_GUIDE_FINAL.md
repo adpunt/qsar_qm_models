@@ -1987,14 +1987,17 @@ warning that the readings are from slopes.*
 
 ### F8 — the three assay datasets
 
-**A decision first: one figure or three?** The code decides from the geometry. Three grids of nineteen
-models stacked is about 18 inches and the journal allows 225 mm, so `panel_layout` splits them and writes
-three files. Two ways to take that, and the second is what the draft assumes:
+**Settled 2026-09-18: one figure with three panels.** The code writes three image files because three
+grids of nineteen models stacked is about 18 inches and the journal allows 225 mm, but they go into one
+`figure*` with panel letters so that the shared colour scale — which exists precisely so the three datasets
+can be compared — stays on one page. It is tall, so it will want `[p]` and a page of its own.
 
-| | what it looks like | what it costs |
-|---|---|---|
-| three separate figures | Figures 7, 8 and 9, one per dataset, each with its own caption | three float numbers, and the cross-dataset comparison the colour scale was built for is split across three pages |
-| **one `figure*` with three sub-blocks** | one number, three `\includegraphics` lines in one float, panel letters a), b), c) | the float is tall; you may need `[p]` and a page of its own |
+**The variational-network row stays in, with a sentence in the caption.** On the Caco-2 panel the brightest
+row is the first variational network, at AUC$_{norm}$ 0.970 under Gaussian noise, the highest of the
+nineteen models, on a clean R$^2$ of 0.358, the second lowest of the nineteen. AUC$_{norm}$ is a share of
+clean accuracy, so the small denominator is what lifts it — the Gaussian process on the same panel sits at
+0.809 on a clean R$^2$ of 0.517. The caption below carries that sentence. Dropping the row would mean
+listing a nineteen-model roster and drawing seventeen.
 
 ```latex
 \begin{figure*}[htbp]
@@ -2009,15 +2012,17 @@ first column of each panel is clean R$^2$ and is deliberately uncoloured: it is 
 columns are a fraction of, not a measurement on the same scale. Colour runs on one fixed range across
 all three panels, printed on the colour bar; the assay datasets and QM9 use different ranges because
 their spans differ by a factor of three, so a cell here and a cell in Figure~\ref{fig:grid} are not
-comparable by colour. A grey cell marked ``not run'' was never fitted and one marked ``excluded'' was
-fitted and then dropped. There are no error bars: one fit per cell with the seed pinned, and the five
+comparable by colour. The brightest row on panel b) has the second lowest clean R$^2$ of the nineteen
+models: AUC$_{norm}$ is a share of a model's own clean accuracy, so a small first column lifts the rest of
+the row, and every row must be read against its first column. A grey cell marked ``not run'' was never
+fitted and one marked ``excluded'' was fitted and then dropped. There are no error bars: one fit per cell with the seed pinned, and the five
 scaffold folds partition one dataset rather than repeating an experiment. Censoring is absent because
 it runs on a named subset of pairs and cannot rank models.}
 \label{fig:assay}
 \end{figure*}
 ```
 
-*152 words, above the 70–130 band, and it is the one caption I would leave long — it carries the two
+*196 words, well above the 70–130 band, and it is the one caption I would leave long — it carries the two
 prohibitions a reader would otherwise breach, which are comparing a colour here with a colour in
 Figure~\ref{fig:grid}, and reading the censoring column as a model comparison.*
 
@@ -2058,27 +2063,52 @@ the tables section.
 | `tab:robustness` | T4 at ECFP4 on QM9 | **wrapper above** |
 | `tab:uncertainty` | T6 | wrapper is yours once T6's shape is settled — `RERUN_PLAN.md` §15, READ FIRST item 3 |
 | `tab:variants` | T5 | wrapper from the pattern; it is an additional file, so the reference becomes "Additional file~8" unless you promote it |
-| `tab:pairs` | T8 | same; §R2 points at it, which is an argument for promoting it |
-| `fig:conditions` | F4b | **promotion decision below** |
+| `tab:pairs` | T8 | **PROMOTED to the paper, 2026-09-18, author's call.** §R2's third paragraph points at it |
+| `fig:conditions` | F4b | stays an additional file, 2026-09-18, author's call |
 | `fig:ranks` | R15 | **promotion decision below** |
-| `fig:transfer` | R9 | **promotion decision below** |
+| `fig:transfer` | R9 | **PROMOTED to the paper, 2026-09-18, author's call.** §R5's second paragraph points at it |
 
 ## Four figures the Results text leans on that §14.25 puts in additional files
 
-Each fired a decision or carries a paragraph of the argument. Promoting any of them is your call; the
-sentence that changes is named.
+**Settled 2026-09-18.** The rank-transfer figure goes in the paper and the other three stay additional
+files. The twelve-standout-pairings table goes in the paper too, which is the table entry above rather than
+a figure. Each row below still names the sentence that changes, because the three that stayed out are the
+ones whose pointers now have to be rewritten.
 
 | figure | what it carries | if it stays an additional file |
 |---|---|---|
 | **F4b** `F4b_rf_across_noise_conditions.png` | one model across all seven conditions on one pair of axes — the picture of the paper's differentiator | §R4's second paragraph loses its orienting sentence and points at Table~\ref{tab:robustness} instead. **This is the one I would promote**: the subsection that carries the paper's novel claim currently has no figure, while the subsection that repeats the ANOVA has two |
-| **R9** `R9_rank_transfer_ecfp4.png` | rank on QM9 beside rank on each assay dataset, one row per model | §R5's second paragraph loses its orienting sentence. Note that decision D9 fired and its own verdict says *"T7 is promoted to a figure"* — the decision engine recommends the main text and §14.25 does not, and that disagreement is unresolved in the repository |
+| **R9** `R9_rank_transfer_ecfp4.png` | rank on QM9 beside rank on each assay dataset, one row per model | ✅ **IN THE PAPER.** §R5's second paragraph keeps its orienting sentence and `fig:transfer` resolves inside the manuscript. This also settles the disagreement in the repository: decision D9's own verdict said *"T7 is promoted to a figure"* while §14.25 said additional file, and the paper now follows D9 |
 | **R15** `R15_rank_against_level_*.png` | where each model ranks as the noise rises | §R4's fourth paragraph drops to one sentence about Kendall's *W*. R15 is two charts to say the ranking barely moves, so this is the weakest of the four |
 | **R6** `R6_representation_profile_*.png` | the cells where a model's robustness at one representation sits outside the range of its others | §R1's third paragraph keeps Figure~\ref{fig:grid} and loses nothing. Decision D5 fired on eight cells, and **seven of the eight are variant models**, which the cross-model figures exclude — so D5 fires on cells the paper does not draw |
 ---
 
 # THE TABLES
 
-Four in the paper — T1, T2, T4 at ECFP4, and T6 — per `RERUN_PLAN.md` §14.25.
+**Five in the paper**, and the fifth is new on 2026-09-18: the metrics table, the noise-conditions table,
+robustness at ECFP4, the uncertainty table, and the twelve standout pairings, which the author promoted
+because §R2's third paragraph names it and nothing else in the paper carries that list.
+
+🔴 **The uncertainty table has changed and so has its file.** It is now **one row per model and noise
+condition, on QM9 at the PDV representation**, which is 30 rows, and it is written to
+`T6_uncertainty.tex` as before. Every number column used to be a median over the seven noise conditions.
+Censoring is the one condition under which a model becomes *more* certain as its labels are corrupted, so a
+median over seven with one reversed cancelled it out, and §R6's second paragraph had no table behind it.
+
+**PDV rather than ECFP4, because censoring never ran on QM9 at ECFP4.** On the computed property censoring
+ran at PDV alone; on the three laboratory sets it ran at ECFP4, PDV and ChemBERTa. QM9 at ECFP4 would have
+been 28 rows with no censoring row among them, which is the one condition the split exists to show. This
+makes the uncertainty table the only main-text table not held at ECFP4, and its caption must say so.
+
+What the three censoring rows show, from the fragment as generated: both component slopes go negative
+(NGBoost $-0.354$, the first variance-head network $-0.217$ and $-0.137$, the Gaussian process $-0.069$)
+against $+0.62$ to $+1.19$ and $+0.07$ to $+0.84$ under every other condition. The correlation between
+predicted uncertainty and error also turns negative, and the gain from dividing the error by the uncertainty
+jumps to $+0.17$ and $+0.20$ against roughly zero everywhere else. **Do not write a sentence around that
+last number yet** — it is the quantity §R7 says has no band behind it until the re-run.
+
+The complete version, every dataset and every representation at 1,003 rows, is written beside it as
+`T6b_uncertainty_every_dataset.tex` for an additional file.
 
 🔴 **Paste from `results/decisions_arc_20260916/tables_latex_fixed/`, not from `tables/`.** The sixteen
 fragments in `tables/` were written before the escaping fix and fifteen of the sixteen do not compile: "Sort
@@ -2129,16 +2159,55 @@ conditions cover a named subset of pairs by design.}
 carries a separate footnote of about 20 to 25 words holding the metric definition and the replicate
 convention. The caption above folds the footnote in, which is what Kolmar does.*
 
+**The uncertainty table's wrapper.** It is the only main-text table not held at ECFP4 and the caption has to
+say why.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Uncertainty statistics per model and noise condition on the QM9 HOMO--LUMO gap, PDV
+representation. The two support columns state whether each component of the predicted uncertainty varies
+from molecule to molecule or is a single number per fit; a component that does not vary is given no slope,
+because a slope through a constant describes the fit rather than the molecules. The slopes are of mean
+predicted uncertainty against the amount of noise added to the training labels. $\Delta$AUC is the change in
+how well the corrupted labels are ranked when the out-of-fold error is divided by the predicted uncertainty
+rather than used alone. Values are the median over folds. PDV is held here rather than ECFP4, which the other
+tables hold, because censoring was run on the computed property at PDV alone. An em dash marks a combination
+that was not run under that condition.}
+\label{tab:uncertainty}
+\small
+\input{T6_uncertainty}
+\end{table}
+```
+
+**The standout-pairings wrapper.**
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{The twelve model-and-representation pairings that score well on both predictive accuracy and
+robustness across all four datasets. Clean R$^2$ is the accuracy with no noise added and AUC$_{norm}$ is the
+share of it retained as noise rises. Rows are ordered by the two together: within each dataset both
+quantities are rescaled to run from 0 at that dataset's worst pairing to 1 at its best, the two are
+averaged, and the result is averaged over the four datasets. Pairings whose AUC$_{norm}$ exceeds 1 on any
+dataset are excluded, because that happens when the clean accuracy being divided by is itself small. Only
+pairings that ran on every dataset appear.}
+\label{tab:pairs}
+\small
+\input{T8_pairs_across_datasets}
+\end{table}
+```
+
 | slot | fragment | goes in | notes |
 |---|---|---|---|
 | **T1** | `T1_metrics.tex` | Methods | 18 metrics, generated from the registry the figure code reads, so it cannot name a metric nothing computes. Add the two new rows after the re-run: the gain against its own band, and the error's band as the precondition |
 | **T2** | `T2_noise_conditions.tex` | Methods | ⚠️ The "why it is in the study" column is prose from `noise_conditions.json` and three of its seven cells are **truncated mid-sentence** — grouped-shifted ends "Same amo", Student-*t* ends "Every figure here is on the t", Laplace ends "the fir". The column is a working note, not caption text. Rewrite the seven cells by hand, one clause each, or drop the column |
 | **T4** | `T4_robustness_qm9_ecfp4.tex` | **paper** | 13 base models × 7 conditions, clean R² first. The three assay versions go to additional files |
-| **T6** | `T6_uncertainty.tex` | **paper**, after narrowing | 292 rows as generated. See `RERUN_PLAN.md` §15, READ FIRST item 3 — the dataset column and the representation name are fixed, the condition question is yours |
+| **T6** | `T6_uncertainty.tex` | **paper** | 30 rows, one per model and noise condition, QM9 at PDV. Wrapper below. The 1,003-row complete version is `T6b_uncertainty_every_dataset.tex` |
 | T3 | `T3_variance_decomposition_qm9.tex` | additional | the numbers behind F2, with the jackknife spread |
 | T5 | `T5_probabilistic_transformations.tex` | additional | 27 rows, one column per representation, `*` for the signed-rank test. **The caption must say that on ten pairs a two-sided signed-rank test cannot go below 0.002, and on the five-fold assay datasets it cannot go below 0.0625 however large the effect** |
 | T7 | `T7_rank_transfer_*.tex` ×6 | additional | one per representation. See the cut list |
-| T8 | `T8_pairs_across_datasets.tex` | additional, or paper | 12 pairings × 4 datasets, clean R² and AUC_norm side by side. §R2's third sentence points at it, so promoting it would be reasonable |
+| **T8** | `T8_pairs_across_datasets.tex` | **paper** | 12 pairings × 4 datasets, clean R² and AUC_norm side by side. Promoted 2026-09-18; §R2's third paragraph names it |
 
 ---
 

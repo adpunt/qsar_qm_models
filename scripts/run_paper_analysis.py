@@ -614,10 +614,21 @@ def build_tables(args, tables, verdicts):
     if tables.get('d10_probabilistic') is not None:
         built.append(TAB.t5_probabilistic(tables['d10_probabilistic'], out))
     if tables.get('d8_support') is not None or tables.get('d7_support') is not None:
+        # TWO TABLES, NOT ONE. The paper prints QM9 at PDV, which is the only
+        # combination on the computed property where censoring ran -- it ran at
+        # PDV alone there, and at ECFP4, PDV and ChemBERTa on the three
+        # laboratory sets. QM9 at ECFP4 would have been 28 rows with no
+        # censoring row in them, which is the one condition the split exists to
+        # show. Author's call, 2026-09-18.
+        support = tables.get('d8_support', tables.get('d7_support'))
         built.append(TAB.t6_uncertainty(
-            tables.get('d8_support', tables.get('d7_support')),
-            tables.get('d7_q4'), tables.get('d7_q6'),
-            tables.get('d8_component_slopes'), out))
+            support, tables.get('d7_q4'), tables.get('d7_q6'),
+            tables.get('d8_component_slopes'), out,
+            dataset='qm9', rep='pdv', name='T6_uncertainty'))
+        built.append(TAB.t6_uncertainty(
+            support, tables.get('d7_q4'), tables.get('d7_q6'),
+            tables.get('d8_component_slopes'), out,
+            name='T6b_uncertainty_every_dataset'))
     if tables.get('d9_rank_transfer') is not None:
         built.append(TAB.t7_rank_transfer(tables['d9_rank_transfer'], out))
     if tables.get('standout_pairs') is not None:

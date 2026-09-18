@@ -11951,6 +11951,35 @@ conditions, counts and array ranges only.
 
 ### 13.23 🔴 THE OPEN REGISTER — everything known to be wrong, 2026-09-07
 
+#### 13.23z ✅ 55 rows of `d7_q6.csv` carried no noise condition — found and fixed 2026-09-18
+
+`d7_q6.csv` is 1,058 rows of one correlation between predicted uncertainty and out-of-fold error, keyed by
+dataset, model, representation and noise condition. **55 of those rows have a blank condition.** They are
+not a rounding issue and they are not empty: they carry a dataset, a model, a representation and a value.
+
+**What it cost.** The uncertainty table took a median over conditions, so a row with no condition joined
+into every condition's median at once. Nothing complained, because a `groupby` on a key that includes a NaN
+simply drops or folds it depending on the call. The table is now keyed by condition and drops them with the
+reason in the code (`figlib_tables.t6_uncertainty`), so the printed numbers are clean.
+
+**FOUND AND FIXED THE SAME DAY.** It is the loader, `_normalise_qm9` in `scripts/uncertainty_stats.py`.
+`_pick` returns the CONDITION COLUMN when the file has one, and the `unspecified` fallback beside it only
+fires when the column is **missing altogether**. A file carrying a `condition` column that is empty on some
+rows therefore passed those blanks through as NaN, and `_cell_iter` groups with `dropna=False`, so each one
+became its own cell keyed on NaN. The comment two lines above the fallback says an all-NaN column would let
+a pooled frame slip past `assert_single_cell`, which is exactly the hazard it did not cover.
+
+The loader now fills a blank condition from the file name where the name carries one, refuses the file under
+`strict` where it does not and says how many rows are blank, and writes `unspecified` under `strict=False`.
+`scripts/test_blank_condition_is_not_a_cell.py` covers all three and the cell iterator, and it fails on the
+code as it was.
+
+**These are measurements that lost their label, not duplicates.** All 55 are QM9, spread across thirteen
+models and all six representations, and **54 of the 55 are combinations that appear under no named condition
+anywhere else in the file**. So the per-condition counts quoted in §R6 are short by whatever those 55 turn
+out to be, and that only resolves on the re-run. 🔴 **The numbers §R6 gives — 78 of 109 under Gaussian noise
+and 58 of 110 under a shared scaffold offset — are the ones to re-check first after the next harvest.**
+
 **One list, kept here, updated in place.** Started because the work had split into
 half-finished threads: three status tools were rewritten three times in one night, each
 rewrite fixing the previous one's bug while the experiment failures they were built to
@@ -26446,7 +26475,7 @@ is new work invented by me; it is all hers.
 | item | state |
 |---|---|
 | 1. The four Q1 conclusions | **DONE.** §R1 and §R2 rewritten from the conclusions down, 618 and 713 words, five and six paragraphs |
-| 2. Five unsettled decisions | **STILL OPEN.** They are the author's and are re-stated below |
+| 2. Five unsettled decisions | **ALL FIVE SETTLED 2026-09-18.** See the block under this table |
 | 3. The plan read end to end against the paper | **PART DONE.** §R1 to §R7, the Introduction, the cut list and the references were checked line by line against the 16 September harvest this session; the Methods half has not been |
 | 4. The Introduction | **DONE.** The preview paragraph is rewritten and the two stale bibliography notes in §I1 and §I2 are corrected |
 | 5. The cut list | **DONE.** All six items still stand, every number reproduces, two paragraph pointers corrected |
@@ -26477,7 +26506,27 @@ thing independently and I answered it by adding three sentences, which the autho
 small amount of edits". This is the largest outstanding item and it is the rewrite of §R1 and §R2 from the
 conclusions down.
 
-## 2. 🔴 Five decisions raised and never settled
+## 2. ✅ Five decisions raised and never settled — ALL FIVE SETTLED 2026-09-18
+
+| decision | settled as |
+|---|---|
+| the uncertainty table | one row per model and noise condition, **QM9 at PDV**, 30 rows. ECFP4 was the author's first answer and I had to withdraw it: censoring never ran on the computed property at ECFP4, only at PDV, so that version was 28 rows with no censoring row in it. A 1,003-row complete version goes to an additional file |
+| the twelve standout pairings | **in the paper.** §R2's third paragraph names it and nothing else carries that list |
+| the rank-transfer figure | **in the paper.** §R5's second paragraph describes it sentence by sentence. This also resolves the repository's own disagreement — decision D9's verdict said promote and §14.25 said additional file |
+| the random forest across seven conditions | **stays an additional file.** The robustness table already carries the same seven numbers per model |
+| the assay heatmap's brightest row | **stays, with one caption sentence.** It is the first variational network at AUC_norm 0.970 on a clean R² of 0.358, the second lowest of the nineteen; the Gaussian process beside it is 0.809 on 0.517 |
+| the assay heatmap, one figure or three | **one `figure*`, panels a/b/c.** Keeps the shared colour scale on one page; it will want `[p]` |
+| `NaN` in the tables | **an em dash**, done in code with a test; the CSV keeps the real `NaN` |
+
+**A defect found while doing this, traced and fixed.** `d7_q6.csv` carries 55 rows whose noise condition is
+blank. While every number in that table was a median over the conditions, those rows joined silently into
+every one of them. The cause is `_pick` in the loader returning a column that exists but is empty, past a
+fallback that only covers a column that is absent. Fixed, with a test. See §13.23z. **The one consequence
+still open is that §R6's per-condition counts may be short by up to 55 until the next harvest.**
+
+---
+
+## 2a. The original statement of those decisions, kept
 
 I put each of these to her once, got no answer because a larger complaint arrived, and never returned to
 them. They block the figure and table blocks.
