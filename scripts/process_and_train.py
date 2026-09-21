@@ -21,7 +21,20 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 from rdkit.Chem.Scaffolds.MurckoScaffold import MurckoScaffoldSmiles
 from collections import deque
 import gc
-import deepchem as dc
+# deepchem is imported INSIDE load_moleculenet (the only place it is used)
+# and not here, for the same reason polaris is, below.
+#
+# It drags tensorflow in, and tensorflow carries a protobuf ceiling. On this
+# laptop, 2026-09-20, protobuf 6.33.6 against tensorflow 2.16.2 raised
+# "'MessageFactory' object has no attribute 'GetPrototype'" and then
+# AttributeError inside text_format, so NOTHING that imports this module
+# could run -- including every local tuning and head-to-head script. env.yml
+# deleted tensorflow on 2026-08-27 precisely to be rid of that ceiling; this
+# import was the one line still reaching for it.
+#
+# The nine MoleculeNet datasets it loads (esol, freesolv, lipo, qm7, qm8,
+# bace, bbbp, clintox, hiv) are not in this study. QM9 is read off disk and
+# the three measured endpoints come through the laboratory pipeline.
 import gpytorch
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
@@ -2100,7 +2113,10 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         domain_labels_val = domain_labels.get('val', None) if domain_labels else None
         domain_labels_test = domain_labels.get('test', None) if domain_labels else None
         
-        if model_type in ['rf', 'qrf']:
+        # rf300 is the plain forest at 300 trees, the quantile forest's count,
+        # so the pair differs by the quantile machinery alone (author,
+        # 2026-09-21). Same builder, its own spec entry.
+        if model_type in ['rf', 'rf300', 'qrf']:
             return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'svm':

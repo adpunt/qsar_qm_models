@@ -30,7 +30,7 @@ from pathlib import Path
 # name.
 MODELS_ALL = [
     # tree and deterministic (QM9 tier 1)
-    'RF', 'QRF', 'XGBoost', 'LightGBM', 'SVM', 'NGBoost', 'DNN', 'MLP',
+    'RF', 'RF300', 'QRF', 'XGBoost', 'LightGBM', 'SVM', 'NGBoost', 'DNN', 'MLP',
     # Bayesian and variational networks (QM9 tier 2)
     'BNN-Full', 'MLP-BNN-Full', 'VBLL-Full', 'MLP-VBLL-Full',
     # the variance-head pair and the heteroscedastic variational pair
@@ -200,6 +200,13 @@ BREADTH_GRID = [c for c in FULL_GRID if c not in PAIR_SUBSET]
 SECONDS_PER_FIT_PER_1K = {
     # Measured, from results/tuning_local.
     'RF': 37.7, 'QRF': 112.3, 'XGBoost': 31.6, 'LightGBM': 37.4,
+    # RF300 is the plain forest at 300 trees, added 2026-09-21 so the
+    # deterministic-against-probabilistic forest pair differs by the quantile
+    # machinery alone. DERIVED, not measured: three times RF's 37.7, because
+    # three times the trees is the whole of the difference. It lands just
+    # above QRF's measured 112.3, which is the same 300 trees plus the
+    # quantile bookkeeping, so the two are consistent.
+    'RF300': 113.1,
     'SVM': 15.5, 'NGBoost': 544.4, 'DNN': 38.2, 'GP': 1169.5,
     # DERIVED for the eleven models added 2026-09-01, from the QM9 measurement of
     # the model each one extends, scaled by that model's own laboratory number.

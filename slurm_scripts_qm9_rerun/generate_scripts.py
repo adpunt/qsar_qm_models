@@ -650,7 +650,22 @@ if _unused:
 # Rung 5 of RUNBOOK section 5c times them properly; until it has run, these are
 # sized from the nearest thing that HAS been measured, with margin.
 MODELS = {
-    'rf':                       ('-m rf',        1, 12, 'random forest', ALL_REPS),
+    'rf':                       ('-m rf',        1, 12, 'random forest, 100 trees', ALL_REPS),
+    # THE PLAIN FOREST AT THE QUANTILE FOREST'S TREE COUNT, added 2026-09-21
+    # on the author's decision. `rf` has 100 trees and `qrf` has 300, so the
+    # deterministic-against-probabilistic forest comparison was reading a
+    # 200-tree difference as well as the quantile machinery. `rf300` is the
+    # plain forest at 300 trees and nothing else changed, so that pair becomes
+    # clean. The 100-tree rows already on disk stay valid and keep their name.
+    #
+    # 12 hours per 110 training runs is DERIVED, not measured: three times the
+    # 100-tree forest's MEASURED ARC rate of 3.9 in model_hours.json, because
+    # three times the trees is the whole of the difference. It is NOT three
+    # times `rf`'s 12 above -- that entry is the laptop fallback and is already
+    # about three times what ARC does, so tripling it again would price this
+    # model at 52 hours for a fit the measurement says takes seven.
+    # Replace it the moment scripts/measure_walls.py sees a real rf300 task.
+    'rf300':                    ('-m rf300',     1, 12, 'random forest, 300 trees -- the quantile forest\'s count, so rf300 against qrf differs by the quantile machinery alone. DERIVED wall', ALL_REPS),
     'xgboost':                  ('-m xgboost',   1,  5, '', ALL_REPS),
     'lgb':                      ('-m lgb',       1,  4, 'LightGBM', ALL_REPS),
     'svm':                      ('-m svm',       1,  4, 'RBF kernel on every representation', ALL_REPS),

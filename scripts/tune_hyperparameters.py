@@ -373,6 +373,16 @@ def build_validation_split(dataset, sample_size, seed, openadmet_csv=None):
     spec = importlib.util.spec_from_file_location(
         'kirby_validation_pipeline', rosters.KIRBY_PIPELINE_PATH)
     K = importlib.util.module_from_spec(spec)
+    # THE LABORATORY PIPELINE IMPORTS ITS OWN NEIGHBOURS BY BARE NAME.
+    # `from noise_column import ...` at alternative_data_noise_robustness.py:825
+    # resolves against sys.path, and loading a file by location does not put its
+    # directory there -- so this raised ModuleNotFoundError for every dataset
+    # except QM9, measured 2026-09-20. Running that file as a script works
+    # because Python puts the script's own directory on the path; this does the
+    # same thing explicitly.
+    _kirby_dir = os.path.dirname(os.path.abspath(rosters.KIRBY_PIPELINE_PATH))
+    if _kirby_dir not in sys.path:
+        sys.path.insert(0, _kirby_dir)
     spec.loader.exec_module(K)
 
     if dataset == 'herg':

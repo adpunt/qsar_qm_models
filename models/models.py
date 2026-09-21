@@ -2055,10 +2055,15 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
         else:
             # Shared with the experimental pipeline via models/model_defaults.py.
             # Do not restate the numbers here -- that is how the two drifted.
-            params = sklearn_params('qrf' if model_type == 'qrf' else 'rf')
+            # rf300 is the plain forest at the quantile forest's 300 trees,
+            # so the rf300-against-qrf pair differs by the quantile machinery
+            # alone (model_defaults.py, author 2026-09-21). Its own spec entry
+            # rather than an override here, so one file owns the numbers.
+            params = sklearn_params(model_type if model_type in ('qrf', 'rf300')
+                                    else 'rf')
             params_source = 'default'
 
-    if model_type == 'rf':
+    if model_type in ('rf', 'rf300'):
         model = RandomForestRegressor(random_state=iteration_seed, **params)
     elif model_type == 'qrf':
         quantile = trial.suggest_float('quantile', 0.1, 0.9) if args.tuning else 0.5

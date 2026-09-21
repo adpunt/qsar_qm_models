@@ -143,6 +143,7 @@ TUNED_KEY = {
     # roster_label() above, so the key, the job script name and the results file
     # all name the same model.
     'rf':                       'rf',
+    'rf300':                    'rf300',
     'qrf':                      'qrf',
     'svm':                      'svm',
     'xgboost':                  'xgboost',
@@ -224,7 +225,7 @@ def roster_label(model_type, args):
     bt = getattr(args, 'bayesian_transformation', None)
     hetero = bool(getattr(args, 'heteroscedastic_vbll', False))
 
-    if model_type in ('rf', 'qrf'):
+    if model_type in ('rf', 'rf300', 'qrf'):
         return model_type
     if model_type == 'gauche':
         # --kernel defaults to tanimoto, so the RBF process must be named by the

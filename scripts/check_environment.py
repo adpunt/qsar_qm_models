@@ -43,6 +43,9 @@ import sys
 # what has to be importable and constructible for that model to run.
 QM9_MODELS = {
     "rf": ("sklearn.ensemble", "RandomForestRegressor"),
+    # The plain forest at the quantile forest's 300 trees, added 2026-09-21.
+    # Same estimator, a different spec entry, so the same probe.
+    "rf300": ("sklearn.ensemble", "RandomForestRegressor"),
     "qrf": ("quantile_forest", "RandomForestQuantileRegressor"),
     "svm": ("sklearn.svm", "SVR"),
     "xgboost": ("xgboost", "XGBRegressor"),
@@ -121,6 +124,7 @@ QM9_MODELS = {
 VALIDATION_MODELS = {
     # the validation roster (slurm_scripts_validation_rerun MODELS_ALL)
     "RF": (("sklearn.ensemble",), "RandomForestRegressor"),
+    "RF300": (("sklearn.ensemble",), "RandomForestRegressor"),
     "QRF": (("quantile_forest",), "RandomForestQuantileRegressor"),
     "SVM": (("sklearn.svm",), "SVR"),
     "XGBoost": (("xgboost",), "XGBRegressor"),

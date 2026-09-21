@@ -1,6 +1,8 @@
 {
+  "dnn": "USE_TUNED",
   "dnn_bnn_full": "USE_TUNED",
   "dnn_bnn_full_variational": "USE_TUNED",
+  "mlp": "USE_TUNED",
   "mlp_bnn_full": "USE_TUNED",
   "mlp_bnn_full_variational": "USE_TUNED"
 }

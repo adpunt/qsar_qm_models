@@ -86,6 +86,25 @@ SKLEARN_DEFAULTS = {
         'max_features': 0.3,
         'bootstrap': True,
     },
+    # THE PLAIN FOREST AT THE QUANTILE FOREST'S TREE COUNT.
+    #
+    # Author's decision, 2026-09-21. `rf` has 100 trees and `qrf` has 300, so
+    # the one comparison in the study that sets a deterministic model against
+    # its own probabilistic form was reading a 200-tree difference as well. This
+    # entry is the plain forest built at 300 trees and NOTHING else changed, so
+    # `rf300` against `qrf` differs by the quantile machinery alone.
+    #
+    # It is a NEW model rather than a change to `rf`: the 100-tree forest has
+    # already been run on all four datasets and those rows stay valid, and the
+    # author asked for the new one to be saved under its own name.
+    'rf300': {
+        'n_estimators': 300,
+        'max_depth': None,
+        'min_samples_leaf': 5,
+        'min_samples_split': 2,
+        'max_features': 0.3,
+        'bootstrap': True,
+    },
     # quantile_forest.RandomForestQuantileRegressor.
     # 300 trees, not 100: the quantile estimate IS this model's deliverable and
     # 100 trees give a noisy one. Everything else matches the ordinary forest.

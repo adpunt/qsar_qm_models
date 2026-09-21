@@ -134,6 +134,10 @@ def check_tuned_keys_against_models_py():
 
     ARG_CASES = {
         'rf': ('rf', {}), 'qrf': ('qrf', {}), 'svm': ('svm', {}),
+        # The plain forest at the quantile forest's 300 trees, so the
+        # deterministic-against-probabilistic forest pair differs by the
+        # quantile machinery alone (author, 2026-09-21).
+        'rf300': ('rf300', {}),
         'xgboost': ('xgboost', {}), 'lgb': ('lgb', {}), 'ngboost': ('ngboost', {}),
         'gauche_rbf': ('gauche', {'kernel': 'rbf'}),
         'gauche': ('gauche', {'kernel': 'tanimoto'}),

@@ -1,34 +1,66 @@
 {
-  "dnn_bnn_full": {
+  "dnn": {
     "avalon": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
     },
     "chemberta": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
     },
     "ecfp4": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
     },
     "mhggnn": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
     },
     "pdv": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
     },
     "sns": {
       "activation": "tanh",
       "hidden_size1": 64,
-      "hidden_size2": 32
+      "hidden_size2": 64
+    }
+  },
+  "dnn_bnn_full": {
+    "avalon": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
+    },
+    "chemberta": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
+    },
+    "ecfp4": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
+    },
+    "mhggnn": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
+    },
+    "pdv": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
+    },
+    "sns": {
+      "activation": "tanh",
+      "hidden_size1": 64,
+      "hidden_size2": 64
     }
   },
   "dnn_bnn_full_variational": {
@@ -63,42 +95,80 @@
       "hidden_size2": 64
     }
   },
-  "mlp_bnn_full": {
+  "mlp": {
     "avalon": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     },
     "chemberta": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     },
     "ecfp4": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     },
     "mhggnn": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     },
     "pdv": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     },
     "sns": {
-      "dropout_rate": 0.379,
+      "dropout_rate": 0.401,
       "hidden_size": 64,
-      "lr": 0.004285944143830873,
-      "num_hidden_layers": 1
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    }
+  },
+  "mlp_bnn_full": {
+    "avalon": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    },
+    "chemberta": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    },
+    "ecfp4": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    },
+    "mhggnn": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    },
+    "pdv": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
+    },
+    "sns": {
+      "dropout_rate": 0.401,
+      "hidden_size": 64,
+      "lr": 0.005865018723574268,
+      "num_hidden_layers": 3
     }
   },
   "mlp_bnn_full_variational": {
