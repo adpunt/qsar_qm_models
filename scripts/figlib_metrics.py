@@ -318,6 +318,87 @@ def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
     return pd.DataFrame(rows)
 
 
+def clean_accuracy_eta2_by_dataset(df, min_cell=None, min_models=None,
+                                   where='the clean-label ANOVA'):
+    """One decomposition per DATASET, on accuracy with no noise added.
+
+    The companion to `two_way_eta2_by_condition`, and the one place in the study
+    where the noise condition is not an axis. At noise level 0 there is nothing
+    to condition on: the clean fit is made once per (dataset, model,
+    representation, replicate) and every condition's ladder starts from that
+    same fit, so the level-0 rows repeat across the seven conditions rather than
+    being seven measurements. Taking them as seven would multiply every cell
+    count by seven and shrink the residual to nothing.
+
+    So the rows are collapsed to one per replicate first, and a disagreement
+    between two conditions at level 0 is a defect worth printing rather than
+    averaging away.
+
+    The band is the same leave-one-replicate-out jackknife as the per-condition
+    decomposition: drop one replicate, decompose the rest, repeat.
+    """
+    min_cell = C.MIN_CELL_ITERS if min_cell is None else min_cell
+    min_models = MIN_MODELS_FOR_ANOVA if min_models is None else min_models
+    if df is None or not len(df):
+        return pd.DataFrame()
+    clean = df[np.isclose(df['sigma'].astype(float), 0.0)]
+    clean = clean.dropna(subset=['r2'])
+    if not len(clean):
+        return pd.DataFrame()
+    clean = drop_variant_models(clean, where=where)
+
+    keys = ['dataset', 'model', 'rep', 'replicate']
+    # ONE CLEAN FIT PER REPLICATE. If two conditions disagree at level 0 they
+    # are not the same fit, and that is a loading error rather than a spread.
+    disagree = clean.groupby(keys, dropna=False)['r2'].agg(
+        lambda v: float(np.nanmax(v) - np.nanmin(v)))
+    worst = float(disagree.max()) if len(disagree) else 0.0
+    if worst > 1e-9:
+        n_bad = int((disagree > 1e-9).sum())
+        print(f'  {where}: {n_bad} clean cell(s) differ between noise '
+              f'conditions at noise level 0, by up to {worst:.4g} in R2. The '
+              f'clean fit is supposed to be one fit shared by every condition, '
+              f'so this is a loading defect, not a spread. The median is used '
+              f'and the count is reported here.')
+    collapsed = (clean.groupby(keys, dropna=False, as_index=False)['r2']
+                 .median())
+
+    rows = []
+    for dataset, group in collapsed.groupby('dataset', dropna=False):
+        n_models = int(group['model'].nunique())
+        if n_models < min_models:
+            print(f'  {where}: {dataset} has {n_models} model(s) and needs '
+                  f'{min_models}. A decomposition on that many describes those '
+                  f'models, not the choice of model -- skipped.')
+            continue
+        G.assert_replicates(group, ['model', 'rep'], min_n=min_cell,
+                            where=f'{where}, dataset {dataset}')
+        overall = two_way_eta2(group, 'r2')
+        if overall is None:
+            continue
+        replicates = sorted(group['replicate'].dropna().unique())
+        jackknife = []
+        for left_out in replicates:
+            kept = group[group['replicate'] != left_out]
+            if kept['replicate'].nunique() < 2:
+                continue
+            got = two_way_eta2(kept, 'r2')
+            if got is not None:
+                jackknife.append(got)
+        record = dict(dataset=dataset, response='r2_clean', **overall)
+        for share in ('eta2_model', 'eta2_rep', 'eta2_interaction',
+                      'eta2_residual'):
+            values = [p[share] for p in jackknife]
+            record[f'{share}_spread'] = (float(np.max(values) - np.min(values))
+                                         if len(values) > 1 else np.nan)
+        record['n_replicates'] = int(len(replicates))
+        record['n_jackknife'] = len(jackknife)
+        record['spread_is'] = 'leave-one-replicate-out'
+        record['conditions_collapsed'] = int(clean['condition'].nunique())
+        rows.append(record)
+    return pd.DataFrame(rows)
+
+
 def simple_effects(df, response, group_col, factor_col):
     """One-way eta-squared for `factor_col` within each level of `group_col`.
 

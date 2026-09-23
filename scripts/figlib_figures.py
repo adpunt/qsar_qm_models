@@ -473,6 +473,70 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
 
 
+def f2b_clean_decomposition(anova_clean, output_dir):
+    """One panel: the same four terms as F2, on accuracy with no noise added,
+    with the four datasets along the bottom instead of the noise conditions.
+
+    F2 answers how the model and the representation divide the variance once
+    label noise is in the training set. This answers the prior question -- how
+    they divide it before any noise is added -- and it is the only decomposition
+    in the study that can put the computed property and the three measured
+    endpoints on one axis, because the clean fit is the one thing all four
+    datasets have in common.
+
+    There is no noise-condition axis here on purpose: the clean fit is made once
+    per replicate and shared by every condition, so a condition axis would be
+    the same bar drawn seven times.
+    """
+    if anova_clean is None or not len(anova_clean):
+        return None
+    long = []
+    for _, row in anova_clean.iterrows():
+        for column, label in FACTOR_COLUMNS:
+            long.append({'dataset': row['dataset'], 'factor': label,
+                         'share': row.get(column, np.nan),
+                         'spread': row.get(f'{column}_spread', np.nan)})
+    long = pd.DataFrame(long)
+    order = [d for d in C.DATASET_ORDER if d in set(long['dataset'])]
+    order += [d for d in dict.fromkeys(long['dataset']) if d not in order]
+
+    fig, ax = _fig(height=3.4)
+    S.grouped_bars(ax, long, 'dataset', 'factor', 'share', spread='spread',
+                   labeller=str, category_labeller=C.dataset_label,
+                   colours=C.ANOVA_FACTOR_COLORS,
+                   legend=False, categories=order, clip=(0, 100))
+    ax.set_ylabel('Share of variance (%)')
+    ax.set_xlabel('Dataset')
+    ax.set_ylim(0, 100)
+    S.shared_legend(fig, ax, side=True)
+
+    counts = {str(r['dataset']): (int(r['n_models']), int(r['n_reps']),
+                                  int(r['n_replicates']))
+              for _, r in anova_clean.iterrows()}
+    spelled = '; '.join(
+        f'{C.dataset_label(d)} {m} models by {p} representations by {k} '
+        f'replicates, {m * p * k} values'
+        for d, (m, p, k) in counts.items())
+    caption('F2b', f"""
+        How much of the variation in predictive accuracy on CLEAN labels is
+        explained by the choice of model, the choice of representation, the
+        pairing of the two, and what is left over, on each dataset. Accuracy is
+        R$^2$ on held-out molecules with no noise added to the training labels.
+        The bottom axis is the dataset and the side axis is the share of
+        variance, from a two-way analysis with sequential sums of squares; the
+        four shares within a dataset sum to 100 per cent. One bar is one term on
+        one dataset. There is no noise-condition axis: the clean fit is made
+        once per replicate and every noise condition's ladder starts from that
+        same fit, so a condition axis would repeat each bar seven times. The
+        whiskers are NOT confidence intervals: they are a leave-one-replicate-out
+        jackknife -- drop one replicate, decompose the rest, repeat -- so they
+        say how much the answer depends on any one replicate, not how precisely
+        the share is known. The leftover share is the variation between
+        replicates of one identical configuration: same model, same
+        representation, same dataset, different seed. {spelled}.""")
+    return S.save(fig, Path(output_dir) / 'F2b_clean_decomposition.png')
+
+
 # ---------------------------------------------------------------------------
 # F3 -- Q1 continued: WHICH model and WHICH representation
 # ---------------------------------------------------------------------------

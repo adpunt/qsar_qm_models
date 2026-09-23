@@ -287,6 +287,16 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
         else pd.DataFrame()
     if len(anova):
         tables['anova_eta2'] = anova
+    # THE CLEAN-LABEL DECOMPOSITION, one per dataset and no condition axis. It
+    # is the only decomposition that can hold the computed property and the
+    # three measured endpoints on one chart, because the clean fit is what all
+    # four have in common.
+    clean_frames = [f for f in (qm9, assay) if f is not None and len(f)]
+    anova_clean = (M.clean_accuracy_eta2_by_dataset(
+        pd.concat(clean_frames, ignore_index=True)) if clean_frames
+        else pd.DataFrame())
+    if len(anova_clean):
+        tables['anova_eta2_clean'] = anova_clean
     collect(D.d4_interaction(anova))
     collect(D.d5_representation_outlier(qm9_summary))
     collect(D.d6_auc_above_one([qm9_summary, assay_summary],
@@ -360,6 +370,7 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     # Carried for the figures, not written out: the leading underscore keeps
     # them out of the CSV sweep in write_report.
     tables['_qm9_accuracy'] = qm9
+    tables['_assay_accuracy'] = assay
     tables['_primary_rep'] = primary
     # R10 plots one mark per REPLICATE against its own clean baseline, so it
     # needs the frame before the median across replicates is taken.
@@ -403,6 +414,9 @@ def draw_figures(args, tables, verdicts):
     drawn = [FIG.f1_noise_conditions(out)]
     if anova is not None and len(anova):
         drawn.append(FIG.f2_variance_decomposition(anova, out))
+    anova_clean = tables.get('anova_eta2_clean')
+    if anova_clean is not None and len(anova_clean):
+        drawn.append(FIG.f2b_clean_decomposition(anova_clean, out))
     if qm9 is not None and len(qm9) and conditions:
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
     if accuracy is not None and len(accuracy) and qm9 is not None and rep:

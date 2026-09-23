@@ -416,7 +416,7 @@ def test_f2_carries_the_residual_and_the_whiskers(out):
 
     source = Path(FIG.__file__).read_text()
     body = source[source.index('def f2_variance_decomposition'):
-                  source.index('# F3 -- Q1 continued')]
+                  source.index('def f2b_clean_decomposition')]
     check('F2 still passes a spread to the bars', "spread='spread'" in body,
           'no spread= in f2_variance_decomposition')
 
@@ -437,6 +437,61 @@ def test_f2_carries_the_residual_and_the_whiskers(out):
     header = csv.read_text().splitlines()[0] if csv.exists() else ''
     check('T3 still carries the residual', 'Residual' in header,
           header or 'T3 wrote nothing')
+
+
+def test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate(out):
+    """The clean decomposition is per DATASET, and the clean rows collapse first.
+
+    Every noise condition's ladder starts from the same clean fit, so the
+    level-0 rows repeat across the seven conditions. Decomposing them as they
+    come multiplies every cell count by seven and drives the residual towards
+    nothing, which would read as "replicates agree" when it means "the same
+    number was counted seven times".
+    """
+    print('  F2b decomposes clean accuracy per dataset, conditions collapsed')
+    reps = ['ecfp4', 'pdv', 'chemberta']
+    models = ['rf', 'qrf', 'xgboost', 'svm', 'ngboost', 'lgb']
+    conditions = ['gaussian', 'grouped_wider', 'grouped_shifted']
+    rng = np.random.default_rng(11)
+    rows = []
+    for dataset in ('qm9', 'logd'):
+        for model in models:
+            for rep in reps:
+                for replicate in range(5):
+                    # ONE clean fit, then repeated under every condition.
+                    clean = float(0.6 + 0.02 * models.index(model)
+                                  + 0.01 * reps.index(rep)
+                                  + rng.normal(0, 0.01))
+                    for condition in conditions:
+                        for sigma in (0.0, 0.5, 1.0):
+                            rows.append({
+                                'dataset': dataset, 'model': model, 'rep': rep,
+                                'condition': condition, 'replicate': replicate,
+                                'sigma': sigma,
+                                'r2': clean if sigma == 0 else clean - sigma * 0.1})
+    frame = pd.DataFrame(rows)
+
+    got = M.clean_accuracy_eta2_by_dataset(frame)
+    check('one row per dataset, not per condition',
+          sorted(got['dataset']) == ['logd', 'qm9'], str(list(got['dataset'])))
+    per_dataset = int(got['n'].iloc[0])
+    check('the seven-fold repeat is collapsed before the fit',
+          per_dataset == len(models) * len(reps) * 5,
+          f'{per_dataset} values, expected {len(models) * len(reps) * 5}')
+    check('the four shares sum to 100',
+          all(abs(r.eta2_model + r.eta2_rep + r.eta2_interaction
+                  + r.eta2_residual - 100) < 1e-6 for r in got.itertuples()),
+          str(got[['eta2_model', 'eta2_rep', 'eta2_interaction',
+                   'eta2_residual']].sum(axis=1).tolist()))
+    check('the residual is a real within-cell term, not zero',
+          bool((got['eta2_residual'] > 0).all()),
+          str(got['eta2_residual'].tolist()))
+    check('every row carries a jackknife band',
+          bool(got[['eta2_model_spread', 'eta2_residual_spread']].notna()
+               .all().all()), 'a spread came back NaN')
+
+    path = FIG.f2b_clean_decomposition(got, out)
+    check('F2b drew', path is not None and Path(path).exists(), str(path))
 
 
 def test_f4a_draws_its_companion_panel(out):
@@ -599,6 +654,7 @@ def main():
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
         test_f2_carries_the_residual_and_the_whiskers(out)
+        test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate(out)
         test_f4a_draws_its_companion_panel(out)
         test_panels_that_share_an_axis_stay_the_same_width(out)
         test_the_caches_actually_write(out)
