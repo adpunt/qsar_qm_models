@@ -1391,91 +1391,115 @@ Nothing in the paper depends on it yet, but any cross-dataset statement about th
 
 ---
 
-**SAMPLE TEXT.** A draft to cut into, not finished prose. Every number traces to
-`results/decisions_arc/` — T3 for the variance shares, `auc_norm_qm9.csv` for the rest — and is
-marked where it does not yet exist. Models are named rather than counted, and nothing is averaged
-across models or across representations.
+**SAMPLE TEXT, as LaTeX.** Your paragraphs kept where they work. The first sentence is yours
+unchanged, and so is most of the first paragraph — what is added is the numbers it describes in
+words, the table reference, and the clause saying why only three conditions are decomposed. Every
+number traces to `results/decisions_arc/`: T3 for the variance shares, `auc_norm_qm9.csv` for the
+rest. Placeholders marked where the results do not exist yet.
 
-> **Variance decomposition**
->
-> A QSAR model is two choices: what represents the molecule, and what learns from it. We decomposed
-> the variance in two outcomes between those choices, their pairing, and a residual, on the QM9
-> HOMO--LUMO gap (Figure~\ref{fig:variance}, Table~\ref{tab:variance}). The outcomes are predictive
-> accuracy, as $R^2$ at a noise level of one spread of the clean training labels, and robustness, as
-> \aucnorm. The decomposition runs on the noise conditions the whole roster was given: Gaussian,
-> grouped-wider and grouped-shifted. The others were run on a named subset of models and
-> representations, which leaves no full cross to decompose; they are reported in
-> Figure~\ref{fig:deep} instead.
->
-> The two choices do not divide the two outcomes the same way. For accuracy under Gaussian noise,
-> the model and the representation take comparable shares, 29.1 and 26.6 per cent. For robustness
-> the model takes 49.5 per cent and the representation 9.2. The same holds under grouped-wider
-> noise. Representation therefore governs how well a model can do and barely governs how much of
-> that survives corruption, which is what one would expect of noise put into the labels and not into
-> the features: the representation still decides what is learnable, and the model decides how much
-> of it is given up when the target is wrong.
->
-> The pairing of the two is worth more to robustness than to accuracy, 20.4 per cent against 13.7
-> under Gaussian noise. So the representation does matter to robustness, but conditionally --- not
-> as a term that lifts or lowers every model together, but as one that costs some architectures and
-> not others. [PLACEHOLDER --- name the pairings this refers to once
-> Figure~\ref{fig:grid} has been read; the neural networks are the obvious case.]
->
-> Grouped-shifted noise breaks the decomposition rather than shifting it. The residual takes 56.3
-> per cent of the variance in robustness and 76.6 per cent of the variance in accuracy, and the
-> model term falls to 30.5 and 7.1. The residual here is the variation between replicates of one
-> identical configuration --- same model, same representation, same noise condition, same level,
-> different seed --- so what this says is that under a scaffold-wide offset a configuration stops
-> giving a repeatable answer. Which scaffolds are held out interacts with which scaffolds were
-> shifted, and that draw changes more than the choice of model does.
->
-> That residual also sets a floor on everything else in this section. Even under Gaussian noise it
-> is 20.8 per cent of the variance in robustness and 30.6 per cent of the variance in accuracy. Any
-> difference between two models, or between two representations, that is smaller than the spread
-> between seeds of a single configuration is not a difference we can report.
->
-> [PLACEHOLDER --- clean labels, from `anova_eta2_clean.csv` once Figure~\ref{fig:variance_clean}
-> has been drawn. Say which term leads on QM9 before any noise is added, and whether logD, Caco-2
-> and hERG agree. This is the comparison that separates "representation governs accuracy" from
-> "representation governs accuracy only once the labels are wrong".]
->
-> [PLACEHOLDER --- the assay datasets, once the decomposition has been run on them. Their bars carry
-> no band: the five scaffold folds partition one dataset rather than repeating an experiment, so
-> dropping one in turn does not measure the same thing the ten QM9 replicates do.]
->
-> **The kind of noise**
->
-> Across the whole roster and all six representations, grouped-shifted noise cost every model
-> robustness, between 0.005 and 0.082 of \aucnorm depending on the pairing. Grouped-wider noise did
-> not: it moved \aucnorm by between $-0.025$ and $+0.023$, up for some pairings and down for others.
-> The two conditions deliver the same total amount of noise and differ only in whether a scaffold
-> group takes a common offset or has its own errors widened, so what costs a model is not the amount
-> of noise nor its position in the feature space, but whether a whole group of related molecules
-> moves together.
->
-> The shape of an individual error mattered less still. On the models given Laplace, Student-$t$ and
-> outlier noise --- NGBoost, RF, SVM, GP, GP-Hetero, BNN-Full-MVE and VBLL-Full-Hetero, on ECFP4, PDV
-> and ChemBERTa --- each model's \aucnorm under each of those shapes sat within its own
-> replicate-to-replicate spread of its Gaussian value, with GP-Hetero on PDV the single exception.
-> This agrees with \cite{Heid2023}, who found no difference between Gaussian, uniform, hyperbolic and
-> bimodal errors drawn at a matched mean and standard deviation.
->
-> Censoring was the exception to all of it. On the pairings it was run on, \aucnorm fell to between
-> 0.77 and 0.82, against 0.94 to 0.98 for those same pairings under Gaussian noise
-> (Figure~\ref{fig:deep}). Censoring is the one condition that removes information rather than
-> corrupting it, and its level is a fraction of labels clipped rather than a fraction of the label
-> spread, so it does not sit on the same axis as the rest and cannot be read as a harsher dose of
-> the same thing.
->
-> [PLACEHOLDER --- the curves, once Figure~\ref{fig:conditions_by_rep} and `r2_by_level.csv` are in
-> hand. The point to make: \aucnorm is an area and two conditions can share one while losing it in
-> different places. On RF at ECFP4 every condition tracks together to about half the label spread
-> and only then separates, grouped-shifted peels away first, and outlier noise ends the highest of
-> the rest at the largest level --- above Gaussian --- which is the opposite of what a condition
-> that concentrates all its damage on a tenth of the molecules ought to do. Whether that holds on
-> the other five representations is exactly what the new figure is for.]
+```latex
+\subsection{Variance decomposition}
+
+Considering the two main components of a QSAR model, the molecular representation and the model
+architecture, we sought to understand how each contributes to both predictive performance and noise
+robustness. ANOVA decomposition divides the variance between model architecture, molecular
+representation, the pairing of the two, and a residual. We ran this decomposition across three
+noise conditions: Gaussian, grouped-wider and grouped-shifted (Figure~\ref{fig:variance},
+Table~\ref{tab:variance}). These conditions were chosen as they are the methods by which injected
+label noise is related to the feature space, and they are the conditions every model was given on
+every representation; the rest were run on a named subset and leave no full grid to decompose. For
+predictive accuracy measured in $R^2$, model architecture and molecular representation account for
+comparable shares of the variance, 29.1 and 26.6 per cent under Gaussian noise. However, for noise
+robustness, quantified by the normalised area under the R$^2$ retention curve (\aucnorm; higher
+values indicate greater robustness), model architecture accounts for roughly half of the variance
+while molecular representation for under a tenth, 49.5 and 9.2 per cent. This pattern is observed
+across noise conditions. This makes sense, as label noise does not impact the features and
+increasing it would impact the model's abilities. However, the interaction term between model
+architecture and molecular representation is slightly more influential with noise robustness than
+with predictive accuracy, 20.4 per cent against 13.7, though it is on par with the residual. This is
+because some models are heavily influenced by different sets of features, while others are not, and
+this difference is heightened with label noise.
+
+While we observe similar patterns between noise conditions, the predictive performance of
+grouped-shifted noise varies significantly, resulting in higher overall residuals: 56.3 per cent of
+the variance in \aucnorm and 76.6 per cent of the variance in $R^2$, with the model architecture
+term falling to 30.5 and 7.1. This indicates that the offset applied to each scaffold may account
+for more of the variance in both R$^2$ and \aucnorm. The residual is the variation between
+replicates of one identical configuration, differing only in seed, so what this says is that under
+a scaffold-wide offset a configuration stops giving a repeatable answer. Which scaffolds are held
+out interacts with which scaffolds were shifted, and that draw moves the outcome further than the
+choice of model architecture does.
+
+That residual also sets a floor on what the rest of this work can claim. Even under Gaussian noise
+it accounts for 20.8 per cent of the variance in \aucnorm and 30.6 per cent of the variance in
+$R^2$. A difference between two model architectures, or between two molecular representations, that
+is smaller than the spread between seeds of a single configuration is not a difference we report.
+
+% PLACEHOLDER -- clean labels. Fill from anova_eta2_clean.csv once
+% Figure~\ref{fig:variance_clean} has been drawn. Say which term leads on QM9 before any noise is
+% added, and whether logD, Caco-2 and hERG agree. This is what separates "molecular representation
+% governs accuracy" from "molecular representation governs accuracy only once the labels are wrong".
+
+% PLACEHOLDER -- the assay datasets, once the decomposition has been run on them. Their bars carry
+% no band: the five scaffold folds partition one dataset rather than repeating an experiment, so
+% dropping one in turn does not measure what the ten QM9 replicates measure.
+```
+
+**What comes out of this subsection.** Line 421, "All of the neural networks span a wider range of
+\aucnorm\ …", reads Figure~\ref{fig:grid} and not the decomposition — move it, and `fig:grid` with
+it, into "Robustness and clean accuracy". Line 439 repeats the first paragraph; delete it.
 
 ---
+
+**SAMPLE TEXT for the condition comparison — this belongs at `paper.tex:502`, not here.**
+
+That subsection already carries F4b as `fig:conditions`, so the material about which kind of noise
+costs what belongs beside it rather than in the decomposition. Your sentence there currently reads:
+
+> On the HOMO--LUMO gap at ECFP4 it moved the median \aucnorm of nineteen models from 0.926 under
+> Gaussian noise to 0.905, reaching significance. Group-wider, which widens the error within a
+> scaffold family without moving its mean, only shifted the \aucnorm to 0.927.
+
+That is a median over the roster and a count of it, which is the thing you do not want. The
+replacement says more and claims less, because it holds for each pairing separately:
+
+```latex
+However, the shape is not the only aspect of noise we modified. Grouped-shifted noise gives every
+scaffold family its own offset added to every label. On the HOMO--LUMO gap it cost every model
+architecture robustness, on every molecular representation, between 0.005 and 0.082 of \aucnorm
+depending on the pairing. Grouped-wider, which widens the error within a scaffold family without
+moving its mean, did not: it moved \aucnorm by between $-0.025$ and $+0.023$, up for some pairings
+and down for others. The two conditions deliver the same amount of noise and differ only in whether
+a scaffold family takes a common offset or has its own errors widened, so what costs a model is
+neither the amount of noise nor its position in the feature space, but whether a family of related
+molecules moves together.
+
+The shape of an individual error mattered less still. NGBoost, RF, SVM, GP, GP-Hetero,
+BNN-Full-MVE and VBLL-Full-Hetero were each given Laplace, Student-$t$ and outlier noise on ECFP4,
+PDV and ChemBERTa. Under each of those shapes every model's \aucnorm sat within its own
+replicate-to-replicate spread of its Gaussian value, with GP-Hetero on PDV the single exception.
+This coincides with \cite{Heid2023}, who found no difference between Gaussian, uniform, hyperbolic
+and bimodal errors drawn at a matched mean and standard deviation. Thus we see that the shape of
+the error injected does not change how well a model tolerates it.
+
+Censoring was the exception to all of it. On the pairings it was run on, \aucnorm fell to between
+0.77 and 0.82, against 0.94 to 0.98 for those same pairings under Gaussian noise
+(Figure~\ref{fig:deep}). Censoring is the one condition that removes information rather than
+corrupting it, and its level is a fraction of labels clipped rather than a fraction of the label
+spread, so it does not sit on the same axis as the rest and cannot be read as a harsher dose of the
+same thing.
+
+% PLACEHOLDER -- the curves, once Figure~\ref{fig:conditions_by_rep} and r2_by_level.csv are in
+% hand. \aucnorm is an area, and two conditions can share one while losing it in different places.
+% On RF at ECFP4 every condition tracks together to about half the label spread and only then
+% separates, grouped-shifted peels away first, and outlier noise ends the highest of the rest at
+% the largest level -- above Gaussian -- which is the opposite of what a condition that
+% concentrates all its damage on a tenth of the molecules ought to do. Whether that holds on the
+% other five molecular representations is what the new figure is for.
+```
+
+`fig:deep` needs a label: it is R19, promoted to the main text on 2026-09-23, and it is where
+censoring appears at all. `fig:conditions_by_rep` is F4d.
 
 ## MOVEMENT 2 — what the choice of model buys, and whether probabilistic machinery helps
 
