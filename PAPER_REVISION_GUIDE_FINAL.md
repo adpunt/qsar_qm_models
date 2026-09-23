@@ -1268,7 +1268,9 @@ any of the five.
 **Scrapped and restarted 2026-09-23.** What was here was written against noise strategies that no
 longer exist. This version starts from what is in `paper.tex` today.
 
-**Settled 2026-09-23, on the author's call:**
+**Carried out in `paper.tex` on 2026-09-23**, on the author's instruction to break the
+never-edit rule for this one restructure. See "Where everything now sits in `paper.tex`" further
+down for the line numbers and what moved where. The list below is what was agreed and done:
 
 - This subsection carries **one figure and one table**: F2, and T3 with a clean-label row at the top.
 - **F2b and T3b move down** to "Does it hold on measured labels" (`paper.tex:526`). Comparing the
@@ -2428,6 +2430,69 @@ ones whose pointers now have to be rewritten.
 | **R15** `R15_rank_against_level_*.png` | where each model ranks as the noise rises | §R4's fourth paragraph drops to one sentence about Kendall's *W*. R15 is two charts to say the ranking barely moves, so this is the weakest of the four |
 | **R6** `R6_representation_profile_*.png` | the cells where a model's robustness at one representation sits outside the range of its others | §R1's third paragraph keeps Figure~\ref{fig:grid} and loses nothing. Decision D5 fired on eight cells, and **seven of the eight are variant models**, which the cross-model figures exclude — so D5 fires on cells the paper does not draw |
 ---
+
+---
+
+## WHERE EVERYTHING NOW SITS IN `paper.tex` — 2026-09-23
+
+**`paper.tex` was edited directly on the author's instruction, 2026-09-23.** The standing rule is
+that it is never edited; this was a one-off to carry out the moves agreed in chat, and it was
+copy-and-paste plus the new figure and table blocks. No prose was rewritten. The file as it stood
+before is `paper.tex.before_restructure_2026-09-23`.
+
+Nothing was deleted. The two blocks that came out are commented in place with a line saying why.
+
+### The Results subsections, and what is in each
+
+| Line | Subsection | Figures | Tables |
+|---|---|---|---|
+| 387 | Variance decomposition | F2 `fig:variance` | T3 `tab:variance` |
+| 426 | Robustness and clean accuracy | F4a `fig:curves`, F3 `fig:grid` | — |
+| 487 | Artificial noise conditions | F4b `fig:conditions`, R19 `fig:deep` | T4 `tab:robustness` |
+| 548 | Robustness on the three assay datasets | F8 `fig:assay`, F2b `fig:variance_clean`, R9 `fig:transfer` | T3b `tab:variance_clean` |
+
+### What moved, and where it went
+
+| What | From | To |
+|---|---|---|
+| F3, the model-by-representation grid | Variance decomposition | Robustness and clean accuracy, after `fig:curves` |
+| F2b, the clean-label decomposition | Variance decomposition | The assay subsection, after `fig:assay` |
+| The clean-label paragraph, "On clean labels, model architecture and…" | Variance decomposition | The assay subsection, immediately above F2b |
+
+### What was added
+
+| What | Where | Needs |
+|---|---|---|
+| T3 `tab:variance` | Variance decomposition, between the second paragraph and F2 | `T3_variance_decomposition_qm9.tex` on the graphics path |
+| T4 `tab:robustness` | Artificial noise conditions, after the paragraph that cites it | `T4_robustness_qm9_ecfp4.tex` |
+| R19 `fig:deep` | Artificial noise conditions, after `fig:conditions` | `R19_deep_conditions_qm9.png` |
+| T3b `tab:variance_clean` | The assay subsection, after F2b | `T3b_variance_decomposition_clean.tex` |
+
+All four come out of the next figures run. Until then the `\input` lines will fail to compile, so
+either run the figures first or comment the four `\input` lines while drafting.
+
+### What was commented out, not deleted
+
+- **F4c** `fig:robustness`, which was in "Robustness and clean accuracy". It is nineteen rows by
+  four columns of printed numbers, which is a table drawn, and T4 carries the same content with all
+  seven noise conditions instead of three. Uncommenting it is one line if you disagree.
+- **The paragraph beginning "The choice of model architecture is instead the largest source of
+  variance"**, which repeated the subsection's opening paragraph. Its four TODO comments are
+  commented with it and still readable.
+
+### What this fixed on the way
+
+- `Table~\ref{tab:robustness}` was cited at the old line 493 and defined nowhere. T4 defines it.
+- `Table~\ref{tab:variance}` was cited in the opening paragraph and defined nowhere. T3 defines it.
+- `fig:deep` and `tab:variance_clean` are cited where they are introduced, so no float is orphaned.
+
+### Still broken, and none of it mine
+
+- `fig:validation_combined`, `fig:validation_overview`, `fig:variants` and `tab:pairs` are cited and
+  defined nowhere. All four pre-date this edit.
+- `fig:conditions` (F4b) and `fig:transfer` (R9) are defined and never cited in the body. Both
+  pre-date this edit.
+
 
 ---
 
