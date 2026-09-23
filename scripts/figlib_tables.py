@@ -226,15 +226,32 @@ def t2_conditions(output_dir):
 # T3 -- the variance decomposition
 # ---------------------------------------------------------------------------
 
-def t3_variance(anova, output_dir, dataset='qm9'):
+def t3_variance(anova, output_dir, dataset='qm9', clean=None):
     """One row per condition and outcome, with the replicate spread beside each
-    share. No version of this table has ever carried the spread."""
+    share. No version of this table has ever carried the spread.
+
+    `clean` is the clean-label decomposition; its row for this dataset is put
+    at the top, because the whole argument of the subsection is that the two
+    choices divide accuracy one way before noise and another way after, and a
+    reader cannot make that comparison across two separate tables (the author,
+    2026-09-23). It has no noise condition by construction: the clean fit is
+    made once per replicate and every condition starts from it.
+    """
     if anova is None or not len(anova):
         return None
     frame = anova.copy()
     rows = []
+    if clean is not None and len(clean):
+        here = clean[clean['dataset'] == dataset]
+        for _, r in here.iterrows():
+            frame = pd.concat([pd.DataFrame([dict(
+                r, condition='__clean__',
+                outcome='Accuracy (R$^2$ on clean labels)')]), frame],
+                ignore_index=True)
     for _, r in frame.iterrows():
-        row = {'Condition': C.condition_label(r['condition']),
+        row = {'Condition': ('None (clean labels)'
+                             if r['condition'] == '__clean__'
+                             else C.condition_label(r['condition'])),
                'Outcome': r['outcome']}
         for column, label in (('eta2_model', 'Model'),
                               ('eta2_rep', 'Representation'),

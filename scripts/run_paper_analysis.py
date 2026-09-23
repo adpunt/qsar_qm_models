@@ -612,6 +612,13 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
             if got:
                 drawn.append(got)
                 break          # one condition is the headline; the rest are T6
+        # F6b: the aleatoric component against the noise SD actually added, at
+        # PDV and ECFP4 (the author, 2026-09-23). PDV because censoring ran on
+        # QM9 at PDV alone; ECFP4 because the heteroscedastic GP ran on QM9 at
+        # ECFP4 alone.
+        got = FIG.f6b_aleatoric_against_injected(q5, out)
+        if got:
+            drawn.append(got)
     # F9 IS CUT -- the author, 2026-09-16. It drew one bar per model for the
     # correlation between predicted uncertainty and the size of the injected
     # noise, against a permutation band. T6 carries the same numbers with their
@@ -641,7 +648,11 @@ def build_tables(args, tables, verdicts):
 
     built = [TAB.t1_metrics(out), TAB.t2_conditions(out)]
     if tables.get('anova_eta2') is not None and len(tables['anova_eta2']):
-        built.append(TAB.t3_variance(tables['anova_eta2'], out))
+        # The clean-label row rides at the top of T3, so the subsection's
+        # own argument -- the two choices divide accuracy one way before
+        # noise and another way after -- is readable in one table.
+        built.append(TAB.t3_variance(tables['anova_eta2'], out,
+                                     clean=tables.get('anova_eta2_clean')))
     if (tables.get('anova_eta2_clean') is not None
             and len(tables['anova_eta2_clean'])):
         built.append(TAB.t3b_variance_clean(tables['anova_eta2_clean'], out))

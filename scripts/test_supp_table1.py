@@ -43,7 +43,7 @@ def check(name, ok, detail=''):
         failures.append(name)
 
 
-body, n_config, tuned_models = G.build()
+body, n_config, tuned_models, n_descriptors = G.build()
 
 # 1 -----------------------------------------------------------------------
 check('every configuration in the generator MODELS dict has a block',
@@ -116,6 +116,21 @@ svm_tanimoto = [line for line in tex_text.splitlines()
 check('no Tanimoto kernel is claimed for the SVM in additional_files.tex',
       not svm_tanimoto, ' | '.join(svm_tanimoto))
 
+# 5b ----------------------------------------------------------------------
+# PDV is the one representation a reader cannot rebuild from a library call: the
+# 200 descriptor names are pinned in the pipeline, not taken from RDKit's own
+# list, which grows between releases. Table C is the only published record of
+# which 200, so it has to match the pipeline name for name.
+pipeline_names = G.pdv_descriptor_names()
+check('Table C lists every PDV descriptor the pipeline computes',
+      len(pipeline_names) == 200
+      and all(G.tex(n) in body for n in pipeline_names),
+      f'{len(pipeline_names)} names in DEFAULT_DESCRIPTOR_LIST; '
+      + ', '.join(n for n in pipeline_names if G.tex(n) not in body)[:120])
+check('Table C states the RDKit version that computed the descriptors',
+      bool(G.rdkit_version()) and f'RDKit {G.rdkit_version()}' in body,
+      str(G.rdkit_version()))
+
 # 6 -----------------------------------------------------------------------
 # The PDF is the file that is submitted, and it is a separate build step from
 # everything above. Regenerating the block and not rebuilding leaves the .tex
@@ -148,11 +163,14 @@ else:
         s = re.sub(r'\\[a-zA-Z]+', ' ', s)
         return ''.join(c for c in s.lower() if c.isalpha())
 
-    # Both captions, each from \caption{ to the line before its \label.
+    # One caption per generated table, each from \caption{ to the line before
+    # its \label. Table C (the PDV descriptor names) was added 2026-09-20, so
+    # the count moved from two to three; it is asserted rather than counted so
+    # that a table silently dropped from the generator fails here.
     captions = [m.group(1) for m in
                 re.finditer(r'\\caption\{(.*?)\}\n\\label', body, re.S)]
-    check('both captions were found in the generated block', len(captions) == 2,
-          f'{len(captions)} captions')
+    check('all three captions were found in the generated block',
+          len(captions) == 3, f'{len(captions)} captions')
     flat_pdf = flatten(pdf_text)
     stale = [c[:60] for c in captions if flatten(c) not in flat_pdf]
     fresh = not stale and MD.spec_hash() in pdf_text

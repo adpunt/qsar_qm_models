@@ -95,3 +95,6 @@ rust/Cargo.lock
 slurm-*.out
 *_%j.out
 *.selftest.lock
+
+# Staging folder for the journal upload, rebuilt by scripts/stage_additional_files.py
+additional_files/

@@ -1395,6 +1395,104 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
     return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
 
 
+#: The models whose aleatoric component varies per molecule on the out-of-fold
+#: rows. The two heteroscedastic variational networks also have one, but only on
+#: held-out molecules -- they were never scored out of fold -- so they would be
+#: drawn from a different split than the rest and are left out.
+F6B_MODELS = ('dnn_bnn_full_mve', 'mlp_bnn_full_mve', 'het_gp_rbf', 'qrf',
+              'ngboost')
+F6B_DATASETS = ('qm9', 'openadmet-logd', 'chembl-herg-ki',
+                'openadmet-caco2_efflux')
+
+
+def f6b_aleatoric_against_injected(q5, output_dir, reps=('pdv', 'ecfp4'),
+                                   condition='gaussian'):
+    """Does the aleatoric component recover the amount of noise put in?
+
+    One row of panels per representation, one column per dataset. The bottom
+    axis is the standard deviation of the noise added to the training labels,
+    in the label's own units: the noise level times the clean training label
+    spread. The side axis is the mean predicted aleatoric standard deviation
+    over one out-of-fold pass, in the same units, median over folds. The dashed
+    line is equality: a model on it reports exactly the noise that was added.
+    Both axes share units, so each panel is square in data terms.
+    """
+    import matplotlib.pyplot as plt  # noqa: F401
+    frame = q5[(q5['component'] == 'aleatoric')
+               & (q5['condition'] == condition)
+               & (q5['split'] == 'train_oof')
+               & (q5['model'].isin(F6B_MODELS))].copy()
+    if not len(frame):
+        return None
+    frame['rep_key'] = frame['rep'].astype(str).str.lower()
+    frame = frame[frame['rep_key'].isin(reps)]
+    frame['injected_sd'] = frame['sigma'] * frame['label_scale']
+    curve = (frame.groupby(['rep_key', 'dataset', 'model', 'sigma'])
+             .agg(x=('injected_sd', 'median'),
+                  y=('mean_uncertainty', 'median'),
+                  lo=('mean_uncertainty', 'min'),
+                  hi=('mean_uncertainty', 'max'))
+             .reset_index())
+    datasets = [d for d in F6B_DATASETS if d in set(curve['dataset'])]
+    short = {'qm9': 'QM9', 'openadmet-logd': 'logD', 'chembl-herg-ki': 'hERG K\u1d62',
+             'openadmet-caco2_efflux': 'Caco-2'}
+    unit = {'qm9': 'eV'}
+    fig, axes = _fig(height=2.1 * len(reps) + 0.9, nrows=len(reps),
+                     ncols=len(datasets), squeeze=False)
+    letters = 'abcdefghijkl'
+    missing = []
+    for r, rep in enumerate(reps):
+        for c, dataset in enumerate(datasets):
+            ax = axes[r, c]
+            panel = curve[(curve['rep_key'] == rep) & (curve['dataset'] == dataset)]
+            top = 0.0
+            for model in C.sort_models(F6B_MODELS):
+                one = panel[panel['model'] == model].sort_values('sigma')
+                if not len(one):
+                    missing.append(f'{C.model_label(model)} at '
+                                   f'{C.rep_label(rep)} on {short[dataset]}')
+                    continue
+                ax.plot(one['x'], one['y'], marker=C.model_marker(model),
+                        markersize=3.0, linewidth=1.2,
+                        color=C.model_color(model), label=C.model_label(model))
+                ax.fill_between(one['x'], one['lo'], one['hi'],
+                                color=C.model_color(model), alpha=0.12,
+                                linewidth=0)
+                top = max(top, float(one['hi'].max()), float(one['x'].max()))
+            top *= 1.05
+            ax.plot([0, top], [0, top], linestyle='--', color='#555555',
+                    linewidth=0.9, label='Reported = added')
+            ax.set_xlim(0, top)
+            ax.set_ylim(0, top)
+            ax.spines[['top', 'right']].set_visible(False)
+            S.title(ax, letters[r * len(datasets) + c],
+                    f'{short[dataset]}, {C.rep_label(rep)}')
+            if r == len(reps) - 1:
+                ax.set_xlabel(f'Added SD ({unit.get(dataset, "log units")})',
+                              fontsize=8)
+            if c == 0:
+                ax.set_ylabel('Predicted aleatoric SD', fontsize=8)
+            ax.tick_params(labelsize=7)
+    fig.tight_layout(h_pad=1.2, w_pad=0.8)
+    S.shared_legend(fig, list(axes.ravel()), ncol=3)
+    caption('F6b', f"""
+        The aleatoric component against the amount of noise added, under
+        {C.condition_label(condition)}. One row per representation and one
+        column per dataset. The bottom axis is the standard deviation of the
+        noise added to the training labels, in the label's own units (eV on
+        QM9, log units on the assay datasets): the noise level times the clean
+        training label spread. The side axis is the mean predicted aleatoric
+        standard deviation over the molecules of one out-of-fold pass, in the
+        same units; one mark is the median over folds and the band is the range
+        across folds. The dashed line is equality, where a model reports
+        exactly the noise that was added. A line above it at zero added noise
+        is noise the model attributes to the clean labels. The two
+        heteroscedastic variational networks are not drawn because they were
+        not scored out of fold.
+        {('Not run: ' + '; '.join(missing) + '.') if missing else ''}""")
+    return S.save(fig, Path(output_dir) / 'F6b_aleatoric_against_injected.png')
+
+
 def _panel_note(ax, text, width=24):
     """A verdict printed inside a panel, wrapped to the panel's width.
 

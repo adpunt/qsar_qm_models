@@ -53,8 +53,8 @@
 
 {\small
 \begin{longtable}{@{}p{5.0cm}p{5.0cm}p{4.6cm}@{}}
-\caption{\textbf{Additional file 1, Table A: default hyperparameters for all 19 model configurations in the study.}
-Every value is read from \texttt{models/model\_defaults.py} at spec version 1.7.0, spec hash \texttt{26163cc378cd}, which is the file both the QM9 pipeline and the assay pipeline load their settings from. Every QM9 results row carries the spec version and the spec hash as two of its columns, so a QM9 table can be traced back to the settings that produced it; the three assay datasets are written by a second pipeline whose results files do not carry those two columns. The configuration list is the model roster the job generator submits. One setting is used for every representation and for every dataset, except where Table B gives a tuned replacement. The support vector machine uses an RBF kernel on every representation, so no result in this study carries a kernel that changes with the representation. Two values are not held in the shared spec and name their source file in the third column.}
+\caption{\textbf{Additional file 1, Table A: default hyperparameters for every model configuration in the study.}
+Every value is read from \texttt{models/model\_defaults.py} at spec version 1.7.0, spec hash \texttt{9249926c38dc}, which is the file both the QM9 pipeline and the assay pipeline load their settings from. Every QM9 results row carries the spec version and the spec hash as two of its columns, so a QM9 table can be traced back to the settings that produced it; the three assay datasets are written by a second pipeline whose results files do not carry those two columns. The configuration list is the model roster the job generator submits. One setting is used for every representation and for every dataset, except where Table B gives a tuned replacement. The support vector machine uses an RBF kernel on every representation, so no result in this study carries a kernel that changes with the representation. Two values are not held in the shared spec and name their source file in the third column.}
 \label{af1:hyperparameters}\\
 \toprule
 \textbf{Configuration} & \textbf{Hyperparameter} & \textbf{Default value} \\
@@ -81,6 +81,13 @@ Training, all networks & optimizer & adam \\
 \multicolumn{3}{@{}l}{\textit{Tree and boosting models}} \\
 \midrule
 RF \newline \footnotesize\texttt{rf} & n\_estimators & 100 \\
+ & max\_depth & None \newline {\footnotesize\raggedright no limit} \\
+ & min\_samples\_leaf & 5 \\
+ & min\_samples\_split & 2 \\
+ & max\_features & 0.3 \\
+ & bootstrap & True \\
+\addlinespace
+RF300 \newline \footnotesize\texttt{rf300} & n\_estimators & 300 \\
  & max\_depth & None \newline {\footnotesize\raggedright no limit} \\
  & min\_samples\_leaf & 5 \\
  & min\_samples\_split & 2 \\
@@ -278,50 +285,170 @@ A setting is chosen once per model per dataset, not per representation, and is t
 \textbf{Dataset} & \textbf{Configuration} & \textbf{Hyperparameter} & \textbf{Tuned value} \\
 \midrule
 \endhead
+QM9 & NN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
 QM9 & BNN-$\alpha$ & activation & tanh \\
  &  & hidden\_size1 & 64 \\
- &  & hidden\_size2 & 32 \\
+ &  & hidden\_size2 & 64 \\
 \addlinespace
 QM9 & VBLL-$\alpha$ & activation & tanh \\
  &  & hidden\_size1 & 64 \\
  &  & hidden\_size2 & 64 \\
 \addlinespace
-QM9 & BNN-$\beta$ & dropout\_rate & 0.379 \\
+QM9 & NN-$\beta$ & dropout\_rate & 0.401 \\
  &  & hidden\_size & 64 \\
- &  & lr & 0.00429 \\
- &  & num\_hidden\_layers & 1 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
+\addlinespace
+QM9 & BNN-$\beta$ & dropout\_rate & 0.401 \\
+ &  & hidden\_size & 64 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
 \addlinespace
 QM9 & VBLL-$\beta$ & dropout\_rate & 0.357 \\
  &  & hidden\_size & 64 \\
  &  & lr & 0.00119 \\
  &  & num\_hidden\_layers & 1 \\
 \addlinespace
+Caco-2 & NN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
+Caco-2 & BNN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
 Caco-2 & VBLL-$\alpha$ & activation & relu \\
  &  & hidden\_size1 & 64 \\
  &  & hidden\_size2 & 32 \\
+\addlinespace
+Caco-2 & NN-$\beta$ & dropout\_rate & 0.401 \\
+ &  & hidden\_size & 64 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
 \addlinespace
 Caco-2 & BNN-$\beta$ & dropout\_rate & 0.401 \\
  &  & hidden\_size & 64 \\
  &  & lr & 0.00587 \\
  &  & num\_hidden\_layers & 3 \\
 \addlinespace
+hERG K$_i$ & NN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
+hERG K$_i$ & BNN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
 hERG K$_i$ & VBLL-$\alpha$ & activation & tanh \\
  &  & hidden\_size1 & 64 \\
  &  & hidden\_size2 & 64 \\
 \addlinespace
-hERG K$_i$ & BNN-$\beta$ & dropout\_rate & 0.169 \\
+hERG K$_i$ & NN-$\beta$ & dropout\_rate & 0.401 \\
  &  & hidden\_size & 64 \\
- &  & lr & 0.00602 \\
- &  & num\_hidden\_layers & 2 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
+\addlinespace
+hERG K$_i$ & BNN-$\beta$ & dropout\_rate & 0.401 \\
+ &  & hidden\_size & 64 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
+\addlinespace
+LogD & NN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
+\addlinespace
+LogD & BNN-$\alpha$ & activation & tanh \\
+ &  & hidden\_size1 & 64 \\
+ &  & hidden\_size2 & 64 \\
 \addlinespace
 LogD & VBLL-$\alpha$ & activation & tanh \\
  &  & hidden\_size1 & 256 \\
  &  & hidden\_size2 & 32 \\
 \addlinespace
+LogD & NN-$\beta$ & dropout\_rate & 0.401 \\
+ &  & hidden\_size & 64 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
+\addlinespace
+LogD & BNN-$\beta$ & dropout\_rate & 0.401 \\
+ &  & hidden\_size & 64 \\
+ &  & lr & 0.00587 \\
+ &  & num\_hidden\_layers & 3 \\
+\addlinespace
 LogD & VBLL-$\beta$ & dropout\_rate & 0.079 \\
  &  & hidden\_size & 128 \\
  &  & lr & 0.00011 \\
  &  & num\_hidden\_layers & 2 \\
+\bottomrule
+\end{longtable}
+}
+
+\newpage
+
+\begin{center}\Large\textbf{Additional file 1, continued}\end{center}
+
+{\small
+\begin{longtable}{@{}llll@{}}
+\caption{\textbf{Additional file 1, Table C: the 200 descriptors that make up the PDV representation.}
+One entry is one feature of the vector, in the order the pipeline computes them. The list is fixed in the code rather than taken from RDKit's current default set, which grows between releases, so the same 200 features are built on every dataset and in every run. They were computed with RDKit 2022.09.5. Descriptors that return a non-finite value on a molecule have that value replaced by zero before the standardisation constants are computed. Source: \texttt{DEFAULT\_DESCRIPTOR\_LIST} in \texttt{scripts/process\_and\_train.py}.}
+\label{af1:pdv}\\
+\toprule
+\endfirsthead
+\toprule
+\endhead
+BalabanJ & NOCount & SlogP\_VSA7 & fr\_bicyclic \\
+BertzCT & NumAliphaticCarbocycles & SlogP\_VSA8 & fr\_diazo \\
+Chi0 & NumAliphaticHeterocycles & SlogP\_VSA9 & fr\_dihydropyridine \\
+Chi0n & NumAliphaticRings & TPSA & fr\_epoxide \\
+Chi0v & NumAromaticCarbocycles & VSA\_EState1 & fr\_ester \\
+Chi1 & NumAromaticHeterocycles & VSA\_EState10 & fr\_ether \\
+Chi1n & NumAromaticRings & VSA\_EState2 & fr\_furan \\
+Chi1v & NumHAcceptors & VSA\_EState3 & fr\_guanido \\
+Chi2n & NumHDonors & VSA\_EState4 & fr\_halogen \\
+Chi2v & NumHeteroatoms & VSA\_EState5 & fr\_hdrzine \\
+Chi3n & NumRadicalElectrons & VSA\_EState6 & fr\_hdrzone \\
+Chi3v & NumRotatableBonds & VSA\_EState7 & fr\_imidazole \\
+Chi4n & NumSaturatedCarbocycles & VSA\_EState8 & fr\_imide \\
+Chi4v & NumSaturatedHeterocycles & VSA\_EState9 & fr\_isocyan \\
+EState\_VSA1 & NumSaturatedRings & fr\_Al\_COO & fr\_isothiocyan \\
+EState\_VSA10 & NumValenceElectrons & fr\_Al\_OH & fr\_ketone \\
+EState\_VSA11 & PEOE\_VSA1 & fr\_Al\_OH\_noTert & fr\_ketone\_Topliss \\
+EState\_VSA2 & PEOE\_VSA10 & fr\_ArN & fr\_lactam \\
+EState\_VSA3 & PEOE\_VSA11 & fr\_Ar\_COO & fr\_lactone \\
+EState\_VSA4 & PEOE\_VSA12 & fr\_Ar\_N & fr\_methoxy \\
+EState\_VSA5 & PEOE\_VSA13 & fr\_Ar\_NH & fr\_morpholine \\
+EState\_VSA6 & PEOE\_VSA14 & fr\_Ar\_OH & fr\_nitrile \\
+EState\_VSA7 & PEOE\_VSA2 & fr\_COO & fr\_nitro \\
+EState\_VSA8 & PEOE\_VSA3 & fr\_COO2 & fr\_nitro\_arom \\
+EState\_VSA9 & PEOE\_VSA4 & fr\_C\_O & fr\_nitro\_arom\_nonortho \\
+ExactMolWt & PEOE\_VSA5 & fr\_C\_O\_noCOO & fr\_nitroso \\
+FpDensityMorgan1 & PEOE\_VSA6 & fr\_C\_S & fr\_oxazole \\
+FpDensityMorgan2 & PEOE\_VSA7 & fr\_HOCCN & fr\_oxime \\
+FpDensityMorgan3 & PEOE\_VSA8 & fr\_Imine & fr\_para\_hydroxylation \\
+FractionCSP3 & PEOE\_VSA9 & fr\_NH0 & fr\_phenol \\
+HallKierAlpha & RingCount & fr\_NH1 & fr\_phenol\_noOrthoHbond \\
+HeavyAtomCount & SMR\_VSA1 & fr\_NH2 & fr\_phos\_acid \\
+HeavyAtomMolWt & SMR\_VSA10 & fr\_N\_O & fr\_phos\_ester \\
+Ipc & SMR\_VSA2 & fr\_Ndealkylation1 & fr\_piperdine \\
+Kappa1 & SMR\_VSA3 & fr\_Ndealkylation2 & fr\_piperzine \\
+Kappa2 & SMR\_VSA4 & fr\_Nhpyrrole & fr\_priamide \\
+Kappa3 & SMR\_VSA5 & fr\_SH & fr\_prisulfonamd \\
+LabuteASA & SMR\_VSA6 & fr\_aldehyde & fr\_pyridine \\
+MaxAbsEStateIndex & SMR\_VSA7 & fr\_alkyl\_carbamate & fr\_quatN \\
+MaxAbsPartialCharge & SMR\_VSA8 & fr\_alkyl\_halide & fr\_sulfide \\
+MaxEStateIndex & SMR\_VSA9 & fr\_allylic\_oxid & fr\_sulfonamd \\
+MaxPartialCharge & SlogP\_VSA1 & fr\_amide & fr\_sulfone \\
+MinAbsEStateIndex & SlogP\_VSA10 & fr\_amidine & fr\_term\_acetylene \\
+MinAbsPartialCharge & SlogP\_VSA11 & fr\_aniline & fr\_tetrazole \\
+MinEStateIndex & SlogP\_VSA12 & fr\_aryl\_methyl & fr\_thiazole \\
+MinPartialCharge & SlogP\_VSA2 & fr\_azide & fr\_thiocyan \\
+MolLogP & SlogP\_VSA3 & fr\_azo & fr\_thiophene \\
+MolMR & SlogP\_VSA4 & fr\_barbitur & fr\_unbrch\_alkane \\
+MolWt & SlogP\_VSA5 & fr\_benzene & fr\_urea \\
+NHOHCount & SlogP\_VSA6 & fr\_benzodiazepine & qed \\
 \bottomrule
 \end{longtable}
 }

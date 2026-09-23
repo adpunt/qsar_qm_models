@@ -1265,38 +1265,51 @@ any of the five.
 
 ### §R1. Variance decomposition *(replaces `paper.tex:387–440`)*
 
-**Scrapped and restarted 2026-09-23.** What was here was written against noise strategies
-that no longer exist. This version starts from what is in `paper.tex` today and lists what
-has to go in. Nothing below is drafted text — they are the points, for the author to write.
+**Scrapped and restarted 2026-09-23.** What was here was written against noise strategies that no
+longer exist. This version starts from what is in `paper.tex` today.
 
-**The text as it stands in `paper.tex`, with what to do to it:**
+**Settled 2026-09-23, on the author's call:**
+
+- This subsection carries **one figure and one table**: F2, and T3 with a clean-label row at the top.
+- **F2b and T3b move down** to "Does it hold on measured labels" (`paper.tex:526`). Comparing the
+  four datasets this early is premature; the clean-label comparison for QM9 alone lives in T3's
+  first row.
+- **F4c comes out of the paper.** It is `fig:robustness` at line 484 and it is a heatmap of printed
+  numbers — a table drawn. **T4 replaces it**, carrying all seven noise conditions instead of three,
+  and fixes `Table~\ref{tab:robustness}`, which line 497 cites and which exists nowhere.
+- **Line 421 moves out** with `fig:grid`, into "Robustness and clean accuracy". It reads F3, not the
+  decomposition.
+- **Line 439 is deleted.** It repeats the first paragraph.
+
+Net across the Results: the paper goes from ten figures and one table to nine and four.
+
+**The text as it stands, and what happens to it:**
 
 | Where | What it says now | What to do |
 |---|---|---|
-| 389 | The long opening paragraph: what ANOVA does, three conditions, accuracy against robustness, the interaction | Keep the argument, rebuild the sentences. Typos: "tength", "beacuse", and "heightened with label." does not finish |
-| 391 | Grouped-shifted varies, higher residuals | Keep, expand — see the bullets on instability |
-| 393–394 | `TODO: wait for new figure` and the clean-label PLACEHOLDER | Fill from `anova_eta2_clean.csv` once F2b has been drawn |
-| 421 | "All of the neural networks span a wider range of \aucnorm…" | **Move to "Robustness and clean accuracy", with `fig:grid`.** It reads F3, not the decomposition |
-| 439 | "The choice of model architecture is instead the largest source…" | **Delete.** It repeats 389 |
-
-**No table is cited anywhere in this subsection.** T3 is generated and holds every number the
-paragraphs describe in words. Insert it.
+| 389 | The long opening paragraph | Keep the argument and most of the sentences. Typos: "tength", "beacuse", and "heightened with label." does not finish |
+| 391 | Grouped-shifted varies, higher residuals | Keep, expand with the numbers |
+| 393–394 | `TODO: wait for new figure` and the clean-label PLACEHOLDER | Becomes a real paragraph once T3's clean row exists; the four-dataset comparison goes to §R5 |
+| 397–405 | `fig:variance` | Keep |
+| 407–418 | `fig:variance_clean` | **Move to §R5** |
+| 421 | "All of the neural networks span a wider range…" | **Move to "Robustness and clean accuracy"**, with `fig:grid` |
+| 439 | "The choice of model architecture is instead the largest source…" | **Delete** |
 
 ---
 
 **The takeaways this subsection has to land**
 
-- Representation and model matter about equally for accuracy. For robustness, model dominates
-  and representation nearly vanishes — its share drops by about two-thirds. Under Gaussian, model
-  takes about half the variance in AUC$_{norm}$ and representation under a tenth; for $R^2$ under
-  noise the two are close to level, around 29 and 27 per cent. The same two choices swap
-  importance depending on what is being asked.
-- That drop makes sense: the noise goes into the labels, not the features. The representation
-  still decides how much is learnable, so it keeps its share of accuracy. It does not decide how
-  much survives corruption, so it loses its share of robustness.
+- Representation and model matter about equally for accuracy. For robustness, model dominates and
+  representation nearly vanishes — its share drops by about two-thirds. Under Gaussian, model takes
+  about half the variance in AUC$_{norm}$ and representation under a tenth; for $R^2$ under noise
+  the two are close to level, around 29 and 27 per cent. The same two choices swap importance
+  depending on what is being asked.
+- That drop makes sense: the noise goes into the labels, not the features. The representation still
+  decides how much is learnable, so it keeps its share of accuracy. It does not decide how much
+  survives corruption, so it loses its share of robustness.
 - The pairing of model and representation counts for more in robustness than in accuracy — about
-  20 per cent against 14. Picking a representation does matter, but only for particular models,
-  and that is a real effect rather than leftover scatter.
+  20 per cent against 14. Picking a representation does matter, but only for particular models, and
+  that is a real effect rather than leftover scatter.
 - Under grouped-shifted the decomposition largely stops working. The residual takes 56 per cent of
   the robustness variance and 77 per cent of the accuracy variance; model drops to 30 and 7. That
   condition does not just lower scores, it makes them unstable.
@@ -1305,36 +1318,34 @@ paragraphs describe in words. Insert it.
   can claim.
 - Only three conditions can be decomposed at all. The other four did not run on the full cross of
   models and representations, so there is nothing to decompose. One sentence, or the reader wonders.
-- Everything here is QM9. Whether logD, Caco-2 and hERG agree is open. 🔴 **TODO — needs the
-  decomposition run on the assay datasets. Author's call 2026-09-23: no whiskers on the assay bars,
-  and the caption says why.**
-- What happens on clean labels is open until F2b is generated. 🔴 **TODO — fill from
-  `anova_eta2_clean.csv`: one row per dataset, columns `eta2_model`, `eta2_rep`,
-  `eta2_interaction`, `eta2_residual`. Say which term leads on QM9 and whether the three assay
-  datasets agree.**
+- 🔴 **TODO — the clean-label comparison for QM9**, from T3's first row, once the figures have been
+  regenerated. Which term leads before any noise is added is the comparison the whole subsection
+  turns on, and no number for it exists yet.
+- The three assay datasets are §R5's business now, not this subsection's.
 
 ---
 
-**Each noise condition, for accuracy and for robustness**
+**Each noise condition, for accuracy and for robustness** *(the comparison itself belongs at
+`paper.tex:502`, not here — see the second sample block below)*
 
 - **Gaussian** — the reference everything else is read against. Model dominates robustness; model
   and representation split accuracy.
 - **Grouped, wider** — indistinguishable from Gaussian on everything: the four variance shares match
   to within a point or two, AUC$_{norm}$ does not move, the curves lie on top of each other. The same
   amount of noise, arranged so whole scaffolds share it, and nothing notices.
-- **Grouped, shifted** — the same total noise again, but here it costs. Models lose roughly 0.03 to
-  0.05 of AUC$_{norm}$, and the decomposition collapses into residual. The difference from
-  grouped-wider is that whole scaffolds move as a block rather than the noise spreading out inside
-  them. That is the one structural arrangement that bites.
+- **Grouped, shifted** — the same total noise again, but here it costs. It cost every base model on
+  every representation between 0.005 and 0.082 of AUC$_{norm}$, and the decomposition collapses into
+  residual. The difference from grouped-wider is that whole scaffolds move as a block rather than the
+  noise spreading out inside them. That is the one structural arrangement that bites.
 - **Laplace** — heavier tails than Gaussian, no measurable effect.
 - **Student-*t* (ν=5)** — heavier tails still, no measurable effect.
 - **Outlier (10%)** — all the noise dumped on a tenth of the molecules. Not worse than Gaussian. On
   RF at ECFP4 it is the *least* damaging of the lot at the highest level. 🔴 **TODO — check on F4d
   whether that holds on the other five representations.**
-- **Censoring** — the largest effect anywhere in the study, 0.81 to 0.82 of AUC$_{norm}$ against 0.94
-  to 0.98. Its level means a fraction of labels clipped rather than a fraction of the spread, and it
-  ran on five model-and-representation pairs, so it cannot sit on the same axis as the rest. Author's
-  call 2026-09-23: **R19 moves to the main text**, which is where censoring then appears.
+- **Censoring** — the largest effect anywhere in the study, 0.77 to 0.82 of AUC$_{norm}$ against 0.94
+  to 0.98 for those same pairings under Gaussian. Its level means a fraction of labels clipped rather
+  than a fraction of the spread, so it cannot sit on the same axis as the rest. R19 is where it
+  appears at all, which is why R19 goes to the main text.
 
 ---
 
@@ -1349,40 +1360,20 @@ paragraphs describe in words. Insert it.
 - Two conditions can share an AUC$_{norm}$ and lose it in different places. The area does not
   distinguish a model that holds flat and then falls off a cliff from one that declines steadily.
 - 🔴 **This was unreportable until 2026-09-23.** The per-level $R^2$ was written out for Gaussian
-  only, averaged across representations, as a decision aid. The individual curves existed nowhere
-  on disk — the only drawing of them was F4b, one model on one representation. Two additions fix
-  it, and neither needs a new experiment: `r2_by_level.csv` (every model, representation, condition
-  and level, median over replicates, nothing pooled) and **F4d**, which puts F4b's curves on all six
-  representations. Both come out of the next figures run.
-
----
-
-**Figures and tables this subsection should carry**
-
-| Slot | What it is | State |
-|---|---|---|
-| F2 | The decomposition, QM9, three conditions, two outcomes | Exists. Key alignment fixed, not yet redrawn |
-| F2b | The same on clean labels, all four datasets | Built, never drawn. Placement is the author's call |
-| T3 | Every number F2 draws, with the jackknife band | Generated, cited nowhere |
-| R19 | The conditions that ran on a named subset, censoring included | Promoted to main text 2026-09-23 |
-| F4d | One model's curves under every condition, on all six representations | New, a check figure — may or may not earn a slot |
-
-For scale, the reference papers: Venkatraman 2021 is 12 pages with 3 figures and 6 tables;
-Kolmar and Grulke 2021, the closest comparator, is 19 pages with 6 figures and 7 tables;
-Dablander 2023 is 16 pages with 9 figures and 1 table. `paper.tex` currently has ten figures and
-one table. The numbers belong in tables and the shapes in figures, and at the moment the shapes
-are doing both jobs.
+  only, averaged across representations, as a decision aid. The individual curves existed nowhere on
+  disk — the only drawing of them was F4b, one model on one representation. Two additions fix it and
+  neither needs a new experiment: `r2_by_level.csv` and **F4d**. Both come out of the next figures run.
 
 ---
 
 **Two defects found while reading the figures, both fixed 2026-09-23**
 
 - **R19 was dropping three of its seven models.** It ran through the variant-model filter, which
-  exists for cross-model comparisons and was taking out GP (het.), BNN-Full-MVE and
-  VBLL-Full-Hetero — three of the models the deep run was chosen to include. The caption then
-  reported the surviving four as everything that ran.
-- **F4c drops the deep conditions and censoring without saying so.** Its caption now says where
-  they went.
+  exists for cross-model comparisons and was taking out GP (het.), BNN-Full-MVE and VBLL-Full-Hetero
+  — three of the models the deep run was chosen to include. The caption then reported the surviving
+  four as everything that ran.
+- **F4c dropped the deep conditions and censoring without saying so.** Its caption now says where
+  they went — though F4c is leaving the paper anyway.
 
 **One defect still open.** QM9 ran VBLL-Full-Hetero in the deep run; logD, Caco-2 and hERG ran the
 MLP version instead. Both are listed in `deep_run_pairs.json`, added a few days apart, each needing
@@ -1392,10 +1383,10 @@ Nothing in the paper depends on it yet, but any cross-dataset statement about th
 ---
 
 **SAMPLE TEXT, as LaTeX.** Your paragraphs kept where they work. The first sentence is yours
-unchanged, and so is most of the first paragraph — what is added is the numbers it describes in
-words, the table reference, and the clause saying why only three conditions are decomposed. Every
-number traces to `results/decisions_arc/`: T3 for the variance shares, `auc_norm_qm9.csv` for the
-rest. Placeholders marked where the results do not exist yet.
+unchanged and so is most of the first paragraph; what is added is the numbers those sentences
+describe in words, the table reference, and the clause saying why only three conditions are
+decomposed. Every number traces to `results/decisions_arc/`: T3 for the variance shares,
+`auc_norm_qm9.csv` for the rest.
 
 ```latex
 \subsection{Variance decomposition}
@@ -1420,6 +1411,13 @@ with predictive accuracy, 20.4 per cent against 13.7, though it is on par with t
 because some models are heavily influenced by different sets of features, while others are not, and
 this difference is heightened with label noise.
 
+% PLACEHOLDER -- the clean-label comparison, from the first row of
+% Table~\ref{tab:variance} once the figures have been regenerated. Before any noise is added,
+% [which term leads] accounts for [x] per cent of the variance in accuracy against [y] for
+% [the other]. This is the row the argument above turns on: it separates "molecular representation
+% governs accuracy" from "molecular representation governs accuracy only once the labels are
+% wrong". Whether the assay datasets agree is taken up in Section~\ref{sec:measured}.
+
 While we observe similar patterns between noise conditions, the predictive performance of
 grouped-shifted noise varies significantly, resulting in higher overall residuals: 56.3 per cent of
 the variance in \aucnorm and 76.6 per cent of the variance in $R^2$, with the model architecture
@@ -1434,60 +1432,46 @@ That residual also sets a floor on what the rest of this work can claim. Even un
 it accounts for 20.8 per cent of the variance in \aucnorm and 30.6 per cent of the variance in
 $R^2$. A difference between two model architectures, or between two molecular representations, that
 is smaller than the spread between seeds of a single configuration is not a difference we report.
-
-% PLACEHOLDER -- clean labels. Fill from anova_eta2_clean.csv once
-% Figure~\ref{fig:variance_clean} has been drawn. Say which term leads on QM9 before any noise is
-% added, and whether logD, Caco-2 and hERG agree. This is what separates "molecular representation
-% governs accuracy" from "molecular representation governs accuracy only once the labels are wrong".
-
-% PLACEHOLDER -- the assay datasets, once the decomposition has been run on them. Their bars carry
-% no band: the five scaffold folds partition one dataset rather than repeating an experiment, so
-% dropping one in turn does not measure what the ten QM9 replicates measure.
 ```
-
-**What comes out of this subsection.** Line 421, "All of the neural networks span a wider range of
-\aucnorm\ …", reads Figure~\ref{fig:grid} and not the decomposition — move it, and `fig:grid` with
-it, into "Robustness and clean accuracy". Line 439 repeats the first paragraph; delete it.
 
 ---
 
-**SAMPLE TEXT for the condition comparison — this belongs at `paper.tex:502`, not here.**
+**SAMPLE TEXT for the condition comparison — this goes at `paper.tex:502`.**
 
-That subsection already carries F4b as `fig:conditions`, so the material about which kind of noise
-costs what belongs beside it rather than in the decomposition. Your sentence there currently reads:
+That subsection already carries F4b as `fig:conditions`, and it gains R19 as `fig:deep` and T4 as
+`tab:robustness`. Your sentence there currently reads:
 
 > On the HOMO--LUMO gap at ECFP4 it moved the median \aucnorm of nineteen models from 0.926 under
 > Gaussian noise to 0.905, reaching significance. Group-wider, which widens the error within a
 > scaffold family without moving its mean, only shifted the \aucnorm to 0.927.
 
-That is a median over the roster and a count of it, which is the thing you do not want. The
-replacement says more and claims less, because it holds for each pairing separately:
+That is a median over the roster and a count of it. The replacement says more and claims less,
+because it holds for each pairing separately:
 
 ```latex
 However, the shape is not the only aspect of noise we modified. Grouped-shifted noise gives every
 scaffold family its own offset added to every label. On the HOMO--LUMO gap it cost every model
 architecture robustness, on every molecular representation, between 0.005 and 0.082 of \aucnorm
-depending on the pairing. Grouped-wider, which widens the error within a scaffold family without
-moving its mean, did not: it moved \aucnorm by between $-0.025$ and $+0.023$, up for some pairings
-and down for others. The two conditions deliver the same amount of noise and differ only in whether
-a scaffold family takes a common offset or has its own errors widened, so what costs a model is
-neither the amount of noise nor its position in the feature space, but whether a family of related
-molecules moves together.
+depending on the pairing (Table~\ref{tab:robustness}). Grouped-wider, which widens the error within
+a scaffold family without moving its mean, did not: it moved \aucnorm by between $-0.025$ and
+$+0.023$, up for some pairings and down for others. The two conditions deliver the same amount of
+noise and differ only in whether a scaffold family takes a common offset or has its own errors
+widened, so what costs a model is neither the amount of noise nor its position in the feature
+space, but whether a family of related molecules moves together.
 
 The shape of an individual error mattered less still. NGBoost, RF, SVM, GP, GP-Hetero,
 BNN-Full-MVE and VBLL-Full-Hetero were each given Laplace, Student-$t$ and outlier noise on ECFP4,
-PDV and ChemBERTa. Under each of those shapes every model's \aucnorm sat within its own
-replicate-to-replicate spread of its Gaussian value, with GP-Hetero on PDV the single exception.
-This coincides with \cite{Heid2023}, who found no difference between Gaussian, uniform, hyperbolic
-and bimodal errors drawn at a matched mean and standard deviation. Thus we see that the shape of
-the error injected does not change how well a model tolerates it.
+PDV and ChemBERTa (Figure~\ref{fig:deep}). Under each of those shapes every model's \aucnorm sat
+within its own replicate-to-replicate spread of its Gaussian value, with GP-Hetero on PDV the
+single exception. This coincides with \cite{Heid2023}, who found no difference between Gaussian,
+uniform, hyperbolic and bimodal errors drawn at a matched mean and standard deviation. Thus we see
+that the shape of the error injected does not change how well a model tolerates it.
 
 Censoring was the exception to all of it. On the pairings it was run on, \aucnorm fell to between
-0.77 and 0.82, against 0.94 to 0.98 for those same pairings under Gaussian noise
-(Figure~\ref{fig:deep}). Censoring is the one condition that removes information rather than
-corrupting it, and its level is a fraction of labels clipped rather than a fraction of the label
-spread, so it does not sit on the same axis as the rest and cannot be read as a harsher dose of the
-same thing.
+0.77 and 0.82, against 0.94 to 0.98 for those same pairings under Gaussian noise. Censoring is the
+one condition that removes information rather than corrupting it, and its level is a fraction of
+labels clipped rather than a fraction of the label spread, so it does not sit on the same axis as
+the rest and cannot be read as a harsher dose of the same thing.
 
 % PLACEHOLDER -- the curves, once Figure~\ref{fig:conditions_by_rep} and r2_by_level.csv are in
 % hand. \aucnorm is an area, and two conditions can share one while losing it in different places.
@@ -1498,9 +1482,21 @@ same thing.
 % other five molecular representations is what the new figure is for.
 ```
 
-`fig:deep` needs a label: it is R19, promoted to the main text on 2026-09-23, and it is where
-censoring appears at all. `fig:conditions_by_rep` is F4d.
+---
 
+**SAMPLE TEXT for §R5, where F2b and T3b now live.** Goes after `fig:assay` at `paper.tex:545`.
+
+```latex
+The same decomposition on clean labels puts the three assay datasets beside the HOMO--LUMO gap
+(Figure~\ref{fig:variance_clean}, Table~\ref{tab:variance_clean}). Here there is no noise-condition
+axis: the clean fit is made once per replicate and every noise condition starts from it.
+
+% PLACEHOLDER -- fill from anova_eta2_clean.csv once the figures have been regenerated. Say
+% whether the three assay datasets divide clean accuracy the way the HOMO--LUMO gap does, and if
+% they do not, which term moves. The assay bars carry no band: their five scaffold folds partition
+% one dataset rather than repeating an experiment, so dropping one in turn does not measure what
+% dropping one of the ten QM9 replicates measures.
+```
 ## MOVEMENT 2 — what the choice of model buys, and whether probabilistic machinery helps
 
 ### §R2. What label noise costs *(replaces `paper.tex:431–467`)*
@@ -2437,12 +2433,76 @@ ones whose pointers now have to be rewritten.
 
 ## THE FIGURES AND TABLES ADDED ON 2026-09-23, LaTeX blocks
 
-Everything below is new since the list above was written and none of it is in `paper.tex` yet.
-Line numbers are against `paper.tex` as of 2026-09-23.
+Settled with the author on 2026-09-23. **F4c leaves the paper, T4 replaces it, F2b and T3b move to
+the assay subsection, and the decomposition subsection keeps one figure and one table.** Line
+numbers are against `paper.tex` as of 2026-09-23.
 
-### F2b — the decomposition on clean labels *(main text)*
+### T3 — the decomposition, with clean labels as its first row *(main text, Variance decomposition)*
 
-Goes in after line 405, the `\end{figure}` that closes `fig:variance`.
+Currently generated and cited nowhere. The clean-label row is new: it rides at the top of the same
+table so the comparison the subsection turns on can be made without looking at a second table.
+Goes after the first paragraph, before `fig:variance`.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Share of the variance in each outcome explained by model architecture, molecular
+representation, their pairing and the residual, on the QM9 HOMO--LUMO gap. The first row is
+predictive accuracy before any noise is added, which has no noise condition: the clean fit is made
+once per replicate and every noise condition starts from it. The $\pm$ is half the
+leave-one-replicate-out range, the decomposition repeated with each replicate dropped in turn. It
+is not a per-replicate spread, as decomposing a single replicate leaves one observation per cell
+and the residual is then arithmetically zero.}
+\label{tab:variance}
+\input{T3_variance_decomposition_qm9}
+\end{table}
+```
+
+### T4 — every model under every noise condition *(main text, the condition comparison)*
+
+**This replaces F4c**, which is `fig:robustness` at line 484: a heatmap of nineteen rows by four
+columns of printed numbers, which is a table drawn. T4 carries all seven conditions instead of
+three, and inserting it resolves `Table~\ref{tab:robustness}`, cited at line 497 and defined
+nowhere. Delete lines 478–485 and put this where the condition comparison discusses them.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Robustness (\aucnorm) of each model under each noise condition on the QM9 HOMO--LUMO gap
+at ECFP4, with clean $R^2$ in the first column as the quantity the rest are a fraction of. A dash
+is a pairing that condition was not run on: Laplace, Student-$t$ and outlier noise were given to a
+named subset of model architectures, and censoring to a named subset of pairings. Values are
+medians over replicates.}
+\label{tab:robustness}
+\input{T4_robustness_qm9_ecfp4}
+\end{table}
+```
+
+### R19 — the conditions run on a named subset *(promoted to main text 2026-09-23)*
+
+This is where censoring appears at all. Goes in the condition comparison, after line 511, the
+`\end{figure}` that closes `fig:conditions`.
+
+```latex
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R19_deep_conditions_qm9.png}
+\caption{Robustness (\aucnorm) under the noise conditions given to a named subset of model
+architectures and molecular representations, on the QM9 HOMO--LUMO gap. a) ECFP4, b) PDV,
+c) ChemBERTa. Rows are the models these conditions were run on, chosen before the run to cover one
+from each family, and Gaussian is the left column as the reference the rest are read against.
+Values are medians over replicates and colour is on one fixed range across all panels. Censoring is
+here rather than on the curves because its level is a fraction of labels clipped rather than a
+fraction of the label spread; a grey square marked ``not run'' is a pairing it was never given.}
+\label{fig:deep}
+\end{figure}
+```
+
+### F2b and T3b — moved to "Does it hold on measured labels"
+
+Cut `fig:variance_clean` from lines 407–418 and put it after `fig:assay` at line 545, with the
+table beside it. Comparing the four datasets belongs where the assay datasets are introduced, not
+before the reader has met them.
 
 ```latex
 \begin{figure}[htbp]
@@ -2451,127 +2511,51 @@ Goes in after line 405, the `\end{figure}` that closes `fig:variance`.
 \caption{Share of the variance in predictive accuracy on clean labels explained by model
 architecture, molecular representation, their pairing, and the residual, on all four datasets.
 Accuracy is $R^2$ on held-out molecules with no noise added to the training labels. The bottom axis
-is the dataset, the side axis the share of variance; the four shares within a dataset sum to
-100\%. There is no noise-condition axis: the clean fit is made once per replicate and every noise
-condition starts from it. Whiskers on QM9 are a leave-one-replicate-out jackknife, not confidence
-intervals; the assay datasets have none, as their five scaffold folds partition one dataset rather
-than repeating an experiment.}
+is the dataset, the side axis the share of variance; the four shares within a dataset sum to 100\%.
+There is no noise-condition axis: the clean fit is made once per replicate and every noise
+condition starts from it. Whiskers on the HOMO--LUMO gap are a leave-one-replicate-out jackknife,
+not confidence intervals; the assay datasets have none, as their five scaffold folds partition one
+dataset rather than repeating an experiment.}
 \label{fig:variance_clean}
 \end{figure}
-```
 
-### R19 — the conditions run on a named subset *(promoted to main text 2026-09-23)*
-
-This is where censoring appears at all. It belongs in the subsection that compares the noise
-conditions, so after line 511, the `\end{figure}` that closes `fig:conditions`.
-
-```latex
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{R19_deep_conditions_qm9.png}
-\caption{Robustness (\aucnorm) under the noise conditions given to a named subset of models and
-molecular representations, on the QM9 HOMO--LUMO gap. a) ECFP4, b) PDV, c) ChemBERTa. Rows are the
-models these conditions were run on, chosen before the run to cover one from each family, and
-Gaussian is the left column as the reference the rest are read against. Values are medians over
-replicates and colour is on one fixed range across all panels. Censoring is here rather than on the
-curves because its level is a fraction of labels clipped rather than a fraction of the label
-spread; a grey square marked ``not run'' is a pairing it was never given.}
-\label{fig:deep}
-\end{figure}
-```
-
-### T3 — the numbers behind F2 *(main text, currently cited nowhere)*
-
-Goes in the Variance decomposition subsection, after the second paragraph. The file is
-`T3_variance_decomposition_qm9.tex`; paste its body or `\input` it.
-
-```latex
-\begin{table}[htbp]
-\centering
-\caption{Share of the variance in each outcome explained by model architecture, molecular
-representation, their pairing and the residual, per noise condition, on the QM9 HOMO--LUMO gap.
-The $\pm$ is half the leave-one-replicate-out range: the decomposition is repeated with each
-replicate dropped in turn. It is not a per-replicate spread, as decomposing a single replicate
-leaves one observation per cell and the residual is then arithmetically zero.}
-\label{tab:variance}
-\input{T3_variance_decomposition_qm9}
-\end{table}
-```
-
-### T3b — the same on clean labels *(main text, new 2026-09-23)*
-
-The numbers behind F2b. Without it the clean-label paragraph has a figure and nothing to quote.
-
-```latex
 \begin{table}[htbp]
 \centering
 \caption{Share of the variance in predictive accuracy on clean labels explained by model
-architecture, molecular representation, their pairing and the residual, one row per dataset.
-Accuracy is $R^2$ on held-out molecules with no noise added to the training labels. There is no
-noise-condition column: the clean fit is made once per replicate and every noise condition starts
-from it. The assay datasets carry no band, as their five scaffold folds partition one dataset
-rather than repeating an experiment.}
+architecture, molecular representation, their pairing and the residual, one row per dataset. The
+HOMO--LUMO gap row is the same decomposition as the first row of Table~\ref{tab:variance}. The
+assay datasets carry no band, as their five scaffold folds partition one dataset rather than
+repeating an experiment.}
 \label{tab:variance_clean}
 \input{T3b_variance_decomposition_clean}
 \end{table}
 ```
 
-### T4 — every model under every noise condition *(main text)*
-
-Already generated for all four datasets and cited nowhere. This is the table that carries all
-seven conditions, censoring included, with clean $R^2$ as its first column and a dash where a
-pairing was not run — the thing a reader needs when the figures each show a subset. Goes in the
-condition-comparison subsection.
-
-```latex
-\begin{table}[htbp]
-\centering
-\caption{Robustness (\aucnorm) of each model under each noise condition on the QM9 HOMO--LUMO gap
-at ECFP4, with clean $R^2$ in the first column as the quantity the rest are a fraction of. A dash
-is a pairing that condition was not run on: Laplace, Student-$t$ and outlier noise were given to a
-named subset of models, and censoring to a named subset of pairings. Values are medians over
-replicates.}
-\label{tab:robustness}
-\input{T4_robustness_qm9_ecfp4}
-\end{table}
-```
-
-The three assay versions, `T4_robustness_logd_ecfp4`, `T4_robustness_caco2_ecfp4` and
-`T4_robustness_herg_ecfp4`, go to the additional files with one `% Additional file N — Title`
-comment each, so `scripts/stage_additional_files.py` picks them up.
-
-### F3b and F4d — additional files
+### F3b and F4d — additional files, or nothing
 
 **F3b** `F3b_every_condition_qm9_<condition>.png`, one image per condition: the robustness grid for
-every noise condition the whole roster ran, grouped-wider included. `fig:grid`'s caption in the
-main text already promises it. Three `\includegraphics` in one figure environment, as in the
-Additional file 13 block.
+every noise condition the whole roster ran, grouped-wider included. `fig:grid`'s caption already
+promises it. Three `\includegraphics` in one figure environment, with a
+`% Additional file N — Title` comment above the section so `scripts/stage_additional_files.py`
+lists it.
 
 **F4d** `F4d_conditions_by_representation_<model>.png`: one model's curves under every noise
-condition, one panel per molecular representation. A check figure first — look at it before
-deciding whether it earns a slot. If the answer to *whether outlier noise is the least damaging at
-high level holds beyond RF at ECFP4* is yes, it belongs in the main text beside
+condition, one panel per molecular representation. A check figure first. If outlier noise being the
+least damaging at high level holds beyond RF at ECFP4, it earns a place beside
 Figure~\ref{fig:conditions}; if it is an RF quirk, it is an additional file or nothing.
 
-### What the main text then holds
+### What the Results then hold
 
-| Slot | What it is | Where |
+| Subsection | Figures | Tables |
 |---|---|---|
-| F2 | Decomposition, QM9, three conditions, two outcomes | Variance decomposition |
-| F2b | Decomposition on clean labels, four datasets | Variance decomposition |
-| T3 | The numbers behind F2 | Variance decomposition |
-| T3b | The numbers behind F2b | Variance decomposition |
-| F3 | Model against representation | Robustness and clean accuracy (moved with line 421) |
-| F4b `fig:conditions` | RF across the conditions | The condition comparison |
-| R19 `fig:deep` | The subset conditions, censoring included | The condition comparison |
-| T4 | Every model under every condition | The condition comparison |
+| Variance decomposition | F2 `fig:variance` | T3 `tab:variance` |
+| Robustness and clean accuracy | F3 `fig:grid` (moved in with line 421), F4a `fig:curves` | — |
+| The condition comparison | F4b `fig:conditions`, R19 `fig:deep` | T4 `tab:robustness` |
+| Does it hold on measured labels | F8 `fig:assay`, F2b `fig:variance_clean`, R9 `fig:transfer` | T3b `tab:variance_clean` |
 
-That is four tables in the decomposition and condition sections against the one the paper has now.
-For scale: Venkatraman 2021 runs 12 pages with 3 figures and 6 tables; Kolmar and Grulke 2021, the
-closest comparator, 19 pages with 6 figures and 7 tables; Dablander 2023, 16 pages with 9 figures
-and 1 table. `paper.tex` has ten figures and one table, so the room is in the tables and not in
-more figures.
-
+F4c is gone. The paper goes from ten figures and one table to nine and four. For scale: Venkatraman
+2021 runs 12 pages with 3 figures and 6 tables; Kolmar and Grulke 2021, the closest comparator,
+19 pages with 6 figures and 7 tables; Dablander 2023, 16 pages with 9 figures and 1 table.
 
 # THE TABLES
 

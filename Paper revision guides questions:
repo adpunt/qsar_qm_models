@@ -1,0 +1,69 @@
+First and foremost, you need to give me another pass. 
+You completely threw out my language. I'm reading the performance metrics section right now and I really liked my original text there. 
+
+
+Paper revision guides questions: 
+
+- Can you just give me a clear list of the models that work for uncertainty decomposition
+Look at the data I'm actually presenting, it's not this, this whole subsection after the mathematical formulas is complete overkill. I just need to summarise what I did and how I did it to ensure reproducibility, that's the point of a methods section. Read the section, I added notes
+
+- We do not report an expected calibration error, which was dropped from the analysis.
+Should I be trying this? No harm in seeing if there's anything there no? 
+
+- This is too confusing for me to follow, needs to be rephrased. Like use mathematical language but make it less convoluted:
+	 "The seconddivides the out-of-fold absolute error by the predicted uncertainty, and asks whether that ratio ranks
+	the corrupted labels better than the error alone does, with the difference between the two rankings
+	being what is reported.
+
+	The third statistic is the mean predicted uncertainty per configuration, which tracks whether a model
+	widens as the noise rises. The fourth asks whether the error a model makes is correlated within a
+	scaffold group. Each of the four is reported against the declaration of whether the component it uses
+	varies per molecule."
+
+- Just take a look at Performance metrics subsection - I was not happy with your edits
+- Where is the noise strategies figure??
+- I will need to upload the additional files separately, I need them organised in their own folder
+- Everything in here" ## The current main picture — read this first
+Was a convoluted mess. Considering that should be the most clear thing in this entire document, that's a bit concerning. I dont think those are the questions I set out to answer exactly and frankly I don't know what the fuck you're talking about in your supposed answers.
+- I really like the idea of this paragraph, I just despise how convoluted it's written, yet again. 
+> Studies of noise robustness in this field usually add independent, zero-mean, Gaussian error to the
+> labels. Neither half of that is what the measurements show. \citet{Kruger2012} rejected normality of
+> bioactivity differences by Anderson-Darling test and fitted a Laplace distribution instead.
+> \citet{Kalliokoski2013} could only fit a Gaussian to 16,844 repeat measurement pairs after truncating the
+> tail. Their largest single disagreement was 7.7 log units, which the Gaussian they fitted puts at six in a
+> thousand million million. Where that tail comes from has been examined directly: manual inspection by
+> \citet{Kalliokoski2013} of the pairs in the two highest disagreement bands found 9 out of 10 pairs in one
+> band and 10 out of 10 in the other to be transcription errors, receptor-subtype confusion or assay mix-ups
+> rather than imprecision. The tail may therefore belong to the record rather than to the value, which is why
+> we corrupt a random subset of the labels rather than the extreme ones.
+>
+> The more consequential departure from that convention is independence rather than shape. \citet{Bentz2013}
+> decomposed the variance of log efflux ratio across 23 participating laboratories. They found 62 per cent of
+> that variance between laboratories and 10 per cent unexplained. Laboratory averages that differ are an
+> offset rather than a widening. A public dataset assembled from several sources may therefore carry error
+> that whole groups of related compounds share, and a scaffold split makes those groups explicit. The
+> zero-mean assumption fails as well. \citet{Svensson2025} report the censored fraction for fifteen industrial
+> assays, of which thirteen carry censored labels and eight sit between a quarter and two thirds censored.
+> Recording a value as the assay limit is therefore the most prevalent real mechanism of all. The seven
+> conditions we test vary the shape, the correlation and the bias of the injected error separately, at a
+> matched delivered amount, rather than varying the amount of one of them.
+>
+> One condition cannot be tested fairly, and we say so here. Matching the real tail of
+> \citet{Kalliokoski2013}'s data needs a Student-$t$ with about one degree of freedom, which has no finite
+> variance and so cannot be matched to the other conditions on the amount of noise it delivers. The heaviest
+> tail we inject is a Student-$t$ with five degrees of freedom, against the one degree of freedom that
+> matching their data would take. The error real data carries is therefore heavier-tailed than anything that
+> can be compared at an equal delivered amount.
+Try again, read the sources properly and start that from scratching, keeping in mind all the writing guidelines I've given you
+
+- I got really lost at what you want for the end of the introduciton. I think you're right to call out that I need a preview paragraph, but everything is so poorly written. Again, it's a convoluted mess. Look at the phrasing/tone of voice of my original paper, that's more what I need, but you have a better grasp on the content
+
+
+
+
+
+Note to self: everything needs to be "additional files" not "supplementary"
+
+
+My tasks: 
+citation for avalon

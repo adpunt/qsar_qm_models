@@ -364,7 +364,7 @@ def main_table(names):
         # 4.0cm column in typewriter type.
         r'\begin{longtable}{@{}p{5.0cm}p{5.0cm}p{4.6cm}@{}}',
         r'\caption{\textbf{Additional file 1, Table A: default hyperparameters for '
-        f'all {n_config} model configurations in the study.'r'}',
+        'every model configuration in the study.'r'}',
         f'Every value is read from \\texttt{{models/model\\_defaults.py}} at spec version '
         f'{tex(MD.SPEC_VERSION)}, spec hash \\texttt{{{tex(MD.spec_hash())}}}, which is the '
         r'file both the QM9 pipeline and the assay pipeline load their settings from. '
@@ -468,10 +468,92 @@ def tuned_table(names):
     return '\n'.join(out), models
 
 
+PDV_SOURCE = os.path.join(_ROOT, 'scripts', 'process_and_train.py')
+QM9_PROVENANCE = os.path.join(_ROOT, 'data', 'qm9_pool_provenance.json')
+
+
+def pdv_descriptor_names():
+    """The 200 descriptor names PDV is built from, read out of the pipeline.
+
+    PARSED, NOT IMPORTED. `scripts/process_and_train.py` imports torch, RDKit and
+    the whole model stack at module level, and this generator has to run on a
+    laptop with none of that installed. The list is a plain literal, so reading it
+    with a regex is exact and costs nothing.
+
+    NOT RDKit's OWN LIST. `Descriptors._descList` grows between RDKit releases, so
+    "the 200 RDKit descriptors" does not name a set. This one is pinned in the
+    pipeline and is the only thing that makes PDV reproducible from the paper.
+    """
+    text = open(PDV_SOURCE).read()
+    head, sep, rest = text.partition('DEFAULT_DESCRIPTOR_LIST = [')
+    if not sep:
+        raise SystemExit(
+            f'{PDV_SOURCE} no longer holds DEFAULT_DESCRIPTOR_LIST. Table C is the '
+            f'only published record of which descriptors PDV holds, so this is a '
+            f'failure rather than an empty table.')
+    body, sep, _ = rest.partition(']')
+    names = re.findall(r"'([^']+)'", body)
+    if len(names) != len(set(names)):
+        raise SystemExit('DEFAULT_DESCRIPTOR_LIST holds a duplicate name.')
+    return names
+
+
+def rdkit_version():
+    """The RDKit that computed the descriptors, from the QM9 pool provenance.
+
+    Several of the 200 are version-sensitive -- `Ipc` most of all, whose overflow
+    behaviour changed between releases -- so a reader cannot reproduce PDV from
+    the names alone.
+    """
+    try:
+        with open(QM9_PROVENANCE) as fh:
+            return json.load(fh).get('rdkit_version')
+    except (OSError, ValueError):
+        return None
+
+
+def descriptor_table(n_columns=4):
+    """Additional file 1, Table C: every descriptor name in the PDV vector."""
+    names = pdv_descriptor_names()
+    version = rdkit_version()
+    version_sentence = (
+        f'They were computed with RDKit {tex(version)}. '
+        if version else
+        '% TODO: the RDKit version is not in data/qm9_pool_provenance.json. ')
+    rows = -(-len(names) // n_columns)          # ceiling division
+    columns = [names[i * rows:(i + 1) * rows] for i in range(n_columns)]
+    spec = 'l' * n_columns
+    out = [
+        r'\begin{longtable}{@{}' + spec + r'@{}}',
+        r'\caption{\textbf{Additional file 1, Table C: the ' + str(len(names)) +
+        r' descriptors that make up the PDV representation.}',
+        r'One entry is one feature of the vector, in the order the pipeline '
+        r'computes them. The list is fixed in the code rather than taken from '
+        r"RDKit's current default set, which grows between releases, so the same "
+        r'' + str(len(names)) + r' features are built on every dataset and in '
+        r'every run. ' + version_sentence +
+        r'Descriptors that return a non-finite value on a molecule have that value '
+        r'replaced by zero before the standardisation constants are computed. '
+        r'Source: \texttt{DEFAULT\_DESCRIPTOR\_LIST} in '
+        r'\texttt{scripts/process\_and\_train.py}.}',
+        r'\label{af1:pdv}\\',
+        r'\toprule',
+        r'\endfirsthead',
+        r'\toprule',
+        r'\endhead',
+    ]
+    for r_i in range(rows):
+        cells = [tex(col[r_i]) if r_i < len(col) else '' for col in columns]
+        out.append(' & '.join(cells) + r' \\')
+    out += [r'\bottomrule', r'\end{longtable}']
+    return '\n'.join(out), len(names)
+
+
 def build():
     names = _display_names()
     table_a, n_config = main_table(names)
     table_b, tuned_models = tuned_table(names)
+    table_c, n_descriptors = descriptor_table()
     body = '\n'.join([
         BEGIN_MARK,
         '% Do not edit between these two lines. Regenerate with',
@@ -491,9 +573,17 @@ def build():
         table_b,
         r'}',
         '',
+        r'\newpage',
+        '',
+        r'\begin{center}\Large\textbf{Additional file 1, continued}\end{center}',
+        '',
+        r'{\small',
+        table_c,
+        r'}',
+        '',
         END_MARK,
     ])
-    return body, n_config, tuned_models
+    return body, n_config, tuned_models, n_descriptors
 
 
 def write_into_tex(body):
@@ -518,11 +608,12 @@ if __name__ == '__main__':
     ap.add_argument('--write', action='store_true',
                     help='splice the block into additional_files.tex')
     args = ap.parse_args()
-    body, n_config, tuned_models = build()
+    body, n_config, tuned_models, n_descriptors = build()
     if args.write:
         write_into_tex(body)
         print(f'{n_config} configurations in Table A, '
               f'{len(R.MODELS)} in the generator MODELS dict')
         print(f'Table B carries tuned settings for: {", ".join(tuned_models)}')
+        print(f'Table C lists {n_descriptors} PDV descriptor names')
     else:
         print(body)

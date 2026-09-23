@@ -1,0 +1,142 @@
+R2
+AucNorm 
+
+
+
+\mbox{AUC$_{norm}$} is the area under a configuration's $R^2$ across the noise levels, divided by that
+same configuration's clean $R^2$. Despite the name, it is not an area under a receiver operating
+characteristic curve. A value of 1.0 is no accuracy lost at any noise level, and 0.5 is half the clean
+accuracy gone. A value above one means a configuration scored higher with noise added than without it,
+which happens where its clean $R^2$ is small. Because \mbox{AUC$_{norm}$} integrates every noise level, a
+configuration that falls early and then flattens can reach the value of one that holds and then collapses.
+
+- potential explanation for auc_norm
+
+I saw absolutely no explanation for what's going on with the residuals 
+
+
+
+
+So I'm going to go through questions with you, one-by-one and you're not going to modify any documents unless I say so
+In fact, I generally want information reported back to me in bullet points, I'll translate it into paper text. I just need the raw facts I'm getting a little frustrated with what you've given me. 
+But first and foremost we need to clarify something, I don't know exactly how many confiugrations were run, but it is NEVER okay to say 2/19 configurations. Why? Because those 19 aren't independently representative of a given family or architecture... SOme are variatns of each others. They differ in various ways and I don't want to make broad statements like that. Now I COULD choose a smaller set of representative models (like RF, SVM, GP, and one NN) and say stuff based off that, but I've chosen not to conduct my analysis like that. That seems to be the primary way you analysed things, so frankly most of it is getting trashed. My original paper was far more nuanced, it actually looked for patterns rather than broad, cheap generalistaions, and you completely lost all of that. The purpose of a rewrite guide was so you could carry through my original thought process. You wasted your time on absolute bullshit instead. So we're doing things a bit differently. You're going to answer my quetsions directly and give me exactly the information I want, in a clear format. I'm not letting you make broad decisions about the analysis anymore you've completely lost credibility. 
+You don't need to spend any time correcting the specific example, but I bring it up to show you what I emphatically do not want:
+"Within each dataset, between 92 and 100 per cent of the combinations of model,
+representation and fold give a rising slope. The median slope over those same combinations runs from
+$+0.30$ to $+0.42$ label units of predicted uncertainty per unit of noise level. That reproduces
+Kolmar's result on a computed quantum property and on three assay endpoints."
+92-100% of what? Combinations of models and reps, but SNS/ECFP4 are almost identical. So are a lot of the NN variants. And because of all the variants they are disproportionately represented. These percentages are absolutely meaningless. Median slope. Great. Median over what? Noise condition? dataset? Were the representations held out? Is it a median over the representations? over the replicates? The LAST thing I want is made up statistics that have nothing to do with the results I actually have. I'm not sure if yuo gave me a single table either. Oh yea that's another thing. WHERE THE FUCK DID THE TABLES GO? I thought I had planned out exactly what I wanted in the rerun plan, including tables. Where are they??? Let's start with that. And again, I'm done with the revision guide. If you tell me to put a table in, you tell me in this chat, you read paper.tex, and you tell me what line to put it in and where it should be referenced. 
+
+The analysis actually got worse as you went, and by the time I got to uncertainty I completely lost it. I can't keep trying to get conclusions out of you like this. It's completely off base. You don't connect it to a single result in a figure or a table. It's all random ranks and medians that are essentially meaningless. I'm debating getting rid of everything related to ranks, although I see the benefit of them. It's just really frustrating. 
+What's horrible is I actually spent SO Much time making the figures and making sure they contain everything, and it feels like you didn't consider them AT ALL. The last pass I asked you to do which cost almost $200 I asked you to analyze the figures, and it doesn't seem like that was done in the fucking slightest. I'm honsetly really annoyed. I may have to go figure-by-figure with you, which is not what I wanted to do but you proved yourself completely incapable of analyzing them on your own. But yea let's start with the tables. Then I'll go through about 40 individual questions I have (you really fucked up) and then I'll go into the figures. 
+
+
+- Do I need to report the actual numbers for ANOVA somewhere? Should that be in table either in the figure or in additional files? 
+- F3 is showing the wrong thing - why are you highlighting the noise condition where the residual dominated? I would be open to an actual explanation, but to me it seems like this should be grouped, wider
+- F2 key is misaligned, it's so far to the right
+- F3 - what in god's name is the noise level? What are the conditions here? The caption is not enough... 
+- I need another figure besides F2 - one showing accuracy ANOVAs for clean labels across the datasets 
+- F4a - what happened to the NNs? I wanted NN-a and NN-b as base, or something else, IDK WE DISCUSSED THIS one representation for the alpha and beta category (same for each). But I never said remove them
+
+
+Under Gaussian noise, twenty-one of the twenty-four combinations of dataset and representation carry
+all thirteen base models.  - what the fuck does this mean?????? 
+
+
+
+You need to rephrase this whole thing, I don't want to see a single mention of the total number of a random set of arbitrary models, of anything, I just need to know about patterns. 
+I need to know do the conclusions I made on QM9 translate to the assay data sets and if not, how do they differ? None of this. 
+This information clearly belongs in a table which was not included. You need another pass to properly incorporate the tables 
+These conclusions are actively confusing and meaningless, and don't help me answer any of the questions I sought out to answer. There's clearly some standout cases in these results, none of them are reported properly. 
+
+"Under Gaussian noise, twenty-one of the twenty-four combinations of dataset and representation carry
+all thirteen base models. The other three carry fewer than thirteen: ChemBERTa is missing models on
+Caco-2 and on hERG $K_i$, and MHG-GNN is missing one on Caco-2. Across those twenty-one
+combinations, the two forests are the only models whose \mbox{AUC$_{norm}$} rank never falls below
+eighth of thirteen. The Gaussian process never falls below ninth of thirteen, and its median rank on
+clean $R^2$ over those twenty-one combinations is first of thirteen. Among the seven models that are
+not neural networks, LightGBM and XGBoost are the bottom two on Caco-2 and on hERG $K_i$. Those two
+sit in the middle of the seven on the computed property, under every condition that runs all
+thirteen base models. Why they lose so much more on the two measured endpoints with the lowest clean
+$R^2$, we cannot say.
+
+On Caco-2 and hERG $K_i$, four combinations of model, representation and noise condition retained
+more accuracy with noise added than without it. All four began from a clean $R^2$ between 0.325 and
+0.371, against the floor of 0.30 below which a replicate is excluded. We report them rather than
+patching the measure, because a slope that is not divided by the clean $R^2$ cannot be compared
+across models that start from different clean $R^2$. The plain forest and the quantile forest give
+up a median rank on clean $R^2$ of eighth of thirteen. This suggests that either forest is the safer
+choice when the amount of label noise is unknown."
+You need to go back to paper.tex which I've modified heavily, and look at my edits. Look at what I've said so far, and look at all my frantic TODOs because I haven't been given enough information. Give me suggested text IN THE CORRECT TONE OF VOICE (This will take work, this is not a short relpy) that finishes out this section. I don't trust your ability to do this, this is actually going to be a longer request. 
+Copy and paste my text for this subsection into PAPER_RESULTS_REWRITE and then after proper work looking at the actual figures, looking at the tables, thinking abou the questions I'm trying to answer, taking into account all my complaints, ABIDING BY THE FLOW/LANGUAGE RULES THAT YOU KEEP IGNORING, finish out the suggested text and add in appropriate results. 
+I actually left my old section in the paper (it will be deleted), just so you see how I would analyze this, it doesn't need to match, but make note of the tone, LOOK AT HOW I USE TABLES, look at the conclusions I'm trying to draw. I'm not saying RF ranks 23/25 on some arbitrary set of models and that rank drops  under some convoluted condition and leave it at that. THat's shit. What are the patterns? What does this actually mean? Do the patterns hold over different noise conditions and data sets? You can mention ranks but do it intelligently, not as a random word vomit.
+
+Similarly, the probabilistic vs deterministic results paragraph is pure and utter garbage. 
+"No probabilistic counterpart differed from its base model by more than 0.011 of \mbox{AUC$_{norm}$}
+at the median of its comparisons. Over the same six representations the thirteen base models
+themselves run from 0.871 to 0.935 in \mbox{AUC$_{norm}$} under grouped-shifted noise. Choosing a
+different model family therefore moves \mbox{AUC$_{norm}$} further than making a given model
+probabilistic does. This suggests that a probabilistic form is worth choosing for its uncertainty
+estimate rather than for robustness to label noise."
+- At the median of its comparisons - median over what? 
+- What about accuracy? 
+- Suddenly you're talking about group-shifted noise, what about gaussian? If you're going to compare noise conditions make that explicit
+- This isn't about choosing a different model family - that refers to trees vs NNs, do you mean a different variant? 
+- Can you make this recommmendation if you take accuracy into account? Does this hold for all the cases you've seen? You can't make this claim without the assay data backing it up...
+Honestly I don't even care if you clarify, the point wasn't me getting answers to these questions, it's to tell you how ambiguous your statements are. I shouldn't be able to have this many questions after reading this paragraph. 
+
+
+Most of your noise condition analysis is straight up wrong. Or its incredibly misleading. You go on about a holdout of level 0.5 noise and the difference between the conditions. At that level, they're all bundled together, then immediately after that outlier shoots down out of the group. You make outlier sound like nothing, and you write a whole paragraph about group-shifted. You rely on medians across models I explicitly said that I didn't want. Hold out a model if you want to make these comparisons. Maybe once is fine, but then I need to see how the different models individually respondded to differnet noise conditions. You approached everything wrong. None of your analysis is worth keeping. Figure F4b can stay but its on thin ice.
+4fc may be the only thing that's worth it, and you barely discussed that. I would like to see outlier noise added to that, lmk if that needs more experiments. But outlier was ironically the only outlier, and you didn't discuss that at all 
+Also where is the auc_norm range up to? How much do these numbers change if that range is extended? 
+At this point, I don't trust F4b. F4c tells a way more interesting story, but it's not showing the other conditions. I'm seeing that different noise conditions affect different model familites. GP(het) weirdly works well for grouped-wider. Trees are the best overall, but particualry good with grouped-wider
+NNs really struggle with group shifted but see an improvement with probabilistic variants. NNs are more variant in general, unpredictable with noise. That's definitely a conclusion. Not only are they generally less noise robust, but they vary between types of noise a lot. 
+Remove GP (tanimoto) from F4c
+At this point, I don't trust you, I need to see another table like F4c with the other noise conditions, whatever you have. And then I'll tell you th eleads to follow. But what you did was not okay. I also need to see this with another representation. Ideally multiple. You have lost credibility picking patterns here. 
+It is astounding to me that you missed the mark so badly on outlier, that also needs more of an investigation
+This is going to be a massive one 
+I think part of the issue is that some of the questions belong in other sections. This section needs to introduce the major effect of different noise conditions, but then subsequent sections also need to take into their effect too, which they currently aren't doing. 
+
+
+Here's another round of things you need to analyze better but I'm going to point you in the right direction. Assay data:
+- Group-shifted has the overall hardest
+- I need to see held out accuracy at a given noise level, or better yet some curves for this kind of stuff - what patterns are different? What are the same? What patterns can I say exist regardless of dataset? That's one of the most important questions. Look at the stuff I'm saying for QM9, does that hold up? 
+- NN performance is variable - VBLL looks great for noise robustness but its clean accuracy is poor.
+- LightGBM is also very variable, it's the least conistent of the tree family but has high clean accuracy
+- SVM is actually the standout - how was it with QM9? It looks like highest accuracy and relatively high auc_norm
+- How does NGBoost/PDV do with the assay datasets? That was such an interesting standout for QM9 it would be interesting to see if it worked for these
+- RF is still a really solid choice - good recommendation if you suspect your data is noisy, RF is a classic and holds up to noise relatively well across the board, this is a good takeaway. SVM may be in this recommendation too
+- Grouped-wider seems to really hurt xgboost, lightgbm, and ngboost - this is interesting. RF and QRF and unaffected, what's going on here? 
+- I need to see curves to analyze patterns, and I want to see outlier - that was such an odd one and there's been no attention to it
+- Some of these conclusions can be traced back to the rank transfer
+I like the idea of this but frankly it seems like the wrong way to approach it:
+What does not carry is the ranking of the models themselves. The two rankings were compared at 83
+combinations of molecular representation, noise condition and assay dataset (a rank correlation of 1
+is the same ordering on both). The two rankings agree at the five per cent level on 16 of the 28
+combinations on logD. On Caco-2 that is 2 of 28 combinations, and on hERG $K_i$ 2 of 27. NGBoost is
+first of nineteen on the HOMO--LUMO gap at ECFP4 under Gaussian noise, and third, fourth and seventh
+on logD, Caco-2 and hERG $K_i$ (Figure~\ref{fig:transfer}). LightGBM is sixth there and nineteenth
+of nineteen on both Caco-2 and hERG $K_i$. VBLL-$\alpha$ is tenth on the HOMO--LUMO gap and first on
+both of those two endpoints. A study run on the computed property alone would have reported LightGBM
+as a robust model.
+These numbers are pretty much meaningless. They're confusing to follow and I have no clue what the conclusions are, although I would like to know how they differ. I think the rank figure is good but it needs a much quicker look that connects back to the conclusions I pointed out above. 
+
+WHy was censoring not mentioned until uncertainty? What happened to it in all other contexts?
+
+
+"Within each dataset, between 92 and 100 per cent of the combinations of model,
+representation and fold give a rising slope. The median slope over those same combinations runs from
+$+0.30$ to $+0.42$ label units of predicted uncertainty per unit of noise level. That reproduces
+Kolmar's result on a computed quantum property and on three assay endpoints."
+This is an unacceptable way of reading my data, is there another way I could support Kolmar's claims? 
+
+I need you to understand, there is not a single paragraph in the uncertainty subsection that I feel comfortable working with. Not a single one. Do you understand how badly you've done this? I need you to take a step back and just show me the tables and relevant results, tell me what figures to look at, and I'll point you in directions. You are completely incapable of doing this on your own apparantly. 
+
+
+
+
+Okay everything in the paper.tex is updated except the following:
+- Performance metrics (I took a different approach to results/analysis than you indended) - I need you to go through what metrics I actually used and redo just this section in the revision guide. But the most important thing is that you USE THE REFERENCE PAPERS. Read them all. no grep. Understand the phrasing and the depth and the contents with which the authors describe the metrics. You are completely off base here and it's clear you hallucinated this with no scientific references (despite me BEGGING you repeatedly to do this)
+- Conclusion
+- Abstract
+I LIKE MY PHRASING in the conclusion and abstract in paper.tex. Help me REVISE them not rewrite them
