@@ -597,6 +597,103 @@ def f3_model_by_representation(summary, output_dir, conditions,
     return S.save(fig, Path(output_dir) / 'F3_model_by_representation.png')
 
 
+def f3b_every_full_roster_condition(summary, output_dir, dataset='qm9',
+                                    value='auc_norm'):
+    """F3 again, with NO condition left out of it.
+
+    F3 shows the conditions whose grids differ, because two grids that agree to
+    inside the replicate wobble are one picture drawn twice and the main text
+    has room for one of them. That is a decision about the MAIN TEXT and not a
+    decision to stop looking: a condition held back as a repeat still has to be
+    written about, and it cannot be written about from a figure that does not
+    exist (the author, 2026-09-23).
+
+    So this draws every condition the whole roster was run on, repeats included,
+    at the same fixed colour range as F3, for the additional files. The
+    conditions that ran on a named subset of pairs are not here -- their rows
+    would be mostly grey against these -- they are R19, and between the two
+    every condition in the study has a grid.
+    """
+    frame = C.cross_model(summary[summary['dataset'] == dataset], 'F3b')
+    if not len(frame):
+        return None
+    models = C.sort_models(frame['model'].unique())
+    reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
+    full = len(models) * len(reps)
+
+    # WHICH CONDITIONS RAN ON THE WHOLE ROSTER, asked of the data rather than
+    # named here. A list written into the code goes stale the moment a run
+    # fills in a condition, and then the figure quietly omits it.
+    counts = frame.groupby('condition')['auc_norm'].size()
+    shown = [c for c in C.sort_conditions(counts.index)
+             if int(counts[c]) >= full]
+    partial = [c for c in C.sort_conditions(counts.index) if c not in shown]
+    if not shown:
+        return None
+    frame = frame[frame['condition'].isin(shown)]
+    G.declare(frame, 'F3b', fixed={'dataset': dataset},
+              varies=('model', 'rep', 'condition'))
+
+    lo, hi = C.auc_range(dataset)
+    longest = max((len(C.rep_label(r)) for r in reps), default=0)
+    layout = panel_layout(len(shown), len(models), len(reps), 'F3b',
+                          longest_label=longest)
+    # THREE GRIDS OF THIRTEEN ROWS DO NOT FIT ON ONE PAGE, and eighteen columns
+    # across do not either. One file per condition then, as F8 already does for
+    # the three measured datasets: three readable figures beat one that the
+    # journal rejects on height. The colour range is fixed, so they still
+    # compare (the author's rule for F8, 2026-09-18).
+    groups = [[c] for c in shown] if layout == 'split' else [shown]
+    written = []
+    for group in groups:
+        if layout == 'stacked' or len(group) == 1:
+            fig, axes = _fig(height=C.grid_height(len(models), len(group)),
+                             nrows=len(group), sharex=True)
+        else:
+            fig, axes = _fig(height=C.grid_height(len(models)),
+                             ncols=len(group), sharey=True)
+        axes = np.atleast_1d(axes)
+        image = None
+        for index, (ax, condition) in enumerate(zip(axes, group)):
+            panel = frame[frame['condition'] == condition]
+            image, _ = S.grid(ax, panel, 'model', 'rep', value,
+                              column_labeller=C.rep_label, vmin=lo, vmax=hi,
+                              row_order=models, column_order=reps)
+            letter = 'abcdefg'[shown.index(condition)]
+            S.title(ax, letter, C.condition_label(condition))
+        if image is not None:
+            bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
+            bar.set_label(G.metric_label(value), fontsize=8)
+            bar.ax.tick_params(labelsize=7)
+        suffix = f'_{group[0]}' if len(groups) > 1 else ''
+        written.append(S.save(
+            fig,
+            Path(output_dir) / f'F3b_every_condition_{dataset}{suffix}.png'))
+
+    elsewhere = (' The remaining condition(s) -- '
+                 + ', '.join(C.condition_label(c) for c in partial)
+                 + ' -- ran on a named subset of the pairs rather than on the '
+                   'whole roster and have their own figure, so between the two '
+                   'every noise condition in the study has a grid.'
+                 if partial else '')
+    caption('F3b', f"""
+        Robustness ({G.metric_label(value)}) of every model on every
+        representation, for every noise condition the whole roster was run on,
+        on {C.dataset_label(dataset)}: {", ".join(C.condition_label(c) for c in shown)}.
+        Rows are the {len(models)} models ordered by family, columns are the
+        {len(reps)} representations, one panel per condition. One cell is one
+        model on one representation, the median over the replicates, with its
+        value printed on it. Colour is on the same fixed range as the main-text
+        grid, printed on the colour bar. The main text carries only the
+        conditions whose grids differ from one another; this carries all of
+        them, including the one held back there as a repeat, so that each can be
+        read on its own. The panels are {'separate image files, one per '
+        'condition, because three grids of this many rows do not fit one page; '
+        'they share one colour range and one row order so they still compare'
+        if len(written) > 1 else 'one image'}.{elsewhere}""")
+    return written
+
+
 # ---------------------------------------------------------------------------
 # F4 -- Q2 and Q3: what label noise costs you
 # ---------------------------------------------------------------------------

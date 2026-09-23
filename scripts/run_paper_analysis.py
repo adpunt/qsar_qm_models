@@ -419,6 +419,11 @@ def draw_figures(args, tables, verdicts):
         drawn.append(FIG.f2b_clean_decomposition(anova_clean, out))
     if qm9 is not None and len(qm9) and conditions:
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
+    if qm9 is not None and len(qm9):
+        # The additional-file grid: every condition the whole roster ran,
+        # including the one the main text holds back as a repeat. D2 decides
+        # what the MAIN TEXT carries, not what gets drawn at all.
+        drawn += FIG.f3b_every_full_roster_condition(qm9, out) or []
     if accuracy is not None and len(accuracy) and qm9 is not None and rep:
         drawn.append(FIG.f4_overview(accuracy, qm9, out, rep,
                                      focus_model=args.focus_model,

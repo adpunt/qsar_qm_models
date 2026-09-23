@@ -11951,6 +11951,18 @@ conditions, counts and array ranges only.
 
 ### 13.23 🔴 THE OPEN REGISTER — everything known to be wrong, 2026-09-07
 
+#### 13.23x 🔴 TODO: the abstract, the conclusions and the scientific-contribution statement, 2026-09-20
+
+`PAPER_REVISION_GUIDE_FINAL.md:21` leaves all three out on purpose, because each one restates findings the
+Results had not settled. The Results are now written. What still blocks them is the one open decision in §R4:
+the 0.127 and the 0.095 are medians taken over the computed HOMO--LUMO gap and the three assay datasets
+together, and `PAPER_HOUSE_STYLE.md` forbids a number in the text computed across datasets. Three ways out,
+with what each costs, are written into the guide above the Results.
+
+Close condition: the author picks one of those three, §R4's fourth paragraph is rewritten to match, and the
+three missing blocks are drafted into the guide off the finished Results. They are the last paper text the
+guide does not hold.
+
 #### 13.23y ✅ The paper text was rewritten to `PAPER_HOUSE_STYLE.md`, 2026-09-18
 
 Every block of paper text in `PAPER_REVISION_GUIDE_FINAL.md` was rewritten against the 122 rules: the six
@@ -26638,3 +26650,329 @@ rule.
   document is running**, because I found these by grepping for terms I remembered inventing and that is not
   a method.
 
+
+---
+
+## 16. THE ADDITIONAL FILES, AND THE WORD FOR THEM — 2026-09-21
+
+### 16.1 "Supplementary Material" is reverted to "Additional file"
+
+The author's instruction, 2026-09-21: *"everything needs to be 'additional files' not 'supplementary' -
+that's my bad revert that change"*. The guide had been switched the other way on 2026-09-20.
+
+Reverted in two files, 85 replacements: `PAPER_REVISION_GUIDE_FINAL.md` (71) and
+`scripts/generate_supp_table1.py` (14). `additional_files.tex` was then regenerated, so its three generated
+captions and its three block titles now say Additional file. Nothing in the repository says Supplementary
+any more except the three files that quote the journal or record history: `JCHEMINF_GUIDELINES_VERBATIM.md`,
+`JCHEMINF_FIXES_LOG.md` and `paper_edits_supervisor.md`.
+
+`paper.tex` was not touched. It is never edited here.
+
+### 16.2 The upload folder
+
+The author's instruction: *"I will need to upload the additional files separately, I need them organised in
+their own folder"*. Journal of Cheminformatics is a BMC title and takes each Additional file as its own
+upload rather than as one bound appendix.
+
+`scripts/stage_additional_files.py` writes `additional_files/`, which holds the .tex with its
+`\graphicspath` rewritten to a local `figures/` directory, the three PNGs it includes, and a `MANIFEST.md`
+listing all eleven Additional files and the source path and date of every figure. The folder is deleted and
+rebuilt on every run and is in `.gitignore`, so it is a staging area and never a second source of truth.
+`scripts/generate_supp_table1.py` still writes `additional_files.tex` at the repository root and still passes
+its guard.
+
+    python3 scripts/stage_additional_files.py
+
+### 16.3 🔴 Five of the eleven Additional files are built on the dead metric
+
+Found while staging, not looked for. `additional_files.tex` carries **18 mentions of NDS**, which
+`generate_paper_figures_v2.py` replaced with AUC_norm, and its three figures resolve through
+`\graphicspath{{results/paper_figures/}}`, which is the superseded v1 output directory. The staging script
+found all three in `results/paper_figures_v2/` instead, but those copies are dated **8 July** and therefore
+predate every fix in this re-run, including the held-out-label contamination on QM9.
+
+| Additional file | What it is | State |
+|---|---|---|
+| 2 | Pairwise model NDS correlations | 🔴 dead metric |
+| 3 | Pairwise representation NDS correlations | 🔴 dead metric |
+| 6 | ECFP4 global overview (figure) | 🔴 figure dated 8 July |
+| 7 | Baseline R² against NDS scatter (figure) | 🔴 dead metric and figure dated 8 July |
+| 10 | Validation ANOVA (figure) | 🔴 figure dated 8 July |
+| 1, 4, 5, 8, 9, 11 | hyperparameters, ICC, exclusions, Bayesian transformation effects, uncertainty metrics, RF against QRF | not checked this pass |
+
+**This is the author's decision, not mine.** Each of the five is either regenerated from
+`results/decisions_arc_20260916/` on the current metric, or dropped from the submission. Nothing here
+deletes anything.
+
+### 16.4 Two guard fixes
+
+- `scripts/test_supp_table1.py` asserted that the generated block holds **two** captions. Table C, the 200
+  PDV descriptor names, was added on 2026-09-20 and makes three, so the check had been failing since. Fixed
+  to three, with the reason recorded beside it. The check is kept as an assertion rather than a count so that
+  a table silently dropped from the generator still fails here.
+- The remaining failure is real and needs the author: `additional_files.pdf` predates the current block.
+  There is no `pdflatex` on this laptop, so it has to be rebuilt in Overleaf, or:
+
+      pdflatex -output-directory=_build_addfiles additional_files.tex   # twice, for the longtable
+      cp _build_addfiles/additional_files.pdf additional_files.pdf
+
+---
+
+## 17. THE METHODS, INTRODUCTION AND RESULTS REWRITE — 2026-09-21
+
+Run as one workflow of 23 agents: five read every figure PNG as an image, one re-read the primary
+noise sources, one audited all three bibliography files, one extracted the author's own register from
+`paper.tex` and the target-journal reference papers, then eight wrote and eight audited.
+
+**Two new documents, both superseding parts of `PAPER_REVISION_GUIDE_FINAL.md`:**
+
+- `PAPER_METHODS_INTRO_REWRITE.md` — supersedes M5, M6, §I4, §I6 and "The current main picture".
+- `PAPER_RESULTS_REWRITE.md` — supersedes §R1 through §R7, each block carrying its own figure input.
+
+The author's reason for wanting them separate, 2026-09-21: *"I don't feel like sifting through the
+guide again"*.
+
+### 17.1 🔴 THREE CITATION ERRORS IN THE GUIDE, AND ONE CORRECTION TO A PREVIOUS REPORT
+
+Read from the papers themselves in `research_archive/28450b4e/`, this session.
+
+| claim | verdict |
+|---|---|
+| λ = 3 is inverted in `NOISE_DESIGN.md` | **REFUTED.** `NOISE_DESIGN.md:170-171` and guide:338-339 both read within-laboratory × 3 → between-laboratory, which is the direction Avdeef states. A previous session reported this as inverted and was wrong. **But the Avdeef 2019 PDF is not on disk**, so the only copy of the quote is this repo's own note at `research_archive/28450b4e/wf2/03.md`, and the quote is about intrinsic solubility by CheqSol, not any endpoint here. Mark unverified until the PDF lands |
+| Krüger supports the Student-*t* | **CONFIRMED WRONG, and mislocated by the previous report.** Krüger fitted a Laplace, b=0.7 paralogs and b=1.3 orthologs, Anderson–Darling p<2e-16; the word "student" is not in the paper. Guide:1058, the Introduction sentence, is **correct**. The error is at **guide:343-344**, in the Methods, which also wrongly calls the Laplace's data "repeated public bioactivity measurements" — it was human-to-rat ortholog and paralog differences |
+| Bentz, 23 against eleven laboratories | **Both counts are real and the guide pairs them wrongly.** 23 is the working group as a whole (23 laboratories plus one academic institution), from the Abstract. Eleven is the Caco-2 count. Table 7's Log ER column, which gives 62%, pools all three cell lines: 7 MDCKII, 4 LLC-PK1, 11 Caco-2. Guide:1068 is defensible. **Guide:341-343 is wrong** — the 62% is neither Caco-2-only nor eleven laboratories, and the two guide sentences contradict each other on the same ρ |
+| Kalliokoski, largest ΔpIC50 7.7 log units | CONFIRMED, Figure 2 caption verbatim |
+| Kalliokoski, "could only fit a Gaussian after truncating the tail" | **PARTLY CONFIRMED and overstated.** The truncation is real and is their method, at 0.05 lower and 1.5/2.0/2.5 upper. They never attempt an untruncated fit and never report one failing, and they check the truncation is not doing the work. Safer wording is in `PAPER_METHODS_INTRO_REWRITE.md` §I4 |
+| Kalliokoski, 9 of 10 and 10 of 10 annotation errors | CONFIRMED on the counts, Table 2. The guide's three categories omit stereochemistry error, target error and value error. The paper's own phrase is **"annotation errors"** |
+| p = 0.10 from Hampel | CONFIRMED verbatim |
+| ρ = 0.62 from Bentz Table 7 | CONFIRMED against the Log ER w/o Inhibitor column: 62 / 20 / 10 / 8 |
+| 20% group fraction is a choice | CONFIRMED, and `NOISE_DESIGN.md:177` says so plainly |
+| Caco-2 ≈ 0.35 log units | CONFIRMED as a **computation**, reproduced at 0.337 and 2.18-fold. The word "Computed" must survive into anything quoting it; the number is nowhere in Bentz |
+
+### 17.2 🔴 THE STUDENT-*t* "ν ≈ 1" CLAIM IS WRONG, AND `NOISE_DESIGN.md` §3.1 CONTRADICTS ITSELF
+
+The draft says matching Kalliokoski's tail needs a Student-*t* with about one degree of freedom.
+Computed this session from their own reported quantities — 16,844 pairs, about 70% of ΔpIC50 below
+one log unit, largest 7.7, fitted Gaussian σ = 0.87 at the 2.0 cut — ν = 1 predicts about **709**
+pairs beyond 7.7 where **one** was observed, and ν ≈ 6 predicts 2.1.
+
+`NOISE_DESIGN.md` §3.1 says *"fitting the full tail gives Student-t with ν ≈ 4–6"* and, eight lines
+later, *"matching the real tail needs about ν = 1.1"*. The draft picked up the second. **No working
+behind ν = 1.1 exists anywhere on disk.** The same section calls the study's setting ν = 3; what runs
+is **ν = 5** (`noise_conditions.json`). Both lines in §3.1 need fixing.
+
+The Gaussian half of the argument survives: at σ = 0.87 a Gaussian predicts 1.5×10⁻¹⁴ of a pair.
+
+### 17.3 🔴 F7 DOES NOT EXIST, AND THE DECISION STEP STILL ADVERTISES IT
+
+`results/decisions_arc_20260916/figures/notes_for_the_text.md` calls the censoring enrichment curve
+*"the strongest possible answer to the paper's own title"*. There is no F7 PNG in that directory.
+
+The drawing code is present — `scripts/figlib_figures.py:1260` and `:1359`, exercised by
+`scripts/test_figure_slots.py:106`. **The call was removed.** `scripts/run_paper_analysis.py:546`,
+`_draw_uncertainty`, has the docstring *"F6 only. F7 IS DROPPED -- the author's call, 2026-09-13."*
+The decision step that writes the note still runs and still fires, three days after the drawing step
+it names was cut. Reinstating it is the author's word, one edit, and one analysis re-run.
+
+**And the note is computed off the wrong band.** `d7_q4.csv` has no `adds_signal` column, so
+`figlib_decisions.py:959-968` fell back to `outside_null`, which until 2026-09-17 carried the band for
+out-of-fold **error** against injected noise with the uncertainty nowhere in it — and under censoring a
+clipped label simply is a large error. Two counts made on that file this run: 2,417 rows of 20,699
+have no observed value and no band and are all recorded as firing, 345 of them censoring; and censoring
+fires in 1,925 of 2,070 against 3.4–23.3% for the other six conditions. **Do not quote that 93%.**
+
+### 17.4 THE TWO §R6 FRACTIONS: BOTH NUMERATORS RIGHT, BOTH DENOMINATORS WRONG
+
+Recomputed from `unc_slopes.csv` over the 237 combinations of dataset, model and representation that
+ran all three full-grid conditions.
+
+| condition | separates | both rise | neither moves | cannot be read |
+|---|---|---|---|---|
+| Gaussian | 78 | 31 | 8 | 120 |
+| Grouped-wider | 74 | 37 | 6 | 120 |
+| Grouped-shifted | 58 | 52 | 7 | 120 |
+
+The guide's 109 and 110 are separates plus both-rise, silently dropping the cells where neither part
+moves. **The readable denominator is 117 in every condition**, because readability depends on whether
+both parts vary per molecule, which does not depend on the condition. §R6 now prints 78 of 117 and
+58 of 117.
+
+### 17.5 🔴 FOUR NUMBERS IN THE RESULTS ARE MEDIANS ACROSS THE SIX REPRESENTATIONS
+
+This breaks the author's standing rule and house-style rule 11. They are flagged in place with ⚠️ and
+left at the value they were measured at, because none can be rewritten by editing text.
+
+- §R2: the 0.041 of AUC_norm on the QM9 gap and 0.300 on Caco-2, both spreads across the seven
+  non-neural models where each model's value is first medianed over the six representations. The §R2
+  table of per-model medians rests on the same operation.
+- §R3: the 0.871 and the 0.935, per-model medians over the six representations; and the 0.011, the
+  largest per-pair median change in `d10_probabilistic.csv`, each a median over eighteen comparisons
+  spanning six representations and three noise conditions.
+
+**Fixing them means recomputing the spread inside one named representation**, which is a change to
+`scripts/run_paper_analysis.py` and an analysis re-run. That is the author's call.
+
+### 17.6 FIGURE DEFECTS FOUND BY LOOKING AT THE DRAWINGS
+
+- **`R19_deep_conditions_qm9.png`** — the columns of panels a) and b) are shifted by one: the column
+  labelled Student-*t* holds censoring, and the real Laplace column is drawn outside the grid.
+  `scripts/figlib_figures.py:1867` records the fix, so a re-run corrects it. **The PNG on disk must not
+  be read until then.**
+- **`R15_*`** — both single-panel figures are lettered a); `scripts/figlib_figures.py:957` hard-codes
+  it, so a re-run reproduces it. A paste-time defect wherever R15 lands.
+- **F4c** is drawn into §R2 and has never had a caption anywhere. One was written from the PNG.
+- **F2 and F4a captions** describe what the code writes now, not what the PNG shows. They are right
+  only after `sbatch slurm_scripts_analysis/run_paper_analysis.sh` has run.
+- **`rf300` is not in the figure library.** `grep rf300 scripts/figlib_config.py scripts/figlib_figures.py`
+  returns nothing, so the re-run still draws the 100-tree forest in §R3's panel c).
+
+### 17.7 THE BIBLIOGRAPHY
+
+**Keep `citations.bib`. Discard `refs.bib` and `scripts/new_citations.bib`.**
+
+`citations.bib` has 224 entries and 224 distinct keys, no duplicates, no template entries, and defines
+58 of the 59 keys cited across `paper.tex` and the guide. `refs.bib` has 220 headers but 206 distinct
+keys, 14 of them doubled, and opens with `bib1` through `bib13` — the Springer Nature template's dummy
+references. That is the strongest evidence it is the Overleaf project's bibliography under another
+name, and if Overleaf compiles against it the reference list it produces is wrong.
+
+Two defects need the author:
+
+- **`paper.tex:687`** reads `\bibliography{sn-bibliography}` and no such file exists, so that build has
+  55 unresolved citations. The file that resolves is `paper_inline_bbl.tex`, whose `.bbl` is stale by
+  11 cited keys and carries 10 no longer cited.
+- **ECFP4 is cited under two spellings**: `Rogers2010` at `paper.tex:180`, `rogers2010` at
+  `paper.tex:209` and guide:118. That is the `undefined: rogers2010` failure. The merged file
+  standardises on `Rogers2010`.
+
+The merged, deduplicated, format-corrected file is at
+`<scratchpad>/rewrite/citations_merged.bib`, 225 entries, and the full defect list with the verified
+and unverified entries is at `<scratchpad>/rewrite/bibliography.md`. Nothing in the repository was
+modified.
+
+### 17.8 EXPECTED CALIBRATION ERROR — THE ANSWER TO THE AUTHOR'S QUESTION
+
+She asked, 2026-09-21: *"Should I be trying this? No harm in seeing if there's anything there no?"*
+
+Removed on her own instruction on 2026-08-19 (`RERUN_PLAN.md:82`), and the session logs on disk start
+on 24 August, so the conversation that decided it is not recoverable. Three implementations survive,
+all retired: `scripts/generate_figures.py:375-388`, `scripts/uncertainty_analysis.py:130-160`,
+`NoiseInject/noiseInject/uncertainty.py:177-201`.
+
+Cost to compute now is one figure-job re-run and no cluster experiment, because
+`scripts/generate_paper_figures_v2.py:1919-1920` already builds the arrays it needs.
+
+**The recommendation is the miscalibration area rather than ECE.** Regression has no classes, so all
+three implementations bin on the model's own predicted uncertainty, which means no two models share
+bin edges. Worse, they compare a predicted standard deviation against a mean absolute error, which for
+a perfectly calibrated Gaussian differ by √(2/π) = 0.798 — a perfect model scores about a fifth of its
+own mean predicted uncertainty rather than zero, and a model with wider intervals scores worse for
+that reason alone. The miscalibration area costs the same and is comparable across models.
+
+The three options with their costs are written out in `PAPER_METHODS_INTRO_REWRITE.md` under Q2.
+
+---
+
+## 18. TWO NEW FIGURES, AND THE RULES THEY ARE BUILT ON — 2026-09-23
+
+Both were asked for in one session on 23 September. Both are generated, both are in
+`scripts/run_paper_analysis.py`, and neither has a hand-made number in it.
+
+### 18.1 F2b — the variance decomposition on clean labels, across the four datasets
+
+The author's instruction: *"I need another figure besides F2 - one showing accuracy ANOVAs for clean
+labels across the datasets"*.
+
+**What it is.** The same four terms as F2 — the choice of model, the choice of representation, the pairing
+of the two, and what is left over — on R² with no noise added to the training labels. The bottom axis is
+the dataset. One bar is one term on one dataset. Four bars per dataset, summing to 100 per cent.
+
+**The rules it is built on, and why each one is there.**
+
+1. **No noise-condition axis.** The clean fit is made once per dataset, model, representation and
+   replicate, and every noise condition's ladder starts from that same fit. Checked in
+   `results/decisions_arc/auc_norm_qm9.csv` and `auc_norm_assay.csv`: `baseline_r2` is identical across all
+   seven conditions for every cell. A condition axis would be the same bar drawn seven times.
+2. **The clean rows collapse to one per replicate before the fit.** They appear once per condition in the
+   loaded frame. Left as they come they multiply every cell count by seven and drive the residual towards
+   nothing, which reads as "the replicates agree" when it means "one number was counted seven times".
+3. **A disagreement at level 0 is a defect, not a spread.** If two conditions differ at level 0 the
+   function prints how many cells and by how much, and says it is a loading defect. It does not average it
+   away silently.
+4. **Thirteen models, not nineteen.** The six variant models come out, as they do from F2 and T3:
+   `dnn_bnn_full_mve`, `mlp_bnn_full_mve`, `dnn_vbll_hetero`, `mlp_vbll_hetero`, `het_gp_rbf`, `gauche`.
+   They train under a different likelihood from the model beside them, so they move the model term for a
+   reason that is not the question. Named in `figlib_config.ANOVA_MODELS_EXCLUDE`.
+5. **The band is the same leave-one-replicate-out jackknife as F2.** Drop one replicate, decompose the
+   rest, repeat; the whisker is the range over those fits. It is not a confidence interval.
+6. **The residual is real.** It is the variation between replicates of one identical configuration — same
+   dataset, same model, same representation, different seed. Ten replicates on QM9, five on each of the
+   three assay datasets.
+
+**What the data supports, checked in `results/decisions_arc/d0_coverage.csv` on the 22 September run.** All
+four datasets have 13 base models by 6 representations = 78 cells, every one with a clean level and status
+OK. So 780 clean R² values on QM9 and 390 on each assay dataset, and the design is balanced.
+
+**Code.** `figlib_metrics.clean_accuracy_eta2_by_dataset`, `figlib_figures.f2b_clean_decomposition`, the
+table `anova_eta2_clean.csv` beside `anova_eta2.csv`, and the file `F2b_clean_decomposition.png`.
+Guard: `test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate` in `scripts/test_figure_slots.py`.
+
+### 18.2 F3b — the model-by-representation grid for every condition, not just the ones that differ
+
+The author's instruction: *"that doesn't change the fact I need to see similar results for ALL the noise
+conditions. I know it won't be the full set, but you can't just throw those axes out. I still need to write
+about them."*
+
+**The rule that was wrong, and how it changed.** D2 decides which conditions the MAIN TEXT carries, by
+holding back a grid that repeats another to inside the replicate wobble. That was being read as a decision
+to stop drawing the repeat at all, which left grouped-wider in no figure anywhere — it is in F2 and T3 as
+numbers and nowhere as a grid. D2's scope is now the main text only. Everything gets drawn.
+
+**Where each of the seven conditions is now.**
+
+| Noise condition | Cells on QM9, base models | Figure |
+|---|---|---|
+| Gaussian | 78 of 78 | F3 panel a, and F3b |
+| Grouped, shifted | 78 of 78 | F3 panel b, and F3b |
+| Grouped, wider | 78 of 78 | **F3b only** — held out of the main text as a repeat of Gaussian |
+| Student-*t* (ν=5) | 12 of 78 | R19 |
+| Outlier (10%) | 12 of 78 | R19 |
+| Laplace | 12 of 78 | R19 |
+| Censoring | 3 of 78 | R19 |
+
+One cell is one model on one representation. The four conditions with 12 or 3 cells ran on a named subset
+of the pairs by design, so their rows in a 13-row grid would be mostly grey; R19 puts them on the pairs
+they were run on, with Gaussian beside them as the reference.
+
+**Which conditions F3b draws is asked of the data, not written into the code.** A condition is drawn when
+it has a value for every model-and-representation cell of the roster. A list of names in the code would go
+stale the first time a run fills a condition in, and the figure would then quietly omit it.
+
+**Three grids of thirteen rows do not fit one page.** Stacked they are 345 mm against the journal's 225,
+and eighteen columns side by side is past the limit. So F3b writes one image per condition, sharing one
+colour range and one row order, exactly as F8 already does for the three assay datasets.
+
+**Code.** `figlib_figures.f3b_every_full_roster_condition`, writing
+`F3b_every_condition_qm9_<condition>.png`.
+
+### 18.3 Where the two new figures go, and what has to happen first
+
+**F3b is an additional-file figure.** The main text's own F3 caption already promises it: *"Grouped-wider
+repeats panel a) and is in an additional file"* (`paper.tex:400`). **Where F2b goes is the author's call.**
+It is a result rather than a supporting grid — the model and the representation divide the variance
+differently before any noise is added, and it is the only decomposition that puts the computed property
+beside the three measured endpoints — so the main text is the natural home, next to F2 at `paper.tex:391`.
+Additional files are the alternative and cost nothing but the cross-reference.
+
+The mechanism is in §16.2 and is not free-form: `additional_files.tex`
+carries one `% Additional file N — Title` comment per file, and `scripts/stage_additional_files.py` reads
+those comments to build `additional_files/MANIFEST.md`. A section added without that comment line is
+invisible to the manifest, so the comment is the part that must not be skipped.
+
+🔴 **Two things to fix before either figure can be staged.**
+
+1. `scripts/stage_additional_files.py` searches `results/decisions_arc_20260916/figures` — the 16 September
+   run. The current figures are in `results/decisions_arc/figures`, which is not on its search path, so a
+   new figure would be reported MISSING. One line.
+2. Every figure it staged on 21 September came from `results/paper_figures_v2/` and is dated 8 July. That is
+   §16.3, and it is the author's decision, not mine.
