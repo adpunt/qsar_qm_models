@@ -2433,11 +2433,158 @@ ones whose pointers now have to be rewritten.
 | **R6** `R6_representation_profile_*.png` | the cells where a model's robustness at one representation sits outside the range of its others | §R1's third paragraph keeps Figure~\ref{fig:grid} and loses nothing. Decision D5 fired on eight cells, and **seven of the eight are variant models**, which the cross-model figures exclude — so D5 fires on cells the paper does not draw |
 ---
 
+---
+
+## THE FIGURES AND TABLES ADDED ON 2026-09-23, LaTeX blocks
+
+Everything below is new since the list above was written and none of it is in `paper.tex` yet.
+Line numbers are against `paper.tex` as of 2026-09-23.
+
+### F2b — the decomposition on clean labels *(main text)*
+
+Goes in after line 405, the `\end{figure}` that closes `fig:variance`.
+
+```latex
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F2b_clean_decomposition.png}
+\caption{Share of the variance in predictive accuracy on clean labels explained by model
+architecture, molecular representation, their pairing, and the residual, on all four datasets.
+Accuracy is $R^2$ on held-out molecules with no noise added to the training labels. The bottom axis
+is the dataset, the side axis the share of variance; the four shares within a dataset sum to
+100\%. There is no noise-condition axis: the clean fit is made once per replicate and every noise
+condition starts from it. Whiskers on QM9 are a leave-one-replicate-out jackknife, not confidence
+intervals; the assay datasets have none, as their five scaffold folds partition one dataset rather
+than repeating an experiment.}
+\label{fig:variance_clean}
+\end{figure}
+```
+
+### R19 — the conditions run on a named subset *(promoted to main text 2026-09-23)*
+
+This is where censoring appears at all. It belongs in the subsection that compares the noise
+conditions, so after line 511, the `\end{figure}` that closes `fig:conditions`.
+
+```latex
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R19_deep_conditions_qm9.png}
+\caption{Robustness (\aucnorm) under the noise conditions given to a named subset of models and
+molecular representations, on the QM9 HOMO--LUMO gap. a) ECFP4, b) PDV, c) ChemBERTa. Rows are the
+models these conditions were run on, chosen before the run to cover one from each family, and
+Gaussian is the left column as the reference the rest are read against. Values are medians over
+replicates and colour is on one fixed range across all panels. Censoring is here rather than on the
+curves because its level is a fraction of labels clipped rather than a fraction of the label
+spread; a grey square marked ``not run'' is a pairing it was never given.}
+\label{fig:deep}
+\end{figure}
+```
+
+### T3 — the numbers behind F2 *(main text, currently cited nowhere)*
+
+Goes in the Variance decomposition subsection, after the second paragraph. The file is
+`T3_variance_decomposition_qm9.tex`; paste its body or `\input` it.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Share of the variance in each outcome explained by model architecture, molecular
+representation, their pairing and the residual, per noise condition, on the QM9 HOMO--LUMO gap.
+The $\pm$ is half the leave-one-replicate-out range: the decomposition is repeated with each
+replicate dropped in turn. It is not a per-replicate spread, as decomposing a single replicate
+leaves one observation per cell and the residual is then arithmetically zero.}
+\label{tab:variance}
+\input{T3_variance_decomposition_qm9}
+\end{table}
+```
+
+### T3b — the same on clean labels *(main text, new 2026-09-23)*
+
+The numbers behind F2b. Without it the clean-label paragraph has a figure and nothing to quote.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Share of the variance in predictive accuracy on clean labels explained by model
+architecture, molecular representation, their pairing and the residual, one row per dataset.
+Accuracy is $R^2$ on held-out molecules with no noise added to the training labels. There is no
+noise-condition column: the clean fit is made once per replicate and every noise condition starts
+from it. The assay datasets carry no band, as their five scaffold folds partition one dataset
+rather than repeating an experiment.}
+\label{tab:variance_clean}
+\input{T3b_variance_decomposition_clean}
+\end{table}
+```
+
+### T4 — every model under every noise condition *(main text)*
+
+Already generated for all four datasets and cited nowhere. This is the table that carries all
+seven conditions, censoring included, with clean $R^2$ as its first column and a dash where a
+pairing was not run — the thing a reader needs when the figures each show a subset. Goes in the
+condition-comparison subsection.
+
+```latex
+\begin{table}[htbp]
+\centering
+\caption{Robustness (\aucnorm) of each model under each noise condition on the QM9 HOMO--LUMO gap
+at ECFP4, with clean $R^2$ in the first column as the quantity the rest are a fraction of. A dash
+is a pairing that condition was not run on: Laplace, Student-$t$ and outlier noise were given to a
+named subset of models, and censoring to a named subset of pairings. Values are medians over
+replicates.}
+\label{tab:robustness}
+\input{T4_robustness_qm9_ecfp4}
+\end{table}
+```
+
+The three assay versions, `T4_robustness_logd_ecfp4`, `T4_robustness_caco2_ecfp4` and
+`T4_robustness_herg_ecfp4`, go to the additional files with one `% Additional file N — Title`
+comment each, so `scripts/stage_additional_files.py` picks them up.
+
+### F3b and F4d — additional files
+
+**F3b** `F3b_every_condition_qm9_<condition>.png`, one image per condition: the robustness grid for
+every noise condition the whole roster ran, grouped-wider included. `fig:grid`'s caption in the
+main text already promises it. Three `\includegraphics` in one figure environment, as in the
+Additional file 13 block.
+
+**F4d** `F4d_conditions_by_representation_<model>.png`: one model's curves under every noise
+condition, one panel per molecular representation. A check figure first — look at it before
+deciding whether it earns a slot. If the answer to *whether outlier noise is the least damaging at
+high level holds beyond RF at ECFP4* is yes, it belongs in the main text beside
+Figure~\ref{fig:conditions}; if it is an RF quirk, it is an additional file or nothing.
+
+### What the main text then holds
+
+| Slot | What it is | Where |
+|---|---|---|
+| F2 | Decomposition, QM9, three conditions, two outcomes | Variance decomposition |
+| F2b | Decomposition on clean labels, four datasets | Variance decomposition |
+| T3 | The numbers behind F2 | Variance decomposition |
+| T3b | The numbers behind F2b | Variance decomposition |
+| F3 | Model against representation | Robustness and clean accuracy (moved with line 421) |
+| F4b `fig:conditions` | RF across the conditions | The condition comparison |
+| R19 `fig:deep` | The subset conditions, censoring included | The condition comparison |
+| T4 | Every model under every condition | The condition comparison |
+
+That is four tables in the decomposition and condition sections against the one the paper has now.
+For scale: Venkatraman 2021 runs 12 pages with 3 figures and 6 tables; Kolmar and Grulke 2021, the
+closest comparator, 19 pages with 6 figures and 7 tables; Dablander 2023, 16 pages with 9 figures
+and 1 table. `paper.tex` has ten figures and one table, so the room is in the tables and not in
+more figures.
+
+
 # THE TABLES
 
-**Five in the paper**, and the fifth is new on 2026-09-18: the metrics table, the noise-conditions table,
-robustness at ECFP4, the uncertainty table, and the twelve standout pairings, which the author promoted
-because §R2's third paragraph names it and nothing else in the paper carries that list.
+**Seven in the paper as of 2026-09-23.** The five below, plus the two variance-decomposition
+tables added in the section above: the metrics table, the noise-conditions table, robustness at
+ECFP4, the uncertainty table, the twelve standout pairings, T3 and T3b. Three of them — T3, T3b
+and the robustness table — are generated already and cited nowhere, which is the whole of the
+"where are the tables" problem.
+
+The five that were here before, the fifth new on 2026-09-18: the metrics table, the
+noise-conditions table, robustness at ECFP4, the uncertainty table, and the twelve standout
+pairings, which the author promoted because §R2's third paragraph names it and nothing else in the
+paper carries that list.
 
 🔴 **The uncertainty table has changed and so has its file.** It is now **one row per model and noise
 condition, on QM9 at the PDV representation**, which is 30 rows, and it is written to

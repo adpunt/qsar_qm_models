@@ -569,3 +569,52 @@ def t7_rank_transfer(transfer, output_dir, rep=None, condition='gaussian'):
                 f'averaging over representations is exactly what would hide a '
                 f'ranking that does not transfer.', float_format='%.0f'))
     return written[0] if written else None
+
+
+# ---------------------------------------------------------------------------
+# T3b -- the same decomposition on clean labels, every dataset
+# ---------------------------------------------------------------------------
+
+def t3b_variance_clean(anova_clean, output_dir):
+    """One row per dataset: how accuracy divides before any noise is added.
+
+    T3 answers the question under noise, on QM9 alone. This is the comparison
+    that separates "molecular representation governs accuracy" from
+    "molecular representation governs accuracy only once the labels are
+    wrong", and without it the clean-label paragraph has a figure and no
+    numbers behind it (the author, 2026-09-23).
+
+    The assay datasets get no band. Their five scaffold folds partition one
+    dataset rather than repeating an experiment, so dropping one in turn does
+    not measure what dropping one of the ten QM9 replicates measures -- the
+    same reason T3 gives.
+    """
+    if anova_clean is None or not len(anova_clean):
+        return None
+    rows = []
+    for _, r in anova_clean.iterrows():
+        row = {'Dataset': C.dataset_label(r['dataset'])}
+        for column, label in (('eta2_model', 'Model'),
+                              ('eta2_rep', 'Representation'),
+                              ('eta2_interaction', 'Interaction'),
+                              ('eta2_residual', 'Residual')):
+            spread = r.get(f'{column}_spread')
+            row[f'{label} η² (%)'] = (
+                f"{r[column]:.1f}" if not np.isfinite(spread or np.nan)
+                else f"{r[column]:.1f} ± {spread / 2:.1f}")
+        row['Models'] = int(r.get('n_models', 0))
+        row['Representations'] = int(r.get('n_reps', 0))
+        row['Replicates'] = int(r.get('n_replicates', 0))
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    return write(table, output_dir, 'T3b_variance_decomposition_clean',
+                 'Share of the variance in predictive accuracy on CLEAN '
+                 'labels explained by model, representation, their pairing '
+                 'and the residual, one row per dataset. Accuracy is R2 on '
+                 'held-out molecules with no noise added to the training '
+                 'labels. There is no noise-condition column: the clean fit '
+                 'is made once per replicate and every noise condition starts '
+                 'from it. The ± is half the leave-one-replicate-out range, '
+                 'as in the noise decomposition. The assay datasets have no '
+                 'true replicates and get no band: their five scaffold folds '
+                 'partition one dataset rather than repeating an experiment.')

@@ -642,6 +642,9 @@ def build_tables(args, tables, verdicts):
     built = [TAB.t1_metrics(out), TAB.t2_conditions(out)]
     if tables.get('anova_eta2') is not None and len(tables['anova_eta2']):
         built.append(TAB.t3_variance(tables['anova_eta2'], out))
+    if (tables.get('anova_eta2_clean') is not None
+            and len(tables['anova_eta2_clean'])):
+        built.append(TAB.t3b_variance_clean(tables['anova_eta2_clean'], out))
     if qm9 is not None and len(qm9) and rep:
         built.append(TAB.t4_robustness(qm9, out, rep))
     if assay is not None and len(assay) and rep:
