@@ -918,7 +918,11 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         quantity the rest are a fraction of. A grey square marked "not run" was
         never fitted; one marked "excluded" ran and was dropped, with the reason
         -- no clean level on its ladder, a clean accuracy under the gate, or
-        fewer than three levels to integrate -- in the excluded table.""")
+        fewer than three levels to integrate -- in the excluded table. Only
+        the noise conditions the whole roster ran are here; the ones given to a
+        named subset of models would leave a mostly empty column and are in
+        R19, and censoring is on neither figure's axis. Every condition,
+        including those, is in T4.""")
     written.append(S.save(fig, Path(output_dir) / 'F4c_robustness_grid.png'))
     return written[0] if written else None
 
@@ -2005,7 +2009,14 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
     """
     if summary is None or not len(summary) or not conditions:
         return None
-    frame = C.cross_model(summary[summary['dataset'] == dataset], 'R19')
+    # NOT cross_model. That filter drops the variant models because they
+    # cannot stand as independent architectures in a CROSS-MODEL comparison,
+    # and it was silently taking three of the seven models the deep run was
+    # chosen to include -- GP (het.), BNN-Full-MVE and VBLL-Full-Hetero -- so
+    # the figure drew four rows while its caption reported those four as
+    # everything that ran. This grid is the deep run's own roster, named in
+    # deep_run_pairs.json, not a cross-model ranking (the author, 2026-09-23).
+    frame = summary[summary['dataset'] == dataset]
     show = ['gaussian'] + [c for c in C.sort_conditions(conditions)
                            if c != 'gaussian']
     frame = frame[frame['condition'].isin(show)]
@@ -2052,14 +2063,21 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
         bar.ax.tick_params(labelsize=7)
 
     named = ', '.join(C.condition_label(c) for c in show if c != 'gaussian')
+    roster = ', '.join(C.model_label(m) for m in models)
     caption('R19', f"""
-        The noise conditions that run on a named subset of pairs rather than on
-        the whole roster: {named}, on {C.dataset_label(dataset)}. One panel per
-        representation; rows are the {len(models)} models these conditions were
-        run on and Gaussian is the left column, as the reference they are read
-        against. These conditions are absent from the main robustness grid
-        because their column there would be mostly empty by design, not because
-        anything is still running.""")
+        The noise conditions that run on a named subset of models and
+        representations rather than on the whole roster: {named}, on
+        {C.dataset_label(dataset)}. One panel per representation. The rows are
+        the models these conditions were run on -- {roster} -- chosen before
+        the run to cover one model from each family, and Gaussian is the left
+        column, as the reference the rest are read against. Every value is the
+        median over replicates. These conditions are absent from the main
+        robustness grid because their column there would be mostly empty by
+        design, not because anything is still running. Censoring is here rather
+        than on the curves because its level is a fraction of labels clipped
+        rather than a fraction of the label spread, so it shares no bottom axis
+        with the others; a grey square marked "not run" is a pair it was never
+        given.""")
     return S.save(fig, Path(output_dir) / f'R19_deep_conditions_{dataset}.png')
 
 
@@ -2353,3 +2371,94 @@ def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
     S.shared_legend(fig, ax, ncol=3)
     return S.save(
         fig, Path(output_dir) / f'R15b_rank_by_rep_{model}_{condition}.png')
+
+
+# ---------------------------------------------------------------------------
+# F4d -- F4b's curves, on every representation instead of one
+# ---------------------------------------------------------------------------
+
+def f4d_conditions_by_representation(accuracy, output_dir, dataset='qm9',
+                                     models=None):
+    """One panel per representation, one line per noise condition.
+
+    F4b answers "does the KIND of noise matter" for one model on one
+    representation, and that single panel was the only drawing of the curves
+    that existed. Whether a condition costs more early or late is a property
+    of the pairing, exactly as F4a's two panels show for the models -- so the
+    answer from one representation cannot stand for the other five (the
+    author, 2026-09-23).
+
+    A check figure, not a paper figure: it is here so the shapes can be looked
+    at, and what it shows decides what the paper carries. One file per model.
+    Censoring is absent for the same reason it is absent from F4b -- its level
+    is a fraction of labels clipped, not a fraction of the label spread, so it
+    does not share this bottom axis.
+    """
+    if accuracy is None or not len(accuracy):
+        return []
+    frame = accuracy[accuracy['dataset'] == dataset]
+    rankable = G.ranking_conditions(sorted(frame['condition'].dropna().unique()))
+    frame = frame[frame['condition'].isin(rankable)]
+    if not len(frame):
+        return []
+
+    if models is None:
+        models = [C.DEFAULT_FOCUS_MODEL] if C.DEFAULT_FOCUS_MODEL in set(
+            frame['model']) else sorted(frame['model'].unique())[:1]
+    reps = [r for r in C.REP_LABELS if r in set(frame['rep'].dropna())]
+    if not reps:
+        return []
+
+    written = []
+    for model in models:
+        here = frame[frame['model'] == model]
+        if not len(here):
+            continue
+        # A representation this model never ran on would draw an empty panel
+        # under a letter, which reads as a finding rather than a gap.
+        panes = [r for r in reps if len(here[here['rep'] == r])]
+        if not panes:
+            continue
+        columns = min(3, len(panes))
+        rows = int(np.ceil(len(panes) / columns))
+        G.declare(here, 'F4d', fixed={'dataset': dataset, 'model': model},
+                  varies=('rep', 'condition', 'sigma'),
+                  aggregates=('replicate',))
+        fig, axes = _fig(height=2.6 * rows, nrows=rows, ncols=columns,
+                         sharey=True, sharex=True)
+        axes = np.atleast_1d(axes).ravel()
+        for index, (ax, held) in enumerate(zip(axes, panes)):
+            curves = (here[here['rep'] == held]
+                      .groupby(['condition', 'sigma'], as_index=False)['r2']
+                      .median())
+            S.line_chart(ax, curves, 'sigma', 'r2', 'condition',
+                         labeller=C.condition_label,
+                         colours=C.CONDITION_COLORS, legend=False)
+            ax.spines[['top', 'right']].set_visible(False)
+            S.title(ax, 'abcdef'[index], C.rep_label(held))
+            if index % columns == 0:
+                ax.set_ylabel(G.metric_label('r2'))
+            if index >= len(panes) - columns:
+                ax.set_xlabel(LEVEL_AXIS)
+        for spare in axes[len(panes):]:
+            spare.set_visible(False)
+        S.shared_legend(fig, axes[0], side=True)
+        caption('F4d', f"""
+            Whether the KIND of noise matters or only the amount, for
+            {C.model_label(model)} on {C.dataset_label(dataset)}, one panel per
+            representation. One line per noise condition, each the median over
+            replicates, all panels sharing a side axis so the panels can be
+            read against each other. Bottom axis: the amount of noise put into
+            the training labels, as a fraction of the clean training label
+            spread. Lines that lie on top of each other mean this pairing
+            cannot tell the noise conditions apart at a matched dose; lines
+            that separate mean the shape of the noise costs something beyond
+            its size, and WHERE they separate is what the area under the curve
+            cannot tell you. Censoring is absent: its level is a fraction of
+            labels clipped rather than a fraction of the label spread, so it
+            does not share this bottom axis. The numbers behind every line are
+            in r2_by_level.csv.""")
+        written.append(S.save(
+            fig, Path(output_dir) /
+            f'F4d_conditions_by_representation_{model}.png'))
+    return written

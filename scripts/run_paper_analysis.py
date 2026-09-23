@@ -133,6 +133,12 @@ def parse_args(argv=None):
                         'reference condition, which is a reading off the data '
                         'and not a recommendation. RF and QRF are the obvious '
                         'alternatives -- see d1_auc_norm_by_model.csv')
+    p.add_argument('--curve-models', default=None,
+                   type=lambda s: [m.strip() for m in s.split(',') if m.strip()],
+                   help='comma-separated models to draw F4d for, the check '
+                        'figure that puts one model\'s noise-condition curves '
+                        'on all six representations. Default: the same model '
+                        'F4b holds constant. One file per model.')
     p.add_argument('--cache-dir', default=None,
                    help='parquet cache for the parsed results')
     p.add_argument('--only', default='decisions',
@@ -343,6 +349,17 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d10_probabilistic(qm9_per))
 
     collect(D.accuracy_across_representations(qm9))
+    # The curves themselves, unpooled. The line above averages across the
+    # representations and covers one condition; this is every condition on
+    # every representation, because the SHAPE of a curve is not recoverable
+    # from the area under it.
+    collect(D.accuracy_ladder(qm9, dataset='qm9'))
+    if assay is not None and len(assay):
+        for name in sorted(assay['dataset'].dropna().unique()):
+            got, verdict = D.accuracy_ladder(assay, dataset=name)
+            if got:
+                tables[f'r2_by_level_{name}'] = got['r2_by_level']
+                verdicts.append(verdict)
     # Raw numbers for two questions the author asked: which model-and-
     # representation pairs are robust on more than one dataset, and which are
     # best at finding the corrupted labels.
@@ -428,6 +445,11 @@ def draw_figures(args, tables, verdicts):
         drawn.append(FIG.f4_overview(accuracy, qm9, out, rep,
                                      focus_model=args.focus_model,
                                      excluded=tables.get('excluded_qm9')))
+        # F4b on one representation could not say whether where a condition
+        # costs you is a fact about the model or about the pairing. This draws
+        # the same curves on all six.
+        drawn += FIG.f4d_conditions_by_representation(
+            accuracy, out, models=args.curve_models) or []
         drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
                                                 'gaussian'))
         drawn.append(FIG.r16_decoupling(qm9, out, rep,

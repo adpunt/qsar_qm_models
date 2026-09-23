@@ -1222,3 +1222,61 @@ def write_report(verdicts, tables, output_dir, context=None):
     path = output_dir / 'DECISIONS.md'
     path.write_text('\n'.join(lines))
     return path
+
+
+# ---------------------------------------------------------------------------
+# The accuracy ladder -- every condition, every representation, nothing pooled
+# ---------------------------------------------------------------------------
+
+def accuracy_ladder(accuracy, dataset='qm9'):
+    """R2 at every noise level, for every condition and every representation.
+
+    THE DATA THIS STUDY RESTS ON AND NOTHING WAS WRITING IT OUT. The area
+    under the retention curve is saved per cell, and `model_accuracy_by_level`
+    saves one condition averaged across representations as a decision aid --
+    so the only place the individual curves existed was inside whichever
+    figure happened to draw them, which was F4b: one model, one
+    representation. Two conditions can share an AUC_norm and lose it in
+    different places, and nothing on disk could tell you which (the author,
+    2026-09-23).
+
+    One row is one model on one representation under one noise condition at
+    one noise level: the median over replicates, the spread across them, and
+    the count. Nothing is averaged over representations and nothing is
+    averaged over conditions.
+    """
+    if accuracy is None or not len(accuracy):
+        return {}, _verdict('A2', 'What does each curve actually look like?',
+                            False, 'no accuracy rows yet')
+    frame = accuracy[accuracy['dataset'] == dataset]
+    if not len(frame):
+        return {}, _verdict('A2', 'What does each curve actually look like?',
+                            False, f'nothing at {dataset}')
+    out = (frame.groupby(['model', 'rep', 'condition', 'sigma'], dropna=False)['r2']
+           .agg(r2='median',
+                r2_spread=lambda v: float(v.max() - v.min()),
+                n_replicates='size')
+           .reset_index())
+    out.insert(0, 'dataset', dataset)
+
+    # The clean value each curve is read against, carried on every row so a
+    # reader never has to join the table to itself to see what was lost.
+    clean = (out[out['sigma'] == out['sigma'].min()]
+             .set_index(['model', 'rep', 'condition'])['r2'])
+    keys = list(zip(out['model'], out['rep'], out['condition']))
+    out['r2_clean'] = [clean.get(k, float('nan')) for k in keys]
+    out['kept'] = out['r2'] / out['r2_clean']
+
+    levels = sorted(out['sigma'].dropna().unique())
+    says = (f'R2 at {len(levels)} noise level(s) for '
+            f'{out["model"].nunique()} model(s) on '
+            f'{out["rep"].nunique()} representation(s) under '
+            f'{out["condition"].nunique()} noise condition(s), on '
+            f'{C.dataset_label(dataset)}. Median over replicates, which is the '
+            f'only axis collapsed -- nothing is pooled across representations '
+            f'or across conditions. `kept` is that row divided by the same '
+            f'cell at the lowest level, so a curve can be read by shape rather '
+            f'than only by its area.')
+    return ({'r2_by_level': out},
+            _verdict('A2', 'What does each curve actually look like?',
+                     fired=False, says=says))
