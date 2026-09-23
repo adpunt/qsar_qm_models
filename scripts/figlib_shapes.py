@@ -159,12 +159,20 @@ def shared_legend(fig, sources, ncol=4, extra=None, margin=None,
         return out
 
     if side:
+        # THE KEY SITS AT THE EDGE OF THE AXES, NOT THE EDGE OF THE CANVAS.
+        # Anchoring at 1.0 put the entries at the right edge of the FIGURE
+        # while tight_layout had just pulled the axes back to `used`, so the
+        # key floated a fifth of the width clear of the bars it labels -- and
+        # `bbox_inches='tight'` in save() then grew the canvas to take it in,
+        # which widened the gap instead of closing it (the author, 2026-09-23).
+        used = margin if margin is not None else 0.78
+        used = min(used, 0.92)
         legend = fig.legend(handles, labels, loc='center left',
-                            bbox_to_anchor=(1.0, 0.5), ncol=1, frameon=False,
-                            fontsize=8, handletextpad=0.5, labelspacing=0.6)
+                            bbox_to_anchor=(used + 0.01, 0.5), ncol=1,
+                            frameon=False, fontsize=8, handletextpad=0.5,
+                            labelspacing=0.6)
         # Reserve the strip on the right instead of the band underneath.
-        used = margin if margin is not None else 0.80
-        fig.tight_layout(rect=[0, 0, min(used, 0.92), 1])
+        fig.tight_layout(rect=[0, 0, used, 1])
         return legend
 
     legend = fig.legend(colmajor(handles), colmajor(labels), loc='lower center',
