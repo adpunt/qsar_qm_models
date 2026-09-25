@@ -1179,6 +1179,59 @@ def d10_probabilistic(per_replicate):
         n_wins=int(len(wins)), n_losses=int(len(losses)))
 
 
+def counterpart_changes(per_replicate):
+    """Each model against its own probabilistic counterpart, on every dataset.
+
+    One row per dataset, pair, representation and condition. Robustness and
+    clean accuracy side by side, because a counterpart that keeps a larger
+    share of a lower clean R2 has not become the better model. Paired on the
+    replicate on QM9 and on the scaffold fold on the assay datasets; five folds
+    cannot reach p < 0.05 in a signed-rank test, so the assay rows are read by
+    `higher_in` and `lower_in`, the number of folds in which the counterpart
+    sits above or below its base. `matched` says whether the two run at one
+    setting (C.MATCHED_PAIRS); the network pairs are matched only in runs made
+    after commit 85bc2dc.
+    """
+    if per_replicate is None or not len(per_replicate):
+        return {}
+    frame = per_replicate
+    if 'dataset' not in frame.columns:
+        frame = frame.assign(dataset='qm9')
+    frame = frame.assign(dataset=frame['dataset'].map(C.canonical_dataset))
+    rows = []
+    for base, variant in C.PROBABILISTIC_PAIRS:
+        both = frame[frame['model'].isin([base, variant])]
+        for (dataset, rep, condition), sub in both.groupby(
+                ['dataset', 'rep', 'condition']):
+            if sub['model'].nunique() < 2:
+                continue
+            got = M.wilcoxon_paired(sub, 'auc_norm', 'model', base, variant,
+                                    pair_on='replicate')
+            wide = sub.pivot_table(index='replicate', columns='model',
+                                   values=['auc_norm', 'baseline_r2'])
+            wide = wide.dropna()
+            change = wide[('auc_norm', variant)] - wide[('auc_norm', base)]
+            clean = wide[('baseline_r2', variant)] - wide[('baseline_r2', base)]
+            rows.append(dict(
+                dataset=dataset, base=base, variant=variant,
+                matched=(base, variant) in C.MATCHED_PAIRS,
+                rep=rep, condition=condition, n_pairs=int(len(wide)),
+                auc_norm_base=float(wide[('auc_norm', base)].median()),
+                auc_norm_variant=float(wide[('auc_norm', variant)].median()),
+                auc_norm_change=float(change.median()),
+                higher_in=int((change > 0).sum()),
+                lower_in=int((change < 0).sum()),
+                clean_r2_base=float(wide[('baseline_r2', base)].median()),
+                clean_r2_variant=float(wide[('baseline_r2', variant)].median()),
+                clean_r2_change=float(clean.median()),
+                clean_higher_in=int((clean > 0).sum()),
+                clean_lower_in=int((clean < 0).sum()),
+                p_value=got.get('p_value'),
+                significant=bool(got.get('significant'))))
+    table = pd.DataFrame(rows)
+    return {'counterpart_changes': table} if len(table) else {}
+
+
 # ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------

@@ -191,6 +191,11 @@ AUC_NORM_IMPLAUSIBLE_HIGH = 1.05
 # ---------------------------------------------------------------------------
 
 PROBABILISTIC_PAIRS = [
+    # rf300 is the plain forest at the quantile forest's 300 trees and every
+    # other setting identical (author, 2026-09-21), so it is the forest pair.
+    # rf (100 trees) against qrf stays for the harvests that predate rf300; it
+    # reads a 200-tree difference as well as the quantile machinery.
+    ('rf300', 'qrf'),
     ('rf', 'qrf'),
     ('dnn', 'dnn_bnn_full'),
     ('dnn_bnn_full', 'dnn_vbll'),
@@ -200,6 +205,19 @@ PROBABILISTIC_PAIRS = [
     ('mlp_bnn_full', 'mlp_bnn_full_mve'),
     ('gauche_rbf', 'het_gp_rbf'),
 ]
+
+#: The pairs whose two members run at one setting, so they differ by the
+#: probabilistic machinery alone (commit 85bc2dc, 2026-09-21). The network
+#: pairs are matched only in runs made after that commit. Every other pair in
+#: PROBABILISTIC_PAIRS differs in settings as well: the variance-head networks
+#: run at the shared default, the variational ones at their own tuned setting,
+#: and rf at 100 trees against qrf's 300.
+MATCHED_PAIRS = {
+    ('rf300', 'qrf'),
+    ('dnn', 'dnn_bnn_full'),
+    ('mlp', 'mlp_bnn_full'),
+    ('gauche_rbf', 'het_gp_rbf'),
+}
 
 # ---------------------------------------------------------------------------
 # Display. Nothing else owns these.
@@ -389,7 +407,7 @@ MODEL_GROUPS = [
 
 MODEL_COLORS = {
     # Trees -- cool
-    'rf': '#0072B2', 'qrf': '#0072B2',
+    'rf': '#0072B2', 'rf300': '#0072B2', 'qrf': '#0072B2',
     'xgboost': '#56B4E9', 'lgb': '#009E73',
     # NN-alpha -- amber
     'dnn': '#E69F00', 'dnn_bnn_full': '#E69F00', 'dnn_bnn_last': '#E69F00',
@@ -456,7 +474,7 @@ def curve_label(name):
 #: Base model = circle, full Bayesian = square, VBLL = diamond, a per-molecule
 #: noise head = plus, a variance head = star.
 MODEL_MARKERS = {
-    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
+    'rf': 'o', 'rf300': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
     'svm': 'o', 'gauche': 'o', 'gauche_rbf': 's', 'het_gp_rbf': 'P',
     'dnn': 'o', 'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
     'dnn_vbll_hetero': 'P', 'dnn_bnn_full_mve': '*',
@@ -465,7 +483,7 @@ MODEL_MARKERS = {
 }
 
 MODEL_ORDER = [
-    'rf', 'qrf',
+    'rf', 'rf300', 'qrf',
     'xgboost', 'lgb', 'ngboost',
     'svm', 'gauche', 'gauche_rbf', 'het_gp_rbf',
     'dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve', 'dnn_vbll', 'dnn_vbll_hetero',
@@ -473,7 +491,7 @@ MODEL_ORDER = [
 ]
 
 MODEL_LABELS = {
-    'rf': 'RF', 'xgboost': 'XGBoost', 'lgb': 'LightGBM', 'qrf': 'QRF',
+    'rf': 'RF', 'rf300': 'RF (300 trees)', 'xgboost': 'XGBoost', 'lgb': 'LightGBM', 'qrf': 'QRF',
     'ngboost': 'NGBoost', 'svm': 'SVM',
     'dnn': 'NN-α', 'mlp': 'NN-β',
     # The Tanimoto process left the study (14.11v), so there is only one
@@ -556,6 +574,9 @@ def canonical_model(name, pipeline='qm9'):
 #: the uncertainty work, and the one figure that puts each against its own base.
 #: They may be dropped entirely if the uncertainty side does not use them.
 VARIANT_MODELS = {
+    # The 300-tree plain forest exists for the forest pair alone; RF (100
+    # trees) carries the cross-model comparisons.
+    'rf300',
     'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
     'dnn_vbll_hetero', 'mlp_vbll_hetero',
     'het_gp_rbf',

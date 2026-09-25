@@ -16058,9 +16058,27 @@ Open, owned by the paper-revision chat, closed when the new harvest is checked a
 - F8c (`figures/F8c_curves_every_dataset_<rep>.png`, ECFP4 and PDV): held-out R² against noise level
   on all four datasets, one row per dataset, one column per condition including outlier. And T10
   (`tables/T10_accuracy_at_level_<rep>`): R² with no noise and at level 1.0. Both feed guide §R5.
+- For guide §R3 (counterparts): `counterpart_changes.csv`, every pair on every dataset, representation
+  and condition, with the change in AUC_norm and in clean R² and the number of replicates or folds
+  each way; table T11 (`tables/T11_counterparts_<dataset>`); figures R17b (the three families on all
+  four datasets) and R17c (the change each swap makes). `rf300` is now in the figure library as the
+  forest pair's base and is kept out of cross-model figures. **Before this re-run is worth doing,
+  the 21 September pairfix arrays must have finished**: `dnn`, `mlp`, `dnn_bnn_full`,
+  `mlp_bnn_full` and `rf300`, QM9 and assay. The 16 September harvest predates them, so every
+  network and forest number in §R3 is a placeholder.
+- **2026-09-25: all ten pairfix arrays COMPLETED** (author's `sacct`). They appended to the same
+  `anova_<condition>_<rep>_<model>.csv` files as the old runs. The old duplicate rule would have kept
+  the OLD `dnn` and `mlp` rows (params_source "default" ties "tuned" and wins alphabetically) and
+  taken the median of old and new for the two BNNs. Fixed: `drop_superseded` in
+  `scripts/figlib_load.py` drops rows of those four models carrying spec hash `26163cc378cd`
+  wherever a re-run copy exists; guard `scripts/test_superseded_specs.py`; loader cache generation 2.
+- **Not fixed by those runs:** BNN against BNN with a variance head. `dnn_bnn_full_mve` and
+  `mlp_bnn_full_mve` have no tuned entry and run at `NEURAL_DEFAULTS`, while their Bayesian bases now
+  run at the pair setting. The 21 September scope was the deterministic-to-probabilistic pairs only.
+  Guide §R3 holds that paragraph as a placeholder with both options; the author decides.
 
 ```bash
-cd $QSAR && git pull && sbatch slurm_scripts_analysis/run_paper_analysis.sh
+cd $QSAR && bash scripts/pull_safely.sh && sbatch slurm_scripts_analysis/run_paper_analysis.sh
 ```
 
 ---

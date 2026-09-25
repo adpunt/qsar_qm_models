@@ -235,12 +235,18 @@ def _fingerprint(paths):
     return h.hexdigest()[:16]
 
 
+#: Bumped whenever what a loader does to the rows changes, so a frame cached
+#: under the old logic is never reused. 2: drop_superseded (2026-09-25).
+LOADER_GENERATION = 2
+
+
 def _cached(cache_dir, key, paths, build):
     if cache_dir is None:
         return build()
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    target = cache_dir / f'{key}_{_fingerprint(paths)}.parquet'
+    target = (cache_dir
+              / f'{key}_g{LOADER_GENERATION}_{_fingerprint(paths)}.parquet')
     if target.exists():
         try:
             print(f'  cache hit: {target.name}')
@@ -277,6 +283,51 @@ def _cached(cache_dir, key, paths, build):
 # ---------------------------------------------------------------------------
 # QM9
 # ---------------------------------------------------------------------------
+
+#: Rows written BEFORE a model's setting was changed, named by the spec hash
+#: they carry. Commit 85bc2dc (2026-09-21) moved these four networks onto the
+#: setting each shares with its pair and re-ran them into the SAME files, which
+#: `save_results` appends to. The old rows carry 26163cc378cd, the spec before
+#: that commit; the re-run rows carry the spec after it. Without this, the
+#: duplicate rule below keeps the OLD plain networks (their params_source,
+#: "default", ties with the new "tuned" and wins alphabetically) and takes the
+#: median of old and new for the two Bayesian ones.
+SUPERSEDED_SPECS = {
+    'dnn': {'26163cc378cd'},
+    'mlp': {'26163cc378cd'},
+    'dnn_bnn_full': {'26163cc378cd'},
+    'mlp_bnn_full': {'26163cc378cd'},
+}
+
+
+def drop_superseded(df, key, where):
+    """Drop a superseded copy wherever a copy of the same row at a newer spec exists.
+
+    Only the models in SUPERSEDED_SPECS, and only where the replacement is
+    actually there -- a cell the re-run did not reach keeps its old rows, and
+    the count of those is printed so it cannot pass unseen.
+    """
+    if 'spec_hash' not in df.columns or 'model' not in df.columns:
+        return df
+    old = pd.Series(False, index=df.index)
+    for model, hashes in SUPERSEDED_SPECS.items():
+        old |= (df['model'] == model) & df['spec_hash'].astype(str).isin(hashes)
+    if not old.any():
+        return df
+    newer = set(map(tuple, df.loc[~old, key].to_numpy()))
+    replaced = old & pd.Series([tuple(k) in newer for k in df[key].to_numpy()],
+                               index=df.index)
+    kept_old = old & ~replaced
+    if int(replaced.sum()):
+        print(f'  {where}: {int(replaced.sum())} row(s) dropped -- written before '
+              f'commit 85bc2dc moved {", ".join(sorted(SUPERSEDED_SPECS))} onto '
+              f'their shared setting, and re-run since.')
+    if int(kept_old.sum()):
+        cells = (df.loc[kept_old, ['model']].value_counts().to_dict())
+        print(f'  ⚠ {where}: {int(kept_old.sum())} row(s) at the OLD setting have '
+              f'no re-run copy and are kept: {cells}. These are not matched pairs.')
+    return df[~replaced]
+
 
 #: How a cell that was run more than once is resolved. "last" is file append
 #: order and is what the loader did first -- it is not a choice, it is whichever
@@ -416,6 +467,8 @@ def load_qm9(results_dir, cache_dir=None, duplicate_rule='median'):
         df = pd.concat(frames, ignore_index=True)
         df, _ = apply_model_map(df, C.QM9_MODEL_MAP, 'QM9')
         df = _tidy(df, 'qm9', 'replicate')
+        df = drop_superseded(df, ['model', 'rep', 'condition', 'sigma',
+                                  'replicate'], 'QM9')
         # The replicate is IN the key. Without it, appended runs of the same
         # cell overwrite one another.
         key = ['model', 'rep', 'condition', 'sigma', 'replicate']
@@ -641,6 +694,8 @@ def load_assay_accuracy(dirs, cache_dir=None,
         df['dataset'] = df['dataset'].map(_assay_dataset)
         df, _ = apply_model_map(df, C.VALIDATION_MODEL_MAP, 'the assay datasets')
         df = _tidy(df, 'assay', 'fold')
+        df = drop_superseded(df, ['dataset', 'model', 'rep', 'condition',
+                                  'sigma', 'replicate'], 'assay')
         # `fold` is IN the key. The old loader deduplicated on dataset, model,
         # rep, condition and level with no fold, kept the first row, and
         # silently discarded four fifths of the data.

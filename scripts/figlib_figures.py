@@ -1932,7 +1932,9 @@ def plt_rect(x, y, width, height):
 VARIANT_FAMILIES = [
     ('NN-α family', ['dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve']),
     ('NN-β family', ['mlp', 'mlp_bnn_full', 'mlp_bnn_full_mve']),
-    ('Forests', ['rf', 'qrf']),
+    # rf300 is the plain forest at qrf's 300 trees; rf (100 trees) is drawn
+    # only for a harvest that has no rf300 (see _family_members).
+    ('Forests', ['rf300', 'rf', 'qrf']),
 ]
 
 #: One colour per ROLE, shared across the two neural panels so the same kind of
@@ -1943,8 +1945,16 @@ FAMILY_ROLE_COLORS = {
     'dnn': '#0072B2', 'mlp': '#0072B2',
     'dnn_bnn_full': '#D55E00', 'mlp_bnn_full': '#D55E00',
     'dnn_bnn_full_mve': '#009E73', 'mlp_bnn_full_mve': '#009E73',
-    'rf': '#CC79A7', 'qrf': '#7B3294',
+    'rf': '#CC79A7', 'rf300': '#CC79A7', 'qrf': '#7B3294',
 }
+
+
+def _family_members(members, have):
+    """The members of one family that ran, with rf dropped when rf300 ran."""
+    got = [m for m in members if m in have]
+    if 'rf300' in got and 'rf' in got:
+        got.remove('rf')
+    return got
 
 
 def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
@@ -1966,7 +1976,7 @@ def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
     if not len(frame):
         return None
     have = set(frame['model'].unique())
-    use = [(name, [m for m in members if m in have])
+    use = [(name, _family_members(members, have))
            for name, members in (families or VARIANT_FAMILIES)]
     use = [(name, members) for name, members in use if len(members) >= 2]
     if not use:
@@ -2016,6 +2026,180 @@ def r17_variant_families(accuracy, output_dir, rep, dataset='qm9',
         roster and so has no panel here.""")
     return S.save(fig, Path(output_dir) /
                   f'R17_variant_families_{rep}_{condition}.png')
+
+
+def r17b_variant_families_every_dataset(accuracies, output_dir, rep,
+                                        condition='gaussian', families=None):
+    """R17 on all four datasets: rows are datasets, columns the three families.
+
+    The same lines as R17, so a pattern seen on QM9 can be checked on the assay
+    datasets (the author, 2026-09-25). Median over replicates on QM9 and over
+    scaffold folds on the assay datasets. Each row has its own side axis.
+    """
+    frames = [f for f in accuracies if f is not None and len(f)]
+    if not frames:
+        return None
+    acc = pd.concat(frames, ignore_index=True)
+    acc = acc.assign(dataset=acc['dataset'].map(C.canonical_dataset))
+    acc = acc[(acc['rep'] == rep) & (acc['condition'] == condition)]
+    datasets = [d for d in C.DATASET_ORDER if d in set(acc['dataset'])]
+    if not datasets:
+        return None
+    have = set(acc['model'].unique())
+    use = [(name, _family_members(members, have))
+           for name, members in (families or VARIANT_FAMILIES)]
+    use = [(name, members) for name, members in use if len(members) >= 2]
+    if not use:
+        return None
+    G.declare(acc, 'R17b', fixed={'rep': rep, 'condition': condition},
+              varies=('dataset', 'model', 'sigma'), aggregates=('replicate',))
+    fig, axes = _fig(height=1.9 * len(datasets) + 0.8, nrows=len(datasets),
+                     ncols=len(use), sharex=True, sharey='row')
+    axes = np.atleast_2d(axes)
+    letters = iter('abcdefghijklmnopqrstuvwxyz')
+    for i, dataset in enumerate(datasets):
+        for j, (name, members) in enumerate(use):
+            ax = axes[i, j]
+            S.title(ax, next(letters), name)
+            ax.spines[['top', 'right']].set_visible(False)
+            here = acc[acc['dataset'] == dataset]
+            drawn = 0
+            for model in members:
+                one = (here[here['model'] == model]
+                       .groupby('sigma', as_index=False)['r2'].median()
+                       .sort_values('sigma'))
+                if not len(one):
+                    continue
+                drawn += 1
+                ax.plot(one['sigma'], one['r2'], marker='o', markersize=3,
+                        linewidth=1.4,
+                        color=FAMILY_ROLE_COLORS.get(model,
+                                                     C.model_color(model)),
+                        label=C.model_label(model))
+            if not drawn:
+                ax.text(0.5, 0.5, 'not run', transform=ax.transAxes,
+                        ha='center', va='center', color='#888888')
+            elif i == 0 or j == len(use) - 1:
+                ax.legend(loc='lower left', fontsize=6, frameon=False,
+                          handlelength=1.4, labelspacing=0.25)
+            if j == 0:
+                ax.set_ylabel(f'{C.dataset_label(dataset).split(" (")[0]}\n'
+                              f'{G.metric_label("r2")}')
+            if i == len(datasets) - 1:
+                ax.set_xlabel('Noise level')
+    caption('R17b', f"""
+        Held-out accuracy against the amount of label noise for each model and
+        its own probabilistic counterpart, on every dataset, at
+        {C.rep_label(rep)} under {C.condition_label(condition)}. Rows are
+        datasets, named on the side axis; columns are the NN-alpha family, the
+        NN-beta family and the forests. The line is the median over ten
+        replicates on QM9 and over five scaffold folds on the assay datasets.
+        Each row has its own side axis. Bottom axis: the noise level, a
+        fraction of the clean training label spread. The numbers are in
+        counterpart_changes.csv.""")
+    return S.save(fig, Path(output_dir) /
+                  f'R17b_variant_families_every_dataset_{rep}_{condition}.png')
+
+
+#: The pairs R17c draws, top to bottom. A pair with no rows is skipped.
+R17C_PAIRS = [
+    ('rf300', 'qrf'), ('rf', 'qrf'),
+    ('dnn', 'dnn_bnn_full'), ('dnn_bnn_full', 'dnn_bnn_full_mve'),
+    ('mlp', 'mlp_bnn_full'), ('mlp_bnn_full', 'mlp_bnn_full_mve'),
+    ('gauche_rbf', 'het_gp_rbf'),
+]
+
+R17C_CONDITION_MARKERS = {'gaussian': 'o', 'grouped_wider': 's',
+                          'grouped_shifted': '^'}
+
+
+def r17c_counterpart_changes(changes, output_dir, pairs=None,
+                             conditions=tuple(R17C_CONDITION_MARKERS)):
+    """What swapping a model for its counterpart changes, on every dataset.
+
+    Top row: the change in AUC_norm. Bottom row: the change in clean R2. One
+    column per dataset. One row of dots per pair; one dot per representation
+    and condition -- colour is the representation, shape the condition. A
+    filled dot moved the same way in every replicate (QM9) or fold (assay).
+    Nothing is averaged.
+    """
+    if changes is None or not len(changes):
+        return None
+    frame = changes[changes['condition'].isin(conditions)]
+    have = set(zip(frame['base'], frame['variant']))
+    order = [p for p in (pairs or R17C_PAIRS) if p in have]
+    if ('rf300', 'qrf') in order and ('rf', 'qrf') in order:
+        order.remove(('rf', 'qrf'))
+    datasets = [d for d in C.DATASET_ORDER if d in set(frame['dataset'])]
+    if not order or not datasets:
+        return None
+    G.declare(frame, 'R17c', fixed={},
+              varies=('dataset', 'base', 'variant', 'rep', 'condition'),
+              aggregates=('replicate',))
+    fig, axes = _fig(height=0.45 * len(order) * 2 + 1.6, nrows=2,
+                     ncols=len(datasets), sharey=True)
+    axes = np.atleast_2d(axes)
+    reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
+    rep_colors = dict(zip(reps, ['#0072B2', '#E69F00', '#009E73', '#CC79A7',
+                                 '#D55E00', '#56B4E9']))
+    letters = iter('abcdefghijklmnopqrstuvwxyz')
+    for i, (value, label) in enumerate(
+            [('auc_norm_change', 'Change in AUC$_{norm}$'),
+             ('clean_r2_change', 'Change in clean $R^2$')]):
+        for j, dataset in enumerate(datasets):
+            ax = axes[i, j]
+            S.title(ax, next(letters),
+                    C.dataset_label(dataset).split(' (')[0])
+            ax.axvline(0, color='#888888', linewidth=0.8)
+            ax.spines[['top', 'right']].set_visible(False)
+            here = frame[frame['dataset'] == dataset]
+            for y, (base, variant) in enumerate(order):
+                pair = here[(here['base'] == base)
+                            & (here['variant'] == variant)]
+                for k, (_, row) in enumerate(pair.iterrows()):
+                    n = row['n_pairs']
+                    which = ('higher_in', 'lower_in') if i == 0 else (
+                        'clean_higher_in', 'clean_lower_in')
+                    same_way = n and (row[which[0]] == n or row[which[1]] == n)
+                    color = rep_colors.get(row['rep'], '#444444')
+                    jitter = (k % 6 - 2.5) * 0.06
+                    ax.scatter(row[value], y + jitter, s=14,
+                               marker=R17C_CONDITION_MARKERS.get(
+                                   row['condition'], 'o'),
+                               facecolor=color if same_way else 'none',
+                               edgecolor=color, linewidth=0.8)
+            ax.set_yticks(range(len(order)))
+            ax.set_yticklabels([f'{C.model_label(b)} → {C.model_label(v)}'
+                                for b, v in order], fontsize=6)
+            ax.set_xlabel(label, fontsize=7)
+            from matplotlib.ticker import MaxNLocator
+            ax.xaxis.set_major_locator(MaxNLocator(3, symmetric=True))
+            ax.tick_params(axis='x', labelsize=6)
+    # The y axis is shared, so one inversion puts the first pair on top in
+    # every panel.
+    axes[0, 0].invert_yaxis()
+    from matplotlib.lines import Line2D
+    handles = ([Line2D([], [], marker='o', linestyle='', color=rep_colors[r],
+                       label=C.rep_label(r)) for r in reps]
+               + [Line2D([], [], marker=m, linestyle='', color='#444444',
+                         markerfacecolor='none',
+                         label=C.condition_label(c))
+                  for c, m in R17C_CONDITION_MARKERS.items() if c in conditions])
+    fig.legend(handles=handles, loc='lower center', ncol=5, fontsize=6,
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.subplots_adjust(bottom=0.16, hspace=0.45, wspace=0.12)
+    caption('R17c', """
+        What replacing a model with its own probabilistic counterpart changes,
+        on every dataset. Top row: the change in AUC_norm; bottom row: the
+        change in clean R2; both are counterpart minus base, the median of the
+        paired differences over ten replicates on QM9 and five scaffold folds
+        on the assay datasets. One row of marks per pair, one mark per
+        representation (colour) and noise condition (shape). A filled mark
+        moved the same way in every replicate or fold. Left of the grey line,
+        the counterpart is worse. Each panel has its own bottom axis, because
+        the changes on the assay datasets run about ten times those on QM9. Nothing is averaged across representations
+        or conditions. The numbers are in counterpart_changes.csv.""")
+    return S.save(fig, Path(output_dir) / 'R17c_counterpart_changes.png')
 
 
 # ---------------------------------------------------------------------------
