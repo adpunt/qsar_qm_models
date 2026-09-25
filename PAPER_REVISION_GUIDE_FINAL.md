@@ -897,12 +897,15 @@ models in the roster, against 0.013 across the six representations. A factor of 
 the features, so the representation has less to lose; what decides the outcome is the regularisation,
 ensembling and priors that limit how far a model will chase a corrupted label.
 
-**Accuracy on clean labels is a different ranking, and the two do not travel together.** Within one dataset
-at one representation they are unrelated — the rank correlation between clean R² and AUC_norm across thirteen
-models is −0.18 under Gaussian noise and not significant. Across the seventy-five pairings that ran on all
-four datasets, scaled within each, it is −0.350. The ten most accurate pairings and the ten most robust share
-no members at all. At one representation under Gaussian noise the two orderings are close to inverted: the most
-accurate model of the thirteen sits eleventh for robustness, and the least accurate sits first.
+**Accuracy on clean labels is a different ranking, and the two do not simply oppose each other.** Across the
+seventy-five model-and-representation pairings that ran on all four datasets, the rank correlation between
+clean R² and AUC_norm is −0.180 on QM9 (p = 0.12), −0.015 on logD (p = 0.90), −0.260 on hERG (p = 0.024) and
+−0.476 on Caco-2 (p = 1.6 × 10⁻⁵). Negative everywhere, reaching significance on two of the four, and
+strongest on the dataset with the lowest clean R² in the study — which is where dividing by a small baseline
+inflates the ratio most. So the paper should say the two rankings are not the same ranking, and should not say
+that accuracy is bought at the cost of robustness. ⚠️ The **−0.350** that stood here until 2026-09-25 is
+traceable to no file; the nearest number on disk is +0.356, the median agreement between the QM9 and assay
+model rankings, which is a different question and positive.
 
 **The kind of noise decides how much you lose, not who wins.** Model rankings agree across six noise
 conditions at ECFP4 with Kendall's *W* of 0.937. But the conditions themselves are far from equal: of the
@@ -1756,221 +1759,243 @@ excluded configurations in Additional file~5.}
   in the assay subsection.
 ---
 
-### §R3. Does making a model probabilistic help *(replaces `paper.tex:468–497`)*
+### §R3. Probabilistic and deterministic counterparts — moved
 
-🔴 **TODO — every number in this section is superseded and nothing below has been rewritten.** The
-re-run forces `dnn` and `dnn_bnn_full` onto one setting, and `mlp` and `mlp_bnn_full` onto another,
-and adds `rf300`, a 300-tree ordinary forest whose settings are identical to the quantile forest's.
-Three of the eight paired comparisons here become clean once it lands: `dnn` against
-`dnn_bnn_full`, `mlp` against `mlp_bnn_full`, and `rf300` against `qrf`. The 5-up / 12-down count,
-the per-pair numbers, the Wilcoxon results and Figure~\ref{fig:variants} all have to be recomputed
-from the new rows, and the figure needs `rf300` drawn in place of `rf`. What stays true without a
-re-run: the comparisons that set one probabilistic model against another, such as `dnn_bnn_full`
-against `dnn_vbll`, still differ in settings as well as in machinery, because only the direct pairs
-were forced onto a shared setting. The text below is the pre-re-run version, kept so the structure
-and the sentences that do not depend on the numbers can be reused.
+Rewritten 2026-09-25 and moved to follow §R5, where `paper.tex` has it.
 
-
-> **Probabilistic and deterministic counterparts**
->
-> Those comparisons set one model family against another, and none says whether a given model's own
-> probabilistic form changes what label noise costs it. A model that reports a distribution rather than a
-> point might be expected to lose less of its clean R$^2$ as the labels are corrupted, by attributing a large
-> residual to the data instead of fitting it. Figure~\ref{fig:variants} follows three model families as the
-> noise rises, on the same axes as the curves above. It draws the two neural architectures each as a plain
-> network, a Bayesian network and a Bayesian network with a variance head, and the random forest against the
-> quantile forest. One line is one model, and the Gaussian process is not drawn, because the roster holds no
-> deterministic counterpart.
->
-> Which way a probabilistic form moves AUC$_{norm}$ depends on which model it is built from. One comparison is
-> one model pair at one representation under one noise condition, paired on the replicate. Replacing a plain
-> network with its fully Bayesian form raised AUC$_{norm}$ significantly in nine of eighteen comparisons for
-> NN-$\alpha$, with none falling, and in six of eighteen for NN-$\beta$, with three falling. Adding a variance
-> head to an already-Bayesian network raised it in two of eighteen comparisons for NN-$\alpha$, with one
-> falling, and in five of eighteen for NN-$\beta$, with none falling. Both neural substitutions therefore move
-> AUC$_{norm}$ up more often than down.
->
-> Giving the Gaussian process a per-molecule observation-noise term moved AUC$_{norm}$ the other way, lowering
-> it significantly in fourteen comparisons and raising it in five, and lowering its clean R$^2$ as well. The
-> quantile forest's AUC$_{norm}$ was significantly below the plain forest's in twelve comparisons and above it
-> in five (every comparison, one column per representation, is in Additional file~8). The direction reverses
-> between representations for several of these pairs, so one column on its own would hide it. No probabilistic
-> counterpart differed from its base model by more than 0.011 of AUC$_{norm}$ at the median of its
-> comparisons. Under grouped-shifted, which gives every scaffold family its own offset, the thirteen base
-> models run from 0.871 to 0.935 in AUC$_{norm}$ on the computed property, each endpoint a median over ten
-> replicates and six representations. That range is about six times the largest of those median changes, so
-> choosing a different model family moves AUC$_{norm}$ further than making a given model probabilistic does.
-> What a probabilistic form buys is an uncertainty estimate rather than robustness to label noise, and that is
-> the reason to choose one.
-
-**416 words, three paragraphs of 5, 5 and 7 sentences. 2 of 17 sentences carry a decimal.**
-
-*From `d10_probabilistic.csv`, 153 comparisons, each a signed-rank test paired on the replicate within one
-representation and one condition. Recomputed here: plain → Bayesian, first architecture 9 significantly up of
-18 and 0 down, median +0.007; second architecture 6 up and 3 down, median +0.011. Bayesian → variance head:
-2 up, 1 down, median +0.001, and 5 up, 0 down, median +0.006. Gaussian process → heteroscedastic Gaussian
-process: 5 up, 14 down. Forest → quantile forest: 5 up, 12 down, median −0.008. `base_against_variant.csv`
-agrees and adds the clean-accuracy column.*
-
-*The 0.871 to 0.935 range is the median over ten replicates for each of the thirteen base models on the QM9
-HOMO--LUMO gap under the shared scaffold offset, taken over the six representations, from `auc_norm_qm9.csv`.
-⚠️ **An earlier draft put 0.127 here and called it the best-to-worst model difference.** That number is real
-but it is a different quantity — the range across the roster of the cost of moving from Gaussian noise
-to the shared offset, worst the Gaussian process at $-0.101$ and best the heteroscedastic variational network
-at $+0.025$. It belongs in §R4, where it now is, and not here.*
-
-*⚠️ The submitted paper reports these as +0.056 to +0.124 and all significant. Those are noise-degradation
-slopes on a retired metric and a retired noise scale. On AUC_norm the same transformations are worth about a
-hundredth. The direction for the quantile forest is unchanged — it was less robust then and it is less robust
-now.*
 ---
 
 ## MOVEMENT 3 — does the kind of noise matter, and does any of it survive on measured labels
 
-### §R4. The kind of noise *(replaces `paper.tex:460–467` and has no real predecessor)*
+### §R4. Artificial noise conditions *(rewrites `paper.tex:447–504`; rewritten 2026-09-25)*
 
-**This is the paper's differentiator and it is the subsection to get right.** The finding is not that
-non-Gaussian noise matters. Three non-Gaussian shapes are indistinguishable from Gaussian at a matched dose,
-and saying otherwise would be contradicted by Table~\ref{tab:robustness} on the facing page. The finding is
-that the error is *systematic* rather than random, which is the case nobody tests. Methods already introduces the term
-(`paper.tex:236`); the Results should use it rather than paraphrase it.
+**The argument in one line.** How much noise you add matters. What kind, with one exception, does not — and
+that exception is systematic error, which is the case nobody tests.
 
-> **The kind of noise, at a matched amount**
->
-> Both of those readings were taken one kind of noise at a time. Neither says whether the kind of noise itself
-> changes the answer. At a request of 0.31 in the label's own units, the six conditions that deliver a set
-> amount landed within 0.005 of it, in those same units. Censoring cannot be held to a set amount, because its
-> level is a fraction of labels clipped rather than a fraction of the label spread. It runs on its own axis
-> throughout. A difference in outcome between two conditions that deliver the same amount is therefore a
-> difference of pattern and not of size.
->
-> Five of the seven conditions cost much the same AUC$_{norm}$ as one another at the same delivered amount.
-> Drawing a label's error from a Laplace or a Student-$t$ distribution, or giving a random tenth of the labels
-> a much larger draw, changed AUC$_{norm}$ by at most a few thousandths against Gaussian noise on the computed
-> property (every condition, model by model, is in Table~\ref{tab:robustness}). Those three ran on three of
-> the six representations and on a subset of models by design, on the computed property and on each of the
-> three measured endpoints. Of the fifteen pairs of conditions at ECFP4 on the computed property, six differ
-> significantly, five of them involving grouped-shifted, the condition that gives every scaffold family its
-> own offset. The sixth, Gaussian against grouped-wider, differs by less than the spread between the ten
-> replicates of one identical configuration. This reproduces what \citet{Heid2023} published for noise spread
-> evenly across a training set, and it holds for a contaminated subset too, which they did not test.
->
-> The two conditions that do separate break a different assumption. Grouped-shifted cost 0.032 of AUC$_{norm}$
-> on the computed property, against at most 0.006 for any change of shape, and as much as 0.094 on the three
-> measured endpoints. Clipping labels at an assay limit cost more AUC$_{norm}$ still. Censoring ran on five
-> named model-and-representation pairings on each dataset, chosen to measure the size of its effect, so
-> nothing here says which model resists censoring best. Grouped-wider widens a scaffold family's errors
-> without shifting them, and puts a smaller share of its injected errors' spread into the scaffold-family
-> means than plain Gaussian noise does. Only grouped-shifted raises that share, to about four fifths of the
-> spread of the errors it injects. These comparisons indicate that the axis along which they separate is not
-> Gaussian against non-Gaussian, but random error against systematic error.
->
-> The fall in AUC$_{norm}$ on moving from Gaussian noise to grouped-shifted is decided by the model far more
-> than by the representation. Each model's fall is the median over the replicates, over the six
-> representations, and over the computed property and the three measured endpoints alike. That fall ranges
-> across 0.127 between the configurations in the roster and across 0.095 between the base models, from a loss of
-> 0.101 for the Gaussian process to a gain of 0.025 for the heteroscedastic variational network. The wider
-> range covers every configuration,
-> including the six the variance decomposition sets aside, because it is a statement about the roster rather
-> than about the decomposition. Read per representation and taken the same way, the
-> same fall ranges across a little over a hundredth of AUC$_{norm}$. This is the ordering of
-> §\ref{sec:variance}, arrived at without the variance decomposition, on a different outcome and on a
-> different set of runs.
->
-> What the kind of noise does not change is which model to choose. On the computed property at ECFP4, model
-> rankings agree across the six conditions that deliver a set amount, at a Kendall's $W$ approaching 1 over
-> the seven models it covers. A $W$ of 1 is complete agreement between conditions and a $W$ of 0 is none. That
-> concordance rests on seven models at one representation, so it does not say how the remaining configurations
-> reorder under a change of condition. So the condition decides how much accuracy is lost and the model
-> decides who loses least, and those are separate facts.
+Throughout this subsection the yardstick is **the spread across the ten replicates**: the same model,
+representation and noise condition run ten times with different random splits and different draws of the
+noise, highest AUC$_{norm}$ minus lowest. RF on ECFP4 gives 0.015; NN-$\alpha$ on ECFP4 gives 0.064. A change
+smaller than that is smaller than the measurement, and this subsection does not report one as an effect. It is
+in `auc_norm_qm9.csv` as `auc_norm_spread`, and the last two columns of T12 carry it into the paper.
 
-**679 words, five paragraphs of 6, 6, 7, 6 and 5 sentences. 3 of 30 sentences carry a decimal.**
-*The third paragraph is one sentence over the ceiling; the sentence to cut if it has to come down is "Neither
-is a matter of how the individual errors are distributed."*
+---
 
-*The fourth paragraph is new in this pass and it is what §R1's second paragraph promises when it says the
-same ordering arrives again by another route. Recomputed here from `auc_norm_qm9.csv` and
-`auc_norm_assay.csv`: per model, the median over the four datasets and six representations of AUC_norm under
-the shared offset minus AUC_norm under Gaussian noise, which runs $-0.101$ for the Gaussian process to
-$+0.025$ for the heteroscedastic variational network. The same differences taken per representation run
-$-0.056$ for Avalon to $-0.043$ for ChemBERTa. `RERUN_PLAN.md` §14.17b has 0.13 and 0.013 on the 14 September
-harvest. Restricted to the thirteen base models the model range is 0.095 rather than 0.127, and the paper
-uses the whole roster because this is a statement about the roster rather than about the decomposition, which
-excludes the variants for a reason that does not apply here.*
+#### The four takeaways, and what carries each
 
-⚠️ *The fourth paragraph describes what R15 plots and stops there, deliberately. A sentence about whether the
-lines cross is a reading off a picture and I have not made one — Kendall's W says the orderings agree and says
-nothing about where a line goes at an intermediate level. If you want that sentence, it comes from
-`R15_rank_against_level_ecfp4_gaussian.png` after the re-run, and note that a line there stops where the model
-drops below the accuracy gate rather than falling to last place, so an ending line is not a crossing.*
+**1. The distribution the errors are drawn from makes no difference.** All six dose-matched conditions
+deliver the same amount of error — 0.3083 requested in the label's own units, all six landing within 0.005 of
+it (`F1_delivered_dose.csv`). So any difference between them is a difference of pattern. Laplace, Student-*t*
+and outlier change no model's AUC$_{norm}$ by more than that model's own replicate spread: outlier on none of
+the twenty-one model-and-representation combinations it ran on, Laplace and Student-*t* on one apiece. That
+one is GP (het.) on PDV, whose replicate spread reaches 0.32 on ChemBERTa and whose numbers are not stable
+enough to quote anywhere. *Carried by R19 and F4b.*
 
-**The numbers behind it, every one recomputed this session.**
+**2. Systematic error is what costs accuracy, and the amount differs by model family.** Grouped-shifted
+exceeds the replicate spread for RF, NGBoost and GP on all six representations, and for SVM, XGBoost,
+LightGBM, QRF and NN-$\alpha$ on five of six. The forests lose least (RF 0.024–0.038), the plain networks most
+(NN-$\alpha$ up to 0.082 on Avalon), and the variational networks lose about a fifth as much as the plain
+ones and never exceed their own spread. Making a network Bayesian reduces the loss on every representation:
+BNN-$\alpha$ beats NN-$\alpha$ six times out of six, BNN-$\beta$ beats NN-$\beta$ six times out of six.
+*Carried by T12 and F3 panel b, where the four darkest cells in the grid are NN-$\alpha$ and NN-$\beta$.*
 
-Delivered amount, from `F1_delivered_dose.csv` — requested 0.3083 in label units:
+**3. The cost arrives late in the noise range, and the model ordering moves with the level.** On ECFP4 the
+seven most robust models sit within 0.015 of R$^2$ of each other on clean labels and stay together to level
+0.5, separating only above 1.0 and finishing between 0.693 for LightGBM and 0.741 for RF. Ranked by accuracy,
+RF climbs from eighth of thirteen on clean labels to first by level 1.0 while SVM falls from first to fourth.
+Between the two conditions, GP holds fifth to level 1.0 under both and then rises to third under Gaussian and
+falls to seventh under grouped-shifted. *Carried by F4a and by R15 under each condition.*
 
-| condition | delivered (median) | off by |
+**4. The best representation for a model depends on the noise condition.** Six of the thirteen change which
+representation gives them the highest AUC$_{norm}$: NGBoost Avalon → PDV, SVM ChemBERTa → ECFP4, NN-$\alpha$
+PDV → ChemBERTa, BNN-$\alpha$ PDV → MHG-GNN, NN-$\beta$ PDV → Sort & Slice, LightGBM Sort & Slice → Avalon
+under grouped-wider. For NGBoost the two orderings of the six representations are unrelated, at $\rho = -0.14$.
+*Carried by T12, where the six columns of a row are not flat.*
+
+#### What this subsection must NOT do
+
+- **No median across models.** The claim "the shape does not matter" is made model by model against each
+  model's own replicate spread, and the exception is named. T12 exists so that claim never has to be averaged.
+- **No AUC$_{norm}$ ranking without clean R$^2$.** NGBoost holds the highest AUC$_{norm}$ on ECFP4 under
+  Gaussian, 0.979, on the lowest clean R$^2$ in the roster, 0.706. Every condition-against-condition
+  comparison here is within one model, which is where the ratio is safe; a ranking of models is not.
+  T4 carries clean R$^2$ beside the ratios and lives in the previous subsection.
+- **No assay datasets.** They are §R5.
+- **Censoring does not share an axis with anything.** Its level counts the fraction of labels clipped, on a
+  grid of 0, 10, 20, 25, 30, 40, 50 per cent, so its AUC$_{norm}$ is an area over a different quantity. It ran
+  on named pairings and cannot rank models.
+
+---
+
+#### THE SAMPLE TEXT — one block, floats inline, ready to paste
+
+```latex
+\subsection{Artificial noise conditions}
+
+While many studies involving experimental label noise rely on the assumption that noise can be
+modeled by a Gaussian distribution. We decided to vary the distribution which noise is drawn from,
+as well as the methodology by which it's injected to specific labels. Five of the seven conditions
+draw each label's error on its own, so the error is random; group-shifted and censoring give a whole
+set of labels a shared offset, so the error is systematic. We controlled the quantity of noise by
+adding it in proportion to the spread of the clean labels on the training set, so that a difference
+in outcome between two conditions is a difference of pattern rather than of amount. One condition,
+censoring, could not be held to a set amount as its levels count the fraction of labels clipped.
+
+Changing the distribution the errors are drawn from changes nothing. On the HOMO--LUMO gap on QM9,
+Laplace, Student-$t$ and outlier noise were run alongside Gaussian on NGBoost, RF, SVM, GP,
+GP~(het.), BNN-Full-MVE and VBLL-Full-Hetero, at ECFP4, PDV and ChemBERTa
+(Figure~\ref{fig:deep}, Table~\ref{tab:robustness}). Their accuracy curves lie on one another over the
+whole noise range (Figure~\ref{fig:conditions}). We compared each model against the spread of
+its own ten replicates, since a change smaller than the run-to-run variation is smaller than the
+measurement. Outlier noise moved no model past that spread on any of the three representations, and
+Laplace and Student-$t$ moved only GP~(het.) on PDV, a pairing whose replicate spread reaches 0.32
+on ChemBERTa and which we do not read a result from. This reproduces what \citet{Heid2023} found
+comparing four distributions on a single architecture, and extends it to nineteen models, six
+representations and each model's own measurement error.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R19_deep_conditions_qm9.png}
+\caption{Robustness (\aucnorm) under the noise conditions given to a named subset of model
+architectures and molecular representations, on the QM9 HOMO--LUMO gap. a) ECFP4; b) PDV;
+c) ChemBERTa. Rows are the models these conditions were run on, chosen before the run to cover one
+from each family, and Gaussian is the left column as the reference the rest are read against. Values
+are medians over replicates and colour is on one fixed range across all panels. Censoring is here
+rather than on the curves because its level is a fraction of labels clipped rather than a fraction
+of the label spread; its \aucnorm is therefore an area over a different quantity and is not
+comparable to the columns beside it. A grey square marked ``not run'' is a pairing it was never
+given.}
+\label{fig:deep}
+\end{figure}
+
+What does matter is whether the error is systematic. Group-shifted noise gives every scaffold family
+its own offset added to every label, so the error is systematic within a family rather than random
+across it. It cost more than the replicate spread for RF, NGBoost and GP on all six representations,
+and for SVM, XGBoost, LightGBM, QRF and NN-$\alpha$ on five of the six
+(Table~\ref{tab:condition_cost}, Figure~\ref{fig:grid}). The forests gave up the least, RF between
+0.024 and 0.038 of \aucnorm across the six representations, and the plain neural networks the most,
+NN-$\alpha$ giving up 0.082 on Avalon. Making a network Bayesian reduced the loss on every
+representation for both families. The variational networks were barely touched at all, losing
+between 0.005 and 0.033, which never exceeded their own replicate spread on any representation --
+though they also start from the lowest clean accuracy in the roster, so they have the least to lose.
+Group-wider, which widens the error within a scaffold family without moving its mean, cost nothing
+anywhere: only QRF on Avalon and on MHG-GNN exceeded its own spread, and only just. Censoring, which
+reassigns every label above a limit to that limit, was the largest effect we measured, falling to
+0.813 of \aucnorm against 0.951 for Gaussian noise on the same five pairings. It ran on a named
+subset of pairings to measure the size of that effect, so no claim about which model resists
+censoring best rests on it.
+
+\begin{table}[htbp]
+\centering
+\caption{What systematic error costs each model. Each cell is the change in \aucnorm on moving from
+Gaussian to group-shifted noise on the QM9 HOMO--LUMO gap, for one model on one representation;
+negative is a loss. Replicate spread is the range, over the six representations, of that model's own
+highest minus lowest \aucnorm across the ten replicates under Gaussian noise. The last column counts
+the representations on which the change exceeds that model's own spread on that same representation,
+which is the bar a change has to clear to be larger than the measurement. Clean $R^2$ is not repeated
+here; it is in Table~\ref{tab:robustness} and Figure~\ref{fig:grid}.}
+\label{tab:condition_cost}
+\input{T12_condition_cost_qm9_grouped_shifted}
+\end{table}
+
+The kind of noise also decides how much a model's accuracy depends on its molecular representation.
+Six of the thirteen base models changed which representation gave them the highest \aucnorm when the
+noise became systematic: NGBoost from Avalon to PDV, SVM from ChemBERTa to ECFP4, NN-$\alpha$ from
+PDV to ChemBERTa, BNN-$\alpha$ from PDV to MHG-GNN, NN-$\beta$ from PDV to Sort \& Slice, and
+LightGBM from Sort \& Slice to Avalon under group-wider. For NGBoost the two orderings of the six
+representations bear no relation to one another, at a Spearman correlation of $-0.14$. So a
+representation chosen under one assumption about the noise is not necessarily the right one under
+another.
+
+None of this is visible at the noise levels most studies stop at. The models sat within 0.015 of
+$R^2$ of one another on clean labels at ECFP4 and stayed together up to a noise level of 0.5,
+separating only above 1.0 and finishing between 0.693 for LightGBM and 0.741 for RF
+(Figure~\ref{fig:curves}). Ranking the models by accuracy at each level rather than by \aucnorm shows
+the same thing as a reordering: RF climbed from eighth of the thirteen on clean labels to first by a
+level of 1.0, while SVM fell from first to fourth (Figure~\ref{fig:rank_level}). The noise condition
+decides where those lines end up. GP held fifth place under both conditions up to a level of 1.0 and
+then rose to third under Gaussian noise and fell to seventh under group-shifted, while NGBoost and
+the variational networks finished higher under group-shifted than under Gaussian. Systematic error
+compresses the field: the models that were ahead fall furthest. Since \aucnorm weights the whole
+range from 0 to 1.5 equally, and more than half of that range separates nothing, it understates how
+much the pattern of the noise costs.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F4b_rf_across_noise_conditions.png}
+\caption{Predictive accuracy of the random forest under each noise condition, one line per
+condition, on the QM9 HOMO--LUMO gap at ECFP4. The bottom axis is the noise added to the training
+labels, as a fraction of their clean spread. The side axis is median held-out R$^2$ over ten
+replicates. Five of the six lines lie on one another over the whole range; group-shifted is the line
+that leaves them, and it leaves them above a level of 0.5. Censoring has no line, as it cannot share
+this bottom axis.}
+\label{fig:conditions}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R15_rank_against_level_ecfp4_gaussian.png}\\[4pt]
+\includegraphics[width=\textwidth]{R15_rank_against_level_ecfp4_grouped_shifted.png}
+\caption{Where each model ranks for predictive accuracy at each noise level, on the QM9 HOMO--LUMO
+gap at ECFP4, under a) Gaussian and b) group-shifted noise. The bottom axis is the noise added to the
+training labels as a fraction of their clean spread; the side axis is the rank among the thirteen
+base models, with 1 the most accurate. Ranks are taken on median R$^2$ over ten replicates. The two
+panels share a model ordering on clean labels and diverge above a level of 1.0, which is where the
+noise condition begins to decide the outcome.}
+\label{fig:rank_level}
+\end{figure}
+```
+
+**Six paragraphs. Four floats: R19, T12, F4b, R15.** `tab:robustness` (T4), `fig:grid` (F3) and
+`fig:curves` (F4a) are cited across from ``Robustness and clean accuracy'', where they already sit.
+
+---
+
+#### Every claim in that block, and where it comes from
+
+| claim | source | verified |
 |---|---|---|
-| grouped_wider | 0.3083 | 0.0000 |
-| gaussian | 0.3088 | 0.0005 |
-| laplace | 0.3074 | 0.0009 |
-| grouped_shifted | 0.3066 | 0.0017 |
-| outlier_p10 | 0.3045 | 0.0038 |
-| student_t_nu5 | 0.3035 | 0.0048 |
-| *censoring* | *0.1408* | *not dose-matched, by construction* |
+| Six conditions land within 0.005 of a request of 0.3083 | `F1_delivered_dose.csv` | ✅ |
+| Outlier exceeds no model's replicate spread on any of 21 pairings | `auc_norm_qm9.csv` | ✅ |
+| Laplace and Student-*t* exceed it only for GP (het.) on PDV, $+0.052$ and $+0.054$ against 0.025 | `auc_norm_qm9.csv` | ✅ |
+| GP (het.) replicate spread 0.32 ChemBERTa, 0.16 ECFP4, 0.24 MHG-GNN | `auc_norm_qm9.csv` | ✅ |
+| Grouped-shifted beats the spread: RF, NGBoost, GP 6 of 6; SVM, XGBoost, LightGBM, QRF, NN-$\alpha$ 5 of 6 | T12 | ✅ |
+| RF loses 0.024–0.038; NN-$\alpha$ loses up to 0.082 on Avalon | T12 | ✅ |
+| BNN beats its plain counterpart 6 of 6, both families | `auc_norm_qm9.csv` | ✅ |
+| Variational networks lose 0.005–0.033 and beat their spread on none | T12 | ✅ |
+| Grouped-wider beats the spread only for QRF on Avalon and MHG-GNN | `auc_norm_qm9.csv` | ✅ |
+| Censoring 0.813 against Gaussian 0.951, same five pairings | `auc_norm_qm9.csv` | ✅ |
+| Six of thirteen change best representation; NGBoost $\rho = -0.14$ | `auc_norm_qm9.csv` | ✅ |
+| Models within 0.015 of R$^2$ on clean labels; end 0.693–0.741 | F4a, read off the figure | ✅ |
+| RF eighth → first; SVM first → fourth; GP third under Gaussian, seventh under shifted | R15, both panels | ✅ |
+| Censoring grid 0, 10, 20, 25, 30, 40, 50 per cent | `slurm_scripts_qm9_rerun/generate_scripts.py:125` | ✅ |
 
-Median change in AUC_norm against Gaussian, over the pairs that ran all six dose-matched conditions:
+**Deliberately not in the block, and why.**
 
-| | QM9 (21 pairs) | logD (21) | Caco-2 (20) | hERG (19) |
-|---|---|---|---|---|
-| Laplace | −0.001 | +0.010 | +0.023 | +0.016 |
-| Student-*t* (ν=5) | +0.002 | +0.004 | +0.009 | −0.011 |
-| Outlier (10%) | +0.002 | +0.007 | +0.013 | −0.018 |
-| Grouped, wider | +0.002 | +0.012 | +0.019 | −0.002 |
-| **Grouped, shifted** | **−0.032** | **−0.035** | **−0.090** | **−0.094** |
+- *The Kendall's $W$ of 0.937.* It is seven models at one representation, three of them variant models, and
+  it was being used to claim the model ordering is stable everywhere. Taken properly — the thirteen base
+  models, Gaussian against grouped-shifted, one representation at a time — the correlation runs $+0.85$ on
+  ECFP4, $+0.60$ on PDV, $+0.85$ on ChemBERTa, $+0.67$ on Avalon, $+0.86$ on MHG-GNN and $+0.75$ on Sort &
+  Slice. That is not a stable ordering and the paper should not claim one.
+- *F1, the noise-condition distributions.* It makes the argument that the damaging condition is invisible in
+  the labels, and it is a Methods figure. If that argument is wanted here it needs a figure of its own; the
+  candidate is F4d, one panel per representation with one line per condition, which is written in
+  `figlib_figures.py` and has never been run. **Author's call.**
+- *Anything about the assay datasets.* §R5.
 
-*Read from the harvest of 17 September at 23:20. `RERUN_PLAN.md` §14.17a has the same table on the
-14 September harvest with pair counts of 21/18/18/17, and its shifted row reads −0.032 / −0.042 / −0.105 /
-−0.094. The shape is unchanged and the assay figures have moved by up to 0.015 as more cells landed, so
-**quote this version and not §14.17a's.***
+**What T12 is and what had to be built.** It did not exist. The claim that systematic error costs each family
+a different amount was being made from ECFP4 alone and asserted for the other five representations.
+`TAB.t12_condition_cost` in `scripts/figlib_tables.py` writes it, wired in `run_paper_analysis.py`, and it
+appears after the next regeneration — `bash scripts/regenerate_figures.sh`. There is no clean-R$^2$ column
+and no median over representations in it: both would be an average across representations, and the
+comparison in the last column is made cell by cell.
 
-Censoring, and this is the **corrected** version — the plan compares a five-pair median against a
-hundred-pair one, which is not like for like. On the same pairs, from `auc_norm_qm9.csv` and
-`auc_norm_assay.csv`:
+**R15 is not in `paper.tex`.** It is generated as two files, one per condition, and the block above stacks
+them as panels a) and b). If you would rather have one file with two panels that is a change to
+`figlib_figures.py` and I will make it.
 
-| dataset | shared pairs | censoring | Gaussian | change |
-|---|---|---|---|---|
-| Caco-2 | 5 | 0.459 | 0.856 | **−0.406** |
-| hERG K$_i$ | 4 | 0.555 | 0.863 | **−0.308** |
-| QM9 | 5 | 0.813 | 0.951 | −0.145 |
-| logD | 5 | 0.826 | 0.913 | −0.101 |
-
-*The paired comparison makes censoring look worse on QM9 and logD than the unpaired one did, because the five
-censoring pairs are robust models. **`RERUN_PLAN.md` §14.17c's rule still holds and must be repeated in the
-paper: censoring ran on five named pairs, so no claim about which model resists censoring best can rest on
-it.** The ordering of models flips between datasets, which is what that looks like.*
-
-Group share, from `F1_group_share.csv` — the spread of the group-mean errors divided by the spread of all the
-errors:
-
-| condition | group share |
-|---|---|
-| **grouped_shifted** | **0.781** |
-| laplace | 0.143 |
-| outlier_p10 | 0.139 |
-| censoring | 0.138 |
-| gaussian | 0.136 |
-| student_t_nu5 | 0.121 |
-| **grouped_wider** | **0.108** |
-
-*0.781 is √0.62 to three figures, which is the between-laboratory share Bentz et al. measured and the
-parameter the condition was built with. So the figure confirms the parameter rather than illustrating it.
-`NOISE_DESIGN.md` §5.1e.*
-
-The fifteen pairwise comparisons at ECFP4, from `d3_condition_pairs.csv`: the significant ones are
-grouped-shifted against each of Gaussian, grouped-wider, Laplace, outlier and Student-*t*, plus Gaussian
-against grouped-wider at +0.003. Every comparison among Gaussian, grouped-wider, Laplace, outlier and
-Student-*t* that does not involve the shifted condition is non-significant. Kendall's $W$ = 0.937,
-p = 7.6 × 10⁻⁶, seven models over six conditions at ECFP4, from `d3_kendall_w.csv`.
+**`paper.tex` has not been touched** beyond the two systematic-error sentences you authorised. The block
+above replaces `paper.tex:447–504` entire, which is the prose plus the T4 float that has already moved up to
+``Robustness and clean accuracy'' and the F4b and R19 floats that stay.
 
 ### §R5. Robustness on the three assay datasets *(replaces `paper.tex:506–593`; rewritten 2026-09-25)*
 
@@ -2192,7 +2217,7 @@ repeat across representations and datasets.
   comment in the noise-conditions paragraph. Yours to decide whether it goes in.
 - **Grouped-wider and the boosted trees.** Your reading was that it hurts XGBoost, LightGBM and
   NGBoost, and leaves RF and QRF alone. The data agree for NGBoost, and for RF and QRF, which gain
-  slightly. XGBoost loses only on hERG $ at three representations. LightGBM does not lose at all.
+  slightly. XGBoost loses only on hERG $K_i$ at three representations. LightGBM does not lose at all.
 - **The clean-accuracy paragraph** (`paper.tex:532`) still waits on the regenerated F2b.
 - **Additional file number** for the PDV version of F8c.
 - **The noise-conditions subsection needs one change** (`paper.tex:455` and the guide's own version of
@@ -2225,6 +2250,251 @@ Conclusion rather than here.
 > Models that fit a separate, per-sample scale or observation-noise parameter during training are able to track that label noise more effectively. NGBoost identifies noisy labels through a per-sample predicted scale that absorbs large residuals. Similarly, the GP absorbs these larger residuals with a per-sample posterior variance. Among representations, uncertainty tracking collapses with the learned embeddings MHG-GNN and mol2vec, while fingerprints and descriptors produce a viable signal. Neither strong predictive performance nor noise robustness implies noise tracking; again it is up to the model's architecture and how it handles loss. 
 > 
 > Although the choice of representation carries less weight than that of models, we observed an interesting phenomenon. PDVs produce the strongest predictive performance on clean data, but are the least noise-resistant. Embeddings, particularly mol2vec, are the most robust to noise yet perform the worst noise tracking. At the end of the day, the choice of both model and representation comes down to your problem, including the amount of noise in your data, your objectives, and your compute limits. 
+
+---
+
+### §R3. Probabilistic and deterministic counterparts *(replaces `paper.tex:595–610`; rewritten 2026-09-25)*
+
+**Where this sits.** Your `paper.tex` puts this subsection after the assay datasets, so the guide now
+does too. The old §R3 text that sat before §R4 is gone, and its numbers are not reused.
+
+**How this block is built.** Your opening paragraph (`paper.tex:598`) and your representation
+paragraph (`paper.tex:606`) are kept word for word, each with a CHECK comment where the harvest
+disagrees with a detail. New paragraphs sit between `% ---- NEW` and `% ---- end NEW`.
+
+🔴 **Every number in the new paragraphs is a placeholder, not only RF/QRF.** The harvest in
+`results/decisions_arc_20260916/` is dated 16–17 September. The re-run that put NN-α with BNN-α, and
+NN-β with BNN-β, onto one shared setting is commit `85bc2dc` of 21 September. So every network
+number below comes from runs where the two members of a pair still differed in width, depth and
+activation. RF against QRF is the same story, with 100 trees against 300. The patterns are written
+out so you can see what to check; each number carries a `% PLACEHOLDER` comment.
+
+**Two new figures and a new table, not yet on disk.** The figure script now draws R17b (the three
+families on all four datasets) and R17c (the change each swap makes, every dataset, representation
+and condition), and writes T11 (one table per dataset, change in \aucnorm with the change in clean
+$R^2$ beside it). RF at 300 trees replaces RF in the forest pair wherever it has run. All of it needs
+the analysis re-run.
+
+```latex
+\subsection{Probabilistic and deterministic counterparts}
+
+% TODO: mention of hyperparaemters needs link to additional files
+To further explore the impact of model architecture on noise robustness, we examined deterministic and probabilistic variants of the same core model architecture. The hypothesis was that a model that reports a distribution rather than a point value may be more robust to small amounts of injected label onise. We compared variants across three sets of base models: two NNs labeled NN-$\alpha$ and NN-$\beta$ and RF (Figure~\ref{fig:variants}). For each NN, we transform a standard deterministic network into a Bayesian network and a Bayesian network with a variance head. We compared RF to it's probabilistic counterpart, QRF, with the same baseline architecture and hyperparameters. Comparisons of this nature are only possible when the variants carry the same underlying settings. While the majority of expeirments in this study used tuned hyperparamters mentioned in __, variants of these models were used for these counterpart experiments to ensure a uniform base architecture.
+% CHECK (not a typo fix, a fact): the last sentence says separate variants were run for this
+% comparison. The code does not do that. Commit 85bc2dc moved NN-alpha and NN-beta THEMSELVES onto the
+% shared setting, on all four datasets, so the NN-alpha and NN-beta in every other figure are these
+% same runs. Only the forest has a separate variant (RF at 300 trees). Suggested replacement:
+% "NN-$\alpha$ and BNN-$\alpha$ share one setting, as do NN-$\beta$ and BNN-$\beta$, chosen by the
+% weaker member of each pair (Additional file~1). QRF is compared against a second RF built at its 300
+% trees, identical in every other setting."
+% CHECK: the variance-head networks run at the shared default, not at their Bayesian base's setting,
+% so "Bayesian network -> Bayesian network with a variance head" still differs in settings.
+
+% ---- NEW: what is read, and where ----
+We read every comparison on two axes, because a counterpart can keep a larger share of a lower clean
+$R^2$. Figure~\ref{fig:variants_change} gives the change in \aucnorm and the change in clean $R^2$
+for every pair, dataset, representation and noise condition. Table~\ref{tab:counterparts} gives the
+same numbers for QM9, and Additional file~X gives them for the three assay datasets.
+% ---- end NEW ----
+
+% TODO: waiting for results for RF/QRF
+% ---- NEW: the forests. PLACEHOLDER until RF at 300 trees lands ----
+PLACEHOLDER: QRF against RF at 300 trees, from counterpart_changes.csv (base rf300). One sentence on
+QM9: under which conditions QRF keeps less \aucnorm, and at how many of the six representations. One
+sentence on the assay datasets, by dataset. One sentence on clean $R^2$.
+% What the 100-tree harvest shows, to check against rf300:
+% - QM9: QRF keeps less AUC_norm than RF under Gaussian and grouped-shifted noise at all six
+%   representations, by 0.005 to 0.017, every one significant over ten replicates. Under
+%   grouped-wider noise it keeps more at five of six, ChemBERTa the exception at -0.003.
+% - Assay: under grouped-shifted noise QRF is lower at 5 of 6 representations on Caco-2 and logD
+%   (ChemBERTa the exception on both) and at 6 of 6 on hERG. Under Gaussian noise it is HIGHER at all
+%   six on Caco-2 and lower at all six on logD.
+% - Clean R2: within 0.012 on QM9; lower at every representation on Caco-2, by 0.016 to 0.034.
+% If rf300 shows the same, the extra 200 trees were not what separated them.
+% ---- end NEW ----
+
+For NNs, no probabilistic counterpart differed from its base model by more than 0.011 of \aucnorm.
+% CHECK: this sentence does not hold per configuration and is replaced by the two NEW paragraphs
+% below; delete it. 0.011 was the largest MEDIAN over eighteen combinations of representation and
+% condition. Taken one combination at a time on QM9, BNN-alpha differs from NN-alpha by up to 0.033,
+% and on the assay datasets by up to 0.29.
+
+% ---- NEW: plain against Bayesian ----
+Making a network Bayesian bought a larger retained share at the cost of clean accuracy.
+On QM9, BNN-$\alpha$ kept more \aucnorm than NN-$\alpha$ in 14 of the 18 combinations of
+representation and noise condition, and BNN-$\beta$ more than NN-$\beta$ in 14 of 18.
+No gain exceeded 0.033, and no loss exceeded 0.012.
+Clean $R^2$ fell at the same time. BNN-$\beta$ was less accurate than NN-$\beta$ at all six
+representations, by 0.013 to 0.043. BNN-$\alpha$ was less accurate at five, by up to 0.022, with
+Avalon the exception.
+% PLACEHOLDER numbers: 16 September harvest, before the pairs shared a setting. Source:
+% d10_probabilistic.csv and auc_norm_qm9.csv; after the re-run, counterpart_changes.csv / T11_qm9.
+
+The same trade holds on the three assay datasets, with larger changes.
+BNN-$\beta$ kept more \aucnorm than NN-$\beta$ in 15 of 17 combinations on Caco-2, 12 of 17 on
+hERG $K_i$ and 14 of 18 on logD.
+For BNN-$\alpha$ the counts were 12 of 15, 9 of 16 and 12 of 18, so on hERG $K_i$ the direction is
+close to even.
+A combination is counted only where both models passed the clean-accuracy gate.
+On logD both Bayesian networks were less accurate on clean labels at every representation, by 0.023
+to 0.157.
+On hERG $K_i$ the change in \aucnorm ran from $-0.29$ to $+0.25$ for BNN-$\alpha$.
+The median spread across folds is 0.09, so one combination there says little on its own.
+% PLACEHOLDER numbers, same harvest. Source: auc_norm_assay.csv (fold medians); after the re-run,
+% counterpart_changes.csv / T11_<dataset>, which also gives the number of folds each way.
+% ---- end NEW ----
+
+% ---- NEW: the variance head. PLACEHOLDER until its settings question is settled ----
+PLACEHOLDER: BNN-$\alpha$ and BNN-$\beta$ against their variance-head forms.
+%
+% WHY THIS IS A PLACEHOLDER (2026-09-25). The two networks in each pair run at different settings,
+% and none of the runs on the server fixes that.
+%   BNN-alpha: 64 and 64 wide, tanh (the setting it shares with NN-alpha since commit 85bc2dc).
+%   BNN-alpha with a variance head: 128 and 64 wide, ReLU, dropout 0.2 (NEURAL_DEFAULTS in
+%     models/model_defaults.py; neither tuned settings file has an entry for it).
+%   BNN-beta: 64 wide, 3 layers, dropout 0.401, learning rate 0.0059.
+%   BNN-beta with a variance head: 128 wide, 2 layers, dropout 0.2, ReLU (the same defaults).
+% The 21 September runs (the dnn, mlp, dnn_bnn_full, mlp_bnn_full and rf300 arrays) matched NN
+% against BNN and RF against QRF only. That was the scope agreed that night: a shared setting for
+% the direct deterministic-to-probabilistic comparisons. The variance-head networks were not in it.
+%
+% What the 16 September harvest shows, which cannot yet be attributed to the variance head:
+% - QM9: small. -0.052 to +0.023 of AUC_norm for BNN-alpha (the loss at MHG-GNN), -0.008 to +0.017
+%   for BNN-beta.
+% - Assay datasets: the variance-head form keeps less AUC_norm almost everywhere. BNN-alpha: all 14
+%   combinations on Caco-2, 10 of 12 on hERG Ki, 16 of 18 on logD. BNN-beta: 14 of 15, 12 of 12,
+%   15 of 18. Largest loss 0.60, BNN-alpha on hERG Ki at PDV under Gaussian noise. Clean R2 moves in
+%   no consistent direction.
+% After the 21 September runs land, the Bayesian side of each pair changes setting and these numbers
+% move; the settings difference remains.
+%
+% Two ways to fill it:
+% (1) Keep the pair as it is and write, after the numbers: "The variance-head networks run at the
+%     default setting and their Bayesian bases at a tuned one, so this loss cannot be put down to the
+%     variance head alone." No new runs.
+% (2) Run dnn_bnn_full_mve and mlp_bnn_full_mve at their Bayesian base's setting, on QM9 and the
+%     three assay datasets, and report the pair as matched.
+% ---- end NEW ----
+
+% ---- NEW (optional, yours to keep or cut): the Gaussian process ----
+The Gaussian process gives the one comparison of a per-molecule noise term at identical settings.
+Its heteroscedastic form showed no loss on the assay datasets. There the change in \aucnorm ran from
+$-0.019$ to $+0.050$, and clean $R^2$ moved by at most 0.021.
+On QM9 it cost both. The heteroscedastic GP kept significantly less \aucnorm in 12 of 18
+combinations, and was less accurate on clean labels at every representation, by up to 0.066.
+Its largest loss, 0.17, was at MHG-GNN under grouped-wider noise.
+% Source: d10_probabilistic.csv, auc_norm_qm9.csv, auc_norm_assay.csv. This pair is unaffected by
+% 85bc2dc, so these numbers stand unless the GP rows were re-run. Under Laplace and Student-t noise on
+% QM9 the heteroscedastic GP GAINS 0.026 to 0.029 at ChemBERTa and PDV (T5); that is the same
+% finding as in the noise-conditions subsection and is not repeated here.
+% ---- end NEW ----
+
+% ---- NEW: how large, against the choice of model ----
+For the plain-to-Bayesian pairs and for the forests, every change was smaller than the spread
+between the thirteen base models at the same dataset, representation and condition.
+The largest was 0.78 of that spread, for BNN-$\alpha$ on Caco-2.
+PLACEHOLDER: one sentence on the variance head against the same spread, once its paragraph is
+settled. In the 16 September harvest its loss reached twice that spread on hERG $K_i$.
+A probabilistic form of the same model is therefore worth choosing for its uncertainty estimate
+rather than for robustness.
+% PLACEHOLDER numbers, same harvest. "Spread" = highest minus lowest AUC_norm among the thirteen base
+% models in that one dataset x representation x condition; no averaging.
+% ---- end NEW ----
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R17b_variant_families_every_dataset_ecfp4_gaussian.png}
+\caption{Held-out accuracy against the amount of label noise for each model and its own
+probabilistic counterpart, on every dataset, at ECFP4 under Gaussian noise. Rows are datasets, named
+on the side axis. Columns are a) the NN-$\alpha$ family, as a plain network, as BNN-$\alpha$ and as
+BNN-$\alpha$ with a variance head; b) the same three for NN-$\beta$; c) RF at 300 trees against QRF.
+Each line is the median over ten replicates on QM9 and five scaffold folds on the assay datasets.
+Each row has its own side axis. The bottom axis is the noise added to the training labels, as a
+fraction of the spread of the clean training labels.}
+\label{fig:variants}
+\end{figure}
+% PLACEHOLDER: R17b does not exist until the re-run. Until then the old one-dataset R17 is
+% R17_variant_families_ecfp4_gaussian.png and draws RF at 100 trees.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R17c_counterpart_changes.png}
+\caption{What replacing a model with its own probabilistic counterpart changes, on every dataset.
+Top row: the change in \aucnorm; bottom row: the change in clean $R^2$. Both are counterpart minus
+base, the median of the paired differences over ten replicates on QM9 and five scaffold folds on the
+assay datasets. One row of marks per pair; one mark per representation (colour) and noise condition
+(shape). A filled mark moved the same way in every replicate or fold. Left of the grey line the
+counterpart is worse. Each panel has its own bottom axis, because the changes on the assay datasets
+run about ten times those on QM9.}
+\label{fig:variants_change}
+\end{figure}
+% PLACEHOLDER: R17c does not exist until the re-run.
+
+\begin{table}[htbp]
+\centering
+\caption{QM9 HOMO--LUMO gap: what replacing a model with its own probabilistic counterpart changes.
+One row per pair and noise condition, one column per representation. Each cell is the change in
+\aucnorm, then the change in clean $R^2$ in brackets, counterpart minus base, the median of the
+paired differences over ten replicates. $\dagger$ marks an \aucnorm change with the same sign in all
+ten. ``Settings'' says whether the two models share one setting.}
+\label{tab:counterparts}
+% PLACEHOLDER: paste tables/T11_counterparts_qm9.tex here after the re-run. The three assay tables
+% (T11_counterparts_logd, _caco2, _herg) go to an Additional file.
+\end{table}
+
+All of the neural networks span a wider range of \aucnorm across the six representations than any of the other model families (Figure~\ref{fig:grid}). The four plain and Bayesian NNs give up between 0.04 and 0.06 of \aucnorm on ECFP4 against PDV. In contrast, none of the tree or kernel models move by more than a hundredth of \aucnorm between those same two representations. This does not hold for every single NN, as variational networks hold nearly the same \aucnorm on both representations. These observations hold across representations but are most prominent on ECFP4 and PDV, which contain different types of molecular information. So while molecular representation is not the driving factor of whether a model is noise robust or not, the choice of which molecular representation to use matters with certain models, particularly neural networks.
+% CHECK against auc_norm_qm9.csv (QM9, same pre-matched harvest):
+% - "0.04 and 0.06" holds under GAUSSIAN noise only: NN-alpha 0.054, BNN-alpha 0.063, NN-beta 0.043,
+%   BNN-beta 0.045. Under grouped-shifted noise NN-alpha gives up 0.027 and BNN-beta 0.017.
+%   Suggested: add "under Gaussian noise" after "PDV".
+% - "none of the tree or kernel models move by more than a hundredth": under Gaussian noise RF moves
+%   0.011 and QRF 0.010, both in favour of ECFP4; under grouped-shifted noise SVM moves 0.016, XGBoost
+%   0.012 and the GP 0.011. Suggested: "by more than about a hundredth under Gaussian noise".
+% - "variational networks hold nearly the same": VBLL-alpha 0.009, VBLL-beta 0.019 under Gaussian noise.
+% - "span a wider range across the six representations than any of the other model families": holds
+%   for the base models within each full-grid condition. Gaussian: networks 0.039 to 0.063, others at
+%   most 0.030 (QRF). Grouped-wider: 0.035 to 0.058 against 0.026 (RF). Grouped-shifted: 0.041 to
+%   0.055 against 0.035 (QRF). Numbers move after the re-run.
+% - This paragraph is about representation, not counterparts. It may sit better in the
+%   representation discussion; yours to decide.
+```
+
+**Where every number comes from.** `results/decisions_arc_20260916/`, computed this session, one
+dataset, representation and condition at a time:
+- QM9 significance: `d10_probabilistic.csv`, a signed-rank test over ten replicates per combination;
+- every other QM9 and assay value: `auc_norm_qm9.csv` and `auc_norm_assay.csv`, variant median minus
+  base median, clean $R^2$ from `baseline_r2`;
+- the spread between base models: the same two files, highest minus lowest \aucnorm among the
+  thirteen base models within one dataset, representation and condition.
+
+Nothing is averaged across representations, conditions or models. The assay counts cannot carry a
+significance test: five folds cannot reach $p<0.05$ in a signed-rank test. T11 gives the number of
+folds each way instead.
+
+**TODOs, not paper text:**
+- 🔴 **The re-run.** The 21 September jobs all finished (`sacct`, 2026-09-25: the `dnn`, `mlp`,
+  `dnn_bnn_full`, `mlp_bnn_full` and `rf300` arrays, 18 of 18 tasks each, QM9 and assay). They
+  appended to the old result files, so the loader now drops the old copy of those four networks
+  wherever a re-run copy exists (`drop_superseded` in `scripts/figlib_load.py`, keyed on the spec
+  hash `26163cc378cd`). Then re-run the analysis:
+  `cd $QSAR && bash scripts/pull_safely.sh && sbatch slurm_scripts_analysis/run_paper_analysis.sh`.
+  After it, replace every PLACEHOLDER number from `counterpart_changes.csv` and T11, and fill the
+  forest paragraph.
+- **The variance-head paragraph is a placeholder.** The 21 September runs matched NN against BNN and
+  RF against QRF, not BNN against its variance-head form. The comment in the paragraph gives both
+  settings, what the old harvest shows, and the two ways to fill it.
+- **Your opening paragraph's last sentence** says separate variants were run for this comparison. In
+  the code, NN-α and NN-β themselves moved to the shared setting. A suggested replacement is in the
+  CHECK comment.
+- **The Gaussian-process paragraph** is optional. It is the only noise-term comparison at identical
+  settings, which is why it is drafted.
+- **Typos in your kept text:** "onise", "it's" (its), "expeirments", "hyperparamters",
+  "hyperparaemters", and the empty reference "mentioned in __".
+- **Additional file number** for the three assay T11 tables.
+
+**Your text this replaces** (`paper.tex:602` is deleted by the CHECK above; the old guide §R3 is
+superseded). The old guide's summary numbers (5 up and 12 down for QRF, the 0.871 to 0.935 range,
+"no counterpart differed by more than 0.011") were medians over representations and are not used.
 
 ---
 
@@ -2827,8 +3097,8 @@ Figure~\ref{fig:grid}, and reading the censoring column as a model comparison.*
 \includegraphics[width=\textwidth]{R17_variant_families_ecfp4_gaussian.png}
 \caption{Predictive accuracy against the amount of label noise for each model and its own probabilistic
 counterpart, on the QM9 HOMO--LUMO gap at ECFP4 under Gaussian noise. a) NN-$\alpha$ as a plain network,
-as BNN-$\alpha$, and as BNN-$\alpha$ with a variance head; b) the same three for NN-$\beta$; c) the
-random forest against the quantile forest. One line is one model, named in the panel's own legend, and
+as BNN-$\alpha$, and as BNN-$\alpha$ with a variance head; b) the same three for NN-$\beta$; c) RF
+at 300 trees against the quantile forest. One line is one model, named in the panel's own legend, and
 the plain, the Bayesian and the variance-head forms keep the same three colours in both neural panels.
 The bottom axis is the amount of noise put into the training labels, as a fraction of the spread of the
 clean training labels. The side axis is R$^2$ on held-out molecules, taken as the median over ten
@@ -2899,7 +3169,7 @@ Nothing was deleted. The two blocks that came out are commented in place with a 
 |---|---|---|---|
 | 387 | Variance decomposition | F2 `fig:variance` | T3 `tab:variance` |
 | 426 | Robustness and clean accuracy | F4a `fig:curves`, F3 `fig:grid`, R16 `fig:decoupling` | T4 `tab:robustness` |
-| 487 | Artificial noise conditions | F4b `fig:conditions`, R19 `fig:deep` | — (cites `tab:robustness`) |
+| 487 | Artificial noise conditions | R19 `fig:deep`, F4b `fig:conditions`, **R15 `fig:rank_level`** (new) | **T12 `tab:condition_cost`** (new) — cites `tab:robustness`, `fig:grid`, `fig:curves` across |
 | 548 | Robustness on the three assay datasets | F8 `fig:assay`, F2b `fig:variance_clean`, R9 `fig:transfer` | T3b `tab:variance_clean` |
 
 ### What moved, and where it went
@@ -2916,7 +3186,9 @@ Nothing was deleted. The two blocks that came out are commented in place with a 
 |---|---|---|
 | T3 `tab:variance` | Variance decomposition, between the second paragraph and F2 | `T3_variance_decomposition_qm9.tex` on the graphics path |
 | T4 `tab:robustness` | **Robustness and clean accuracy** as of 2026-09-25; the block is still sitting in Artificial noise conditions in `paper.tex` and has to be cut and pasted up | `T4_robustness_qm9_ecfp4.tex` |
-| R19 `fig:deep` | Artificial noise conditions, after `fig:conditions` | `R19_deep_conditions_qm9.png` |
+| R19 `fig:deep` | Artificial noise conditions, first float of the subsection | `R19_deep_conditions_qm9.png` |
+| T12 `tab:condition_cost` | Artificial noise conditions, after the systematic-error paragraph. **New 2026-09-25**, written by `TAB.t12_condition_cost`; appears after the next regeneration | `T12_condition_cost_qm9_grouped_shifted.tex` |
+| R15 `fig:rank_level` | Artificial noise conditions, last float. **Promoted 2026-09-25**; two generated files stacked as panels a) and b) | `R15_rank_against_level_ecfp4_gaussian.png`, `..._grouped_shifted.png` |
 | T3b `tab:variance_clean` | The assay subsection, after F2b | `T3b_variance_decomposition_clean.tex` |
 
 All four come out of the next figures run. Until then the `\input` lines will fail to compile, so

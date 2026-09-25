@@ -758,3 +758,135 @@ def t10_accuracy_at_level(accuracies, output_dir, rep, level=1.0,
                  f'condition. Medians over ten replicates on QM9 and over the '
                  f'scaffold folds on the assay datasets. A dash is a '
                  f'combination that was not run.')
+
+
+# ---------------------------------------------------------------------------
+# T11 -- each model against its own counterpart, one dataset per table
+# ---------------------------------------------------------------------------
+
+T11_CONDITIONS = ('gaussian', 'grouped_wider', 'grouped_shifted')
+
+
+def t11_counterparts(changes, output_dir, dataset,
+                     conditions=T11_CONDITIONS):
+    """One row per pair and condition, one column per representation.
+
+    Each cell is the change in AUC_norm, then the change in clean R2 in
+    brackets, counterpart minus base, the median of the paired differences.
+    † marks a change in AUC_norm with the same sign in every replicate (QM9) or
+    scaffold fold (assay). The Settings column says whether the two members run
+    at one setting.
+    """
+    if changes is None or not len(changes):
+        return None
+    frame = changes[(changes['dataset'] == dataset)
+                    & changes['condition'].isin(conditions)]
+    if not len(frame):
+        return None
+    rows = []
+    for (base, variant, condition), group in frame.groupby(
+            ['base', 'variant', 'condition'], sort=False):
+        row = {'Comparison': f'{C.model_label(base)} → {C.model_label(variant)}',
+               'Settings': 'shared' if group['matched'].any() else 'differ',
+               'Condition': C.condition_label(condition)}
+        for _, r in group.iterrows():
+            n = r['n_pairs']
+            same = n and (r['higher_in'] == n or r['lower_in'] == n)
+            row[C.rep_label(r['rep'])] = (
+                f'{r["auc_norm_change"]:+.3f}{"†" if same else ""} '
+                f'({r["clean_r2_change"]:+.3f})')
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    reps = [C.rep_label(r) for r in C.REP_LABELS
+            if C.rep_label(r) in table.columns]
+    table = table[['Comparison', 'Settings', 'Condition'] + reps]
+    unit = ('ten replicates' if dataset == 'qm9'
+            else 'five scaffold folds')
+    return write(table, output_dir, f'T11_counterparts_{dataset}',
+                 f'{C.dataset_label(dataset)}: what replacing a model with its '
+                 f'own probabilistic counterpart changes. Each cell is the '
+                 f'change in AUC_norm, then the change in clean R2 in '
+                 f'brackets, counterpart minus base, the median of the paired '
+                 f'differences over {unit}. † marks an AUC_norm change with the '
+                 f'same sign in every one. One column per representation and '
+                 f'no averaging across them.')
+
+
+# ---------------------------------------------------------------------------
+# T12 -- what systematic error costs each model, on every representation
+# ---------------------------------------------------------------------------
+
+def t12_condition_cost(summary, output_dir, dataset='qm9',
+                       condition='grouped_shifted', reference='gaussian'):
+    """One row per model, one column per representation, and the yardstick beside it.
+
+    THE CLAIM THIS TABLE EXISTS TO CARRY. Systematic error is the only
+    dose-matched condition that costs anything, and it costs each model family a
+    different amount -- the forests least, the plain networks most, the
+    variational networks almost nothing. That claim was being made from a median
+    across the roster at one representation, which is the averaging the author
+    has ruled out: a median describes no model, and one representation cannot
+    speak for the other five.
+
+    So every cell is one model on one representation, and the last two columns
+    are what decides whether a cell means anything. `Replicate spread` is the
+    median over the six representations of that model's own highest-minus-lowest
+    AUC_norm over the ten replicates under the reference condition. `Beats it
+    on` counts the representations where the change is larger than that model's
+    own spread, out of the ones it ran -- because a change smaller than the
+    run-to-run variation is smaller than the measurement, and the paper should
+    not report it as an effect.
+
+    Negative is a loss. The reference column is the accuracy the ratio is taken
+    against, so it travels with the table for the same reason T4's does.
+    """
+    frame = C.cross_model(summary[summary['dataset'] == dataset], 'T12')
+    frame = frame[frame['condition'].isin([condition, reference])]
+    if not len(frame):
+        return None
+    # CONDITION VARIES HERE, and saying otherwise is a lie the guard catches.
+    # Every other table holds one condition; this one is a DIFFERENCE between
+    # two, so both are in the frame and both have to be declared.
+    G.declare(frame, 'T12', fixed={'dataset': dataset},
+              varies=('model', 'rep', 'condition'))
+
+    auc = frame.pivot_table(index=['model', 'rep'], columns='condition',
+                            values='auc_norm', aggfunc='median')
+    if condition not in auc.columns or reference not in auc.columns:
+        return None
+    change = (auc[condition] - auc[reference]).unstack()
+    wobble = (frame[frame['condition'] == reference]
+              .pivot_table(index='model', columns='rep',
+                           values='auc_norm_spread', aggfunc='median'))
+    # REP_LABELS carries the study's own ordering of the representations, and
+    # there is no sort_representations() to call -- the label map IS the order.
+    reps = [r for r in C.REP_LABELS if r in change.columns]
+    change = change.reindex(index=C.sort_models(change.index), columns=reps)
+    wobble = wobble.reindex(index=change.index, columns=reps)
+    beats = (change.abs() > wobble).sum(axis=1)
+    ran = change.notna().sum(axis=1)
+
+    table = pd.DataFrame({'Model': [C.model_label(m) for m in change.index]})
+    for rep in reps:
+        table[C.rep_label(rep)] = change[rep].to_numpy()
+    # THE YARDSTICK AS A RANGE, NOT A MEDIAN. A median over the six
+    # representations is an average across representations, which this study
+    # does not report, and it would also read as the number the comparison was
+    # made against. The comparison in the last column is made cell by cell,
+    # each change against the spread of THAT model on THAT representation.
+    table['Replicate spread'] = [
+        f'{wobble.loc[m].min():.3f}\u2013{wobble.loc[m].max():.3f}'
+        for m in change.index]
+    table['Beats it on'] = [f'{b} of {n}' for b, n in zip(beats, ran)]
+    return write(table, output_dir, f'T12_condition_cost_{dataset}_{condition}',
+                 f'Change in AUC_norm on moving from '
+                 f'{C.condition_label(reference)} to '
+                 f'{C.condition_label(condition)} on {C.dataset_label(dataset)}, '
+                 f'one cell per model and representation. Negative is a loss. '
+                 f'Replicate spread is the '
+                 f'same model\'s highest minus lowest AUC_norm over the ten '
+                 f'replicates under {C.condition_label(reference)}, given as its '
+                 f'range over the representations, and the last column counts '
+                 f'the representations where the change exceeds that model\'s '
+                 f'own spread on that same representation. Clean accuracy is '
+                 f'not repeated here; it is in T4 and in F3.')

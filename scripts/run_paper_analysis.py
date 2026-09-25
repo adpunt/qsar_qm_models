@@ -364,6 +364,12 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
     collect(D.d10_probabilistic(qm9_per))
+    # Each model against its own counterpart on all four datasets, with clean
+    # R2 beside AUC_norm (the author, 2026-09-25). QM9 is paired on the
+    # replicate, the assay datasets on the scaffold fold.
+    tables.update(D.counterpart_changes(pd.concat(
+        [f for f in (qm9_per, assay_per) if f is not None and len(f)],
+        ignore_index=True) if (len(qm9_per) or len(assay_per)) else None))
 
     collect(D.accuracy_across_representations(qm9))
     # The curves themselves, unpooled. The line above averages across the
@@ -524,6 +530,15 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
     if accuracy is not None and len(accuracy) and rep:
         drawn.append(FIG.r17_variant_families(accuracy, out, rep,
                                               condition=first))
+    # The same families on every dataset, and the change each swap makes on
+    # every dataset, representation and condition (the author, 2026-09-25).
+    if rep:
+        for held in dict.fromkeys([rep, 'ecfp4', 'pdv']):
+            drawn.append(FIG.r17b_variant_families_every_dataset(
+                [accuracy, tables.get('_assay_accuracy')], out, held,
+                condition=first))
+    drawn.append(FIG.r17c_counterpart_changes(
+        tables.get('counterpart_changes'), out))
     if qm9 is not None and len(qm9) and rep:
         others = [r for r in C.REP_LABELS
                   if r in set(qm9['rep']) and r != rep]
@@ -684,6 +699,13 @@ def build_tables(args, tables, verdicts):
         built.append(TAB.t3b_variance_clean(tables['anova_eta2_clean'], out))
     if qm9 is not None and len(qm9) and rep:
         built.append(TAB.t4_robustness(qm9, out, rep))
+    if qm9 is not None and len(qm9):
+        # WHAT SYSTEMATIC ERROR COSTS, ON EVERY REPRESENTATION AT ONCE. T4 is
+        # one representation, so the claim that the cost differs by model
+        # family was being made from ECFP4 and asserted for the other five.
+        # This is the whole grid, with each model's own replicate spread beside
+        # it as the bar a change has to clear.
+        built.append(TAB.t12_condition_cost(qm9, out))
     if assay is not None and len(assay) and rep:
         # Every assay dataset that landed gets its own T4. logd used to be
         # hardcoded here, which silently dropped caco2 and herg -- a dataset is
@@ -694,6 +716,11 @@ def build_tables(args, tables, verdicts):
             built.append(TAB.t4_robustness(assay, out, rep, dataset=name))
     if tables.get('d10_probabilistic') is not None:
         built.append(TAB.t5_probabilistic(tables['d10_probabilistic'], out))
+    if tables.get('counterpart_changes') is not None:
+        changes = tables['counterpart_changes']
+        for name in [d for d in C.DATASET_ORDER
+                     if d in set(changes['dataset'])]:
+            built.append(TAB.t11_counterparts(changes, out, name))
     if tables.get('d8_support') is not None or tables.get('d7_support') is not None:
         # TWO TABLES, NOT ONE. The paper prints QM9 at PDV, which is the only
         # combination on the computed property where censoring ran -- it ran at
