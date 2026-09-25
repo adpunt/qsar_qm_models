@@ -1635,6 +1635,18 @@ labels. Comparing clean $R^2$ against \aucnorm across all models for Gaussian no
 two rank in opposite directions at a Spearman correlation of $-0.18$, which does not reach
 significance.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F4a_models_under_noise.png}
+\caption{Predictive accuracy against label noise on the QM9 HOMO--LUMO gap under Gaussian noise, for
+the eight models with the highest \aucnorm at ECFP4. a) ECFP4; b) PDV, drawn for the same
+eight models, so panel b) is not a separate selection. Bottom axis: the noise level, as a fraction
+of the spread of the clean training labels. Side axis: $R^2$ on held-out molecules, as the median
+over ten replicates. The dashed vertical line marks the noise level every table in this paper
+reports at.}
+\label{fig:curves}
+\end{figure}
+
 That correlation is close to zero because the models do not sit on a line, but in three groups
 (Figure~\ref{fig:decoupling}). The forests, the boosted trees and the kernel models occupy the top
 right of the panel: strong on clean labels and strong under noise. The plain and Bayesian neural
@@ -1644,6 +1656,20 @@ base models at 0.851 and an \aucnorm of 0.892, near the bottom of the panel. NGB
 the top left. A rank correlation over two groups of opposite character and one outlier returns
 almost nothing, so the number understates a real pattern: neural networks buy clean accuracy and
 give it back under noise, while trees and kernels give up a little accuracy and keep it.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R16_decoupling_ecfp4.png}
+\caption{Predictive accuracy on clean labels against robustness, on the QM9 HOMO--LUMO gap at ECFP4,
+under a) Gaussian and b) grouped-shifted noise. One point is one of the thirteen base models; marker
+shape and colour name the model. Bottom axis: $R^2$ with no noise added to the training labels. Side
+axis: \aucnorm, on one scale across both panels. The Spearman correlation between the two axes is
+$-0.18$ ($p = 0.57$) under Gaussian noise and $-0.50$ ($p = 0.082$) under grouped-shifted noise, over
+thirteen models in each case. \aucnorm divides each model's accuracy under noise by its own clean
+accuracy, so a model with a low clean $R^2$ has less to give up and scores higher for it; the side
+axis should be read together with the bottom one rather than alone.}
+\label{fig:decoupling}
+\end{figure}
 
 NGBoost is the standout case. Under Gaussian noise it holds the highest \aucnorm on every one of the
 six molecular representations, with the random forest second on all six. However, it is one of the
@@ -1674,12 +1700,28 @@ while molecular representation is not the driving factor in whether a model is n
 choice of which representation to use matters a great deal for particular architectures, and the
 neural networks that are most sensitive to it are the same ones that gave up the most robustness in
 the first place.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F3_model_by_representation.png}
+\caption{Robustness (\aucnorm) of the thirteen base models on the QM9 HOMO--LUMO gap under a)
+Gaussian and b) grouped-shifted noise. Rows are models, ordered by family; columns are the six
+molecular representations. Colour is fixed across both panels, its bright end the higher \aucnorm.
+Grouped-wider repeats panel a) and is in an additional file. Values are medians over ten replicates,
+excluded configurations in Additional file~5.}
+\label{fig:grid}
+\end{figure}
 ```
 
 **Author notes.**
 
 - `fig:decoupling` is R16, `R16_decoupling_ecfp4.png`. It is generated and has never been in the
   paper. The second paragraph does not work without it.
+- **`tab:robustness` is T4 and lives in "Artificial noise conditions"**, cited from here rather
+  than repeated. It is the only place clean $R^2$ sits beside \aucnorm for every model, so it is
+  arguably this subsection's table rather than that one's. If you would rather it sat here, move
+  the `\begin{table}` block and cite it from the condition subsection instead; a table belongs in
+  one place and either reading is defensible.
 - Read off Figure~\ref{fig:curves} rather than from a table: that NGBoost stays below every other
   line on ECFP4 at every level, and that it ends highest on PDV between 1.0 and 1.5. Confirm both
   against `r2_by_level.csv` when the next figures run produces it, and replace "between noise levels
