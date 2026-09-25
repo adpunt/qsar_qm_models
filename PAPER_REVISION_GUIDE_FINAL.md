@@ -865,7 +865,7 @@ paper.**
    times as much as the representation: 49.5 against 9.2. The representation still matters, but through the
    pairing rather than on its own, and the pairing term is twice the representation's.
 
-2. **The noise conditions do not separate on Gaussianity. They separate on independence and zero mean.**
+2. **The noise conditions do not separate on Gaussianity. They separate on random error against systematic error.**
    Five of the seven conditions behave alike at a matched dose, and that includes all three non-Gaussian
    shapes — Laplace, Student-*t* and random contamination. The two that differ are the one that correlates
    errors inside a scaffold family and the one that clips at an assay limit. Those are the two assumptions
@@ -953,7 +953,7 @@ plain forest it is built from.
 | Robustness is not bought with clean accuracy, and the two top-ten lists share nothing | §R2, T8, R16 |
 | Making a model probabilistic buys an uncertainty estimate, not robustness | §R3, R17, T5 |
 | Every dose-matched condition delivered the same amount, so a difference is a difference of pattern | §R4 opening, F1, `NOISE_DESIGN.md` §5.1e |
-| Shape does not matter; independence and zero mean do | **§R4 — the paper's differentiator**, F4b, T4 |
+| Shape does not matter; random error against systematic error does | **§R4 — the paper's differentiator**, F4b, T4 |
 | Correlated and censored noise cost more on measured labels than on computed ones | §R4, §R5, F8, T4 per dataset |
 | The kind of noise changes how much you lose, not who wins | §R4, Kendall's *W*, R15 |
 | The model ranking does not transfer from QM9 to assay data | §R5, R9, T7 |
@@ -1829,7 +1829,8 @@ now.*
 **This is the paper's differentiator and it is the subsection to get right.** The finding is not that
 non-Gaussian noise matters. Three non-Gaussian shapes are indistinguishable from Gaussian at a matched dose,
 and saying otherwise would be contradicted by Table~\ref{tab:robustness} on the facing page. The finding is
-that *independence and zero mean* are the assumptions that fail, and they are the two nobody tests.
+that the error is *systematic* rather than random, which is the case nobody tests. Methods already introduces the term
+(`paper.tex:236`); the Results should use it rather than paraphrase it.
 
 > **The kind of noise, at a matched amount**
 >
@@ -1859,8 +1860,7 @@ that *independence and zero mean* are the assumptions that fail, and they are th
 > without shifting them, and puts a smaller share of its injected errors' spread into the scaffold-family
 > means than plain Gaussian noise does. Only grouped-shifted raises that share, to about four fifths of the
 > spread of the errors it injects. These comparisons indicate that the axis along which they separate is not
-> Gaussian against non-Gaussian, and not even structured against unstructured, but independent and zero-mean
-> against correlated or biased.
+> Gaussian against non-Gaussian, but random error against systematic error.
 >
 > The fall in AUC$_{norm}$ on moving from Gaussian noise to grouped-shifted is decided by the model far more
 > than by the representation. Each model's fall is the median over the replicates, over the six
@@ -1969,60 +1969,247 @@ against grouped-wider at +0.003. Every comparison among Gaussian, grouped-wider,
 Student-*t* that does not involve the shifted condition is non-significant. Kendall's $W$ = 0.937,
 p = 7.6 × 10⁻⁶, seven models over six conditions at ECFP4, from `d3_kendall_w.csv`.
 
-### §R5. Does it hold on measured labels *(replaces `paper.tex:542–556`)*
+### §R5. Robustness on the three assay datasets *(replaces `paper.tex:506–593`; rewritten 2026-09-25)*
 
-> **Robustness on the three assay datasets**
+**How this block is built.** It starts from your current `paper.tex`, not from the old §R5 text in this
+guide or in `PAPER_RESULTS_REWRITE.md`. Your opening paragraph and Figure~\ref{fig:assay} are word for
+word from `paper.tex:506–527`. So are your clean-accuracy paragraph with its figure and table
+(`paper.tex:532–556`), which still waits on the regenerated figure, and the R9 figure block
+(`paper.tex:561–571`). New paragraphs sit between `% ---- NEW` and `% ---- end NEW`, and they follow
+your comments: the curves, the noise conditions, the models one by one, and a quick reading of the
+rank transfer. Your text they replace is kept at the end.
+
+**Two new outputs, not yet on disk.** The figure script now draws F8c (the curves on all four datasets,
+one file per representation) and writes T10 (held-out R² at level 1.0). Both need the analysis
+re-run. Every sentence that depends on them is a PLACEHOLDER comment.
+
+**Model names.** "The thirteen base models" and every rank below exclude the six variants
+(variance-head BNNs, heteroscedastic VBLLs, the heteroscedastic GP and the Tanimoto GP), as
+Figure~\ref{fig:assay} does. The rank-transfer paragraph uses Figure~\ref{fig:transfer}'s ranks, which
+are out of nineteen.
+
+```latex
+\subsection{Robustness on the three assay datasets}
+
+So far, we have only discussed results coming on HOMO--LUMO gap from QM9, a computed property whose labels carry no measurement error. We repeated these experiments on three experimentally-obtained data sets, 
+LogD, Caco-2 \citep{openadmet}, and hERG Ki \citep{Zdrazil2023}, replicating our process of adding artificial noise. Unlike QM9, the experimental endpoints carry their own measurement noise in both training and test labels; the injected artificial noise therefore adds on top of an unknown noise floor. Repeat measurements of the same compound disagree by about 0.54 log units for pK$_i$ \citep{Kalliokoski2013, Kramer2012}. The hERG $K_i$ labels have a spread of 0.915 log units, so a noise level of 0.6 of that spread is about one unit of that estimated laboratory error. Each model's \aucnorm under each noise condition on the three endpoints is given with its clean R$^2$ beside it (Figure~\ref{fig:assay}). 
+
+\begin{figure*}[p]
+\centering
+\includegraphics[width=\textwidth]{F8_assay_datasets_logd.png}\\[2pt]
+\includegraphics[width=\textwidth]{F8_assay_datasets_caco2.png}\\[2pt]
+\includegraphics[width=\textwidth]{F8_assay_datasets_herg.png}
+\caption{Robustness (\aucnorm) on the three assay datasets, on the ECFP4 representation,
+under the three noise conditions that ran on every model: a) logD; b) Caco-2; c) hERG K$_i$. Rows
+are the thirteen base models, ordered by family, with the six variant models in Additional file~8.
+The first column of each panel is clean R$^2$ and is left uncoloured; the brightest row on panel b)
+has the lowest clean R$^2$ on that panel. Each value is the median over the scaffold folds that met
+the clean-accuracy gate, the lowest clean R$^2$ a fold may have and still be scored (Additional
+file~5). Colour runs on one fixed range across the three panels. That range differs in span
+from the range in Figure~\ref{fig:grid} by a factor of three, so colour is not comparable between
+the two figures. Censoring is absent because it runs on a named subset of pairs and cannot rank
+models.}
+\label{fig:assay}
+\end{figure*}
+
+On clean labels, model architecture and molecular representation divide the variance in predictive accuracy differently from how they divide it once noise is present (Figure~\ref{fig:variance_clean}, Table~\ref{tab:variance_clean}). PLACEHOLDER: state which term leads on QM9 and whether the three assay datasets agree, once the figure has been regenerated.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F2b_clean_decomposition.png}
+\caption{Share of the variance in predictive accuracy on clean labels explained by model architecture,
+molecular representation, their pairing, and the residual, on all four datasets. Accuracy is $R^2$ on
+held-out molecules with no noise added to the training labels. The bottom axis is the dataset, the side
+axis the share of variance; the four shares within a dataset sum to 100\%. There is no noise-condition
+axis: the clean fit is made once per replicate and every noise condition starts from it. Whiskers are a
+leave-one-replicate-out jackknife, not confidence intervals. Thirteen base models by six representations,
+ten replicates on QM9 and five on each assay dataset.}
+\label{fig:variance_clean}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Share of the variance in predictive accuracy on clean labels explained by model
+architecture, molecular representation, their pairing and the residual, one row per dataset. The
+HOMO--LUMO gap row is the same decomposition as the first row of Table~\ref{tab:variance}. The assay
+datasets carry no band, as their five scaffold folds partition one dataset rather than repeating an
+experiment.}
+\label{tab:variance_clean}
+\input{T3b_variance_decomposition_clean}
+\end{table}
+
+% ---- NEW: curves and accuracy at one level (placeholders wait on the re-run) ----
+Figure~\ref{fig:assay_curves} gives held-out accuracy against the noise level on all four datasets,
+one row per dataset and one column per noise condition. Table~\ref{tab:accuracy_at_level} gives the
+same accuracy at one noise level, one spread of the clean training labels.
+% PLACEHOLDER (F8c, T10): on QM9 the loss stays small until the noise reaches about half the label
+% spread, then steepens. Say whether that shape holds on logD, Caco-2 and hERG K_i, dataset by dataset.
+% PLACEHOLDER (F8c): on QM9 LightGBM holds up at low noise and falls sharply after level 1.0. Say
+% whether it falls early or late on Caco-2 and hERG K_i, where its AUC_norm is lowest.
+% PLACEHOLDER (F8c, column d): your note at paper.tex:452 says outlier noise tracks Gaussian up to
+% about 0.4 on QM9 and then falls away. Say whether the assay datasets show the same break.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F8c_curves_every_dataset_ecfp4.png}
+\caption{Held-out accuracy against label noise on every dataset, at ECFP4. Rows are datasets and
+columns noise conditions: a--d) QM9; e--h) logD; i--l) Caco-2; m--p) hERG $K_i$. One line per base
+model, the median over ten replicates on QM9 and over the scaffold folds on the assay datasets. The
+bottom axis is the noise level, a fraction of the clean training label spread. Each row has its own
+side axis. Outlier noise ran on a named subset of models, so its column has fewer lines. The same
+figure at PDV is in Additional file~X.}
+\label{fig:assay_curves}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Held-out $R^2$ with no added noise and at a noise level of 1.0, on ECFP4. One row per base
+model; for each dataset the clean value, then one column per noise condition. Medians over ten
+replicates on QM9 and over the scaffold folds on the assay datasets. [TODO: final caption once the
+table is in.]}
+\label{tab:accuracy_at_level}
+% [T10_accuracy_at_level_ecfp4.tex]
+\end{table}
+% ---- end NEW ----
+
+% ---- NEW: the noise conditions on measured labels ----
+Grouped-shifted noise is the hardest condition on every dataset. For RF, QRF, XGBoost, NGBoost, SVM
+and the GP, it lowers \aucnorm below its Gaussian value on all four datasets and all six
+representations (Figure~\ref{fig:assay}). LightGBM is the one tree model with exceptions, on Caco-2
+at Avalon and MHG-GNN, where it is 0.02 higher. The cost grows as the dataset gets harder. For those
+seven models, grouped-shifted costs 0.02 to 0.06 of \aucnorm on QM9 and 0.02 to 0.11 on logD. On
+Caco-2 and hERG $K_i$ it costs up to 0.22 and 0.21. The two VBLL networks are the clear exception:
+on logD they keep more \aucnorm under grouped-shifted than under Gaussian noise, on every
+representation.
+
+The other noise conditions separate the models in a way that holds on every dataset. Grouped-wider,
+outlier, Laplace and Student-$t$ noise put the same total amount of error on fewer labels than
+Gaussian noise does. Against Gaussian noise, SVM never loses \aucnorm under any of the four, on any dataset or
+representation that ran them. Its gain is 0.01 to 0.02 on QM9 and reaches 0.10 on the assay
+datasets. NGBoost moves the other way. On Caco-2 and hERG $K_i$ it loses \aucnorm under all four, by
+up to 0.15, with one exception at Avalon on Caco-2. On QM9 and logD it moves by 0.04 or less. RF and
+the GP never lose more than 0.03 under any of the four. Under grouped-wider noise, RF gains up to
+0.09 on Caco-2.
+% Grouped-wider and the boosted trees, checked because the author's first reading was that it hurts
+% XGBoost, LightGBM and NGBoost: it hurts NGBoost (above). XGBoost loses 0.09 to 0.14 on hERG at
+% ECFP4, MHG-GNN and Sort & Slice, and moves 0.08 or less elsewhere. LightGBM does not lose: it
+% gains 0.03 to 0.10 on Caco-2 and hERG at most representations, none of it beyond the fold spread.
+% TODO (reading, not tested): SVM's loss grows linearly with a residual, so a few large errors pull
+% it less than many moderate ones; NGBoost fits a Normal likelihood per molecule. Whether that is
+% the mechanism is not tested. Decide whether it goes in the text.
+% ---- end NEW ----
+
+% ---- NEW: which models, on measured labels ----
+The models that hold up on the computed property do not all hold up on measured labels. RF is the
+most consistent. Among the thirteen base models it ranks between first and eighth for \aucnorm under
+Gaussian noise on every dataset and representation. It is first on logD and second on QM9 at every
+representation. Its clean $R^2$ sits in the middle of the thirteen or below. The GP is the most
+accurate model on clean labels on all three assay datasets, first or second at every
+representation, and ranks third to eighth for \aucnorm. On the assay datasets SVM never leads either
+list and never falls to the bottom of either. It ranks third to tenth for clean $R^2$ and fourth to
+ninth for \aucnorm.
+
+NGBoost, the most robust model on QM9 at every representation, does not stay there. It ranks first
+to third on logD, second to eleventh on Caco-2 and sixth to ninth on hERG $K_i$. Its clean $R^2$
+stays among the lowest, except on Caco-2 at Avalon and ChemBERTa. At PDV, where it stood out on QM9 with an \aucnorm of 0.98,
+it keeps 0.94 on logD, 0.84 on Caco-2 and 0.88 on hERG $K_i$. RF at PDV keeps 0.94, 0.88 and 0.92 on
+the same three. LightGBM is the least consistent of the tree models. On Caco-2 and hERG $K_i$ it
+ranks tenth to thirteenth for \aucnorm at every representation, while being among the most accurate
+on clean labels at most of them. VBLL-$\alpha$ is the reverse case. It ranks first or second for
+\aucnorm on hERG $K_i$ at every representation and last on logD at every representation. Its clean
+$R^2$ is among the lowest everywhere except Caco-2 at Avalon. An \aucnorm close to 1 on a weak baseline is partly the ratio
+itself, since a model with little to lose loses little.
+% TODO: plain NNs and full-BNNs vary by dataset and representation with no single pattern. Say so
+% in one sentence, or leave them to the figure.
+
+Clean accuracy does not predict robustness on the assay datasets either. The rank correlation
+between clean $R^2$ and \aucnorm across the thirteen base models is never positive and significant.
+On Caco-2 it is negative at all six representations, from $-0.32$ to $-0.66$, and significant at
+ECFP4 and Sort \& Slice. On logD it lies between $-0.23$ and $0.16$.
+% ---- end NEW ----
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{R9_rank_transfer_ecfp4.png}
+\caption{Where each model ranks for robustness on the QM9 HOMO--LUMO gap and on each of the three
+assay datasets, at ECFP4 under Gaussian noise. Rows are models, ordered by their rank on the
+HOMO--LUMO gap with the most robust at the top. The bottom axis is the rank by
+\aucnorm within a dataset, where 1 is the most robust of the nineteen models ranked.
+Colour and shape together name the dataset. The thirteen base models are drawn and the six variant
+models are not, so some ranks on the axis belong to a model that has no row.}
+\label{fig:transfer}
+\end{figure}
+
+% ---- NEW: the rank transfer, read quickly ----
+Figure~\ref{fig:transfer} puts the four robustness rankings side by side at ECFP4, and it shows the
+pattern above model by model. The forests keep their place: RF and QRF are in the top five of
+nineteen on all four datasets. NGBoost slides from first on QM9 to seventh on hERG $K_i$. The
+boosted trees fall furthest. XGBoost goes from fourth on QM9 to fourteenth and fifteenth on Caco-2
+and hERG $K_i$, and LightGBM from sixth to last on both. VBLL-$\alpha$ goes the other way, from
+tenth to first on both. A robustness ranking made on the computed property carries for the forests,
+but not for the boosted trees or the networks.
+
+For a user who suspects label noise, RF is the safe default among the models tested. It never
+ranks below eighth of the thirteen base models for robustness under Gaussian noise, on any dataset
+or representation, at a middling clean accuracy. SVM is the alternative when a minority of badly
+wrong labels is expected, since it never loses under the conditions that concentrate the error.
+% ---- end NEW ----
+
+```
+
+**Where every number comes from.** All from `results/decisions_arc_20260916/`, computed this session
+and checked against the fold ranges (`auc_norm_lo`, `auc_norm_hi`):
+- ranks among the thirteen base models, the grouped-shifted costs, the concentrated-noise gains and
+  losses, and the NGBoost and RF values at PDV: `auc_norm_assay.csv` and `auc_norm_qm9.csv`;
+- the clean-against-robust correlations: the same two files, `baseline_r2` against `auc_norm`, one
+  dataset and one representation at a time, Gaussian noise;
+- the rank-transfer ranks: `d9_rank_transfer.csv` at ECFP4, Gaussian, as drawn in R9.
+
+No number is averaged across models, representations or datasets. The fold spread on the assay
+datasets is large: the median spread of \aucnorm across folds is 0.09 over every cell in both files. Many
+single differences of a few hundredths are inside it, which is why the text leans on patterns that
+repeat across representations and datasets.
+
+**TODOs, not paper text:**
+- 🔴 **The re-run.** F8c and T10 do not exist until the analysis runs again (same command as §R6). After
+  it, fill the three PLACEHOLDER comments in the curves paragraph and re-check every number above.
+- **What to look at in F8c when it lands:** whether the QM9 shape holds on each assay dataset, where
+  LightGBM loses its accuracy, and whether outlier noise breaks away from Gaussian at about 0.4 on
+  the assay datasets as your note says it does on QM9. The PDV version answers the NGBoost question
+  in curves rather than in \aucnorm.
+- **Why SVM gains and NGBoost loses under concentrated noise** is a reading, not a test. It sits in a
+  comment in the noise-conditions paragraph. Yours to decide whether it goes in.
+- **Grouped-wider and the boosted trees.** Your reading was that it hurts XGBoost, LightGBM and
+  NGBoost, and leaves RF and QRF alone. The data agree for NGBoost, and for RF and QRF, which gain
+  slightly. XGBoost loses only on hERG $ at three representations. LightGBM does not lose at all.
+- **The clean-accuracy paragraph** (`paper.tex:532`) still waits on the regenerated F2b.
+- **Additional file number** for the PDV version of F8c.
+- **Plain NNs and full-BNNs** have no single pattern across datasets. One sentence, or leave them to the
+  figure.
+
+**Your text this replaces** (`paper.tex:559`, `577–581` and `584–593`), kept word for word. The
+paragraphs at `584–593` read as conclusions for the whole paper, so they may belong in the
+Conclusion rather than here.
+
+> The different noise conditions display the same relative performance across these additional datasets. Grouped-shifted resulted in the lowest overall \aucnorm
 >
-> Everything so far is a computed property with no measurement error of its own. We repeated the grid on
-> three laboratory endpoints: a distribution coefficient, an efflux ratio and a binding affinity. There the
-> injected noise sits on top of measurement error already in the labels, which we cannot separate. Repeat
-> measurements of the same compound and target disagree by about 0.68 log units for pIC$_{50}$ and about
-> 0.54 log units for pK$_i$ \citep{Kalliokoski2013, Kramer2012}. A level of about 0.6 is therefore one unit
-> of the error a laboratory already carries. Figure~\ref{fig:assay} has the three measured endpoints, models
-> down the side and noise conditions across. One cell is a model's AUC$_{norm}$ under one condition, and the
-> first column holds its clean R$^2$, so the two are read together.
+> That correlation is taken over pairings drawn from four datasets;
+> it says the orderings disagree rather than by how much on any one endpoint. Nine of the twelve
+> pairings that rank highest on both are a Gaussian process or a forest, one pairing to a row of
+> Table~\ref{tab:pairs}. The two orderings disagree wherever they were tested, and not only at
+> NGBoost.
 >
-> The ordering of the noise conditions in the subsection on the kind of noise survives on measured labels.
-> Grouped-shifted, which gives every scaffold family its own offset, has the lowest AUC$_{norm}$ of the six
-> conditions that deliver the same amount of corruption. It lowers AUC$_{norm}$ on all three laboratory
-> endpoints by more than it does on the HOMO--LUMO gap. Censoring is lower again on all three, and furthest
-> down on Caco-2 and hERG $K_i$, where clean R$^2$ is lowest. Clean accuracy and label spread are both lower
-> on those two datasets, so the drop is reported without a cause. Its level counts the fraction of labels
-> clipped rather than a fraction of the spread, so it is not matched against the other six. Censoring also
-> ran on five named model-and-representation pairings, not the whole roster, so nothing here says which
-> model resists it best.
->
-> What does not survive is the ranking of models, compared across eighty-three combinations of
-> representation, noise condition and assay dataset. The median rank correlation between a model's standing
-> on the computed property and on a measured endpoint is 0.36 (1 would mean the same ordering). Twenty of
-> the eighty-three reach significance at the five per cent level. Figure~\ref{fig:transfer} has models down
-> the side in their QM9 order, a model's robustness rank within a dataset on the bottom axis, and one mark
-> per dataset. That median hides a spread and is not a measurement on any one combination. Agreement is
-> highest on logD and lowest on hERG $K_i$, so part of the ordering does carry on the distribution
-> coefficient.
->
-> Agreement also depends on the representation it is read at, from moderate at ECFP4 down to none at Sort
-> \& Slice. The main-text table therefore names the representation the agreement was computed at. On the
-> computed property the four tree models sit in one narrow band of AUC$_{norm}$. On Caco-2 and hERG $K_i$
-> the two bagged forests keep about nine tenths of their clean accuracy, where LightGBM keeps about three
-> fifths. A study run on the computed property alone would have reported LightGBM as a robust model. A
-> pairing chosen on one endpoint should be re-checked on the next, at the cost of running the grid again
-> there.
+> Per-dataset NDS heatmaps across all model architectures and noise strategies are shown in Figure~\ref{fig:validation_overview}. The ANOVA on these additional datasets confirms that model architecture dominates robustness variance on all three datasets, as seen in Additional file~10, and that the trends with respect to noise robustness generalize. NGBoost ranks first on both QM9 and external datasets, SVM also transfer quite well. Some models' predictive capabilities are limited on these external datasets, likely due to a combination of smaller training sets, narrower chemical coverage, and the unknown experimental noise in the labels. XGBoost and BNN variants suffer the most here, (Figure~\ref{fig:validation_combined}a).
+> 
+> QRF was consistently less robust than RF on every external data set (Additional file~11). As seen with QM9, choice of molecular representation has a minimal effect on noise robustness across all three external datasets, reinforcing the finding that model architecture, not representation, is the main driver of noise robustness. 
+> 
+> These results lead to two main conclusions. The first is that noise robustness, defined as the rate at which predictive performance degrades with increasing label noise, is primarily determined by the model's training mechanism. The margin maximization of SVM, the weight priors of BNNs, and the ensembling in tree methods all appear to keep those models from fitting to noise. The choice of representation has a stronger influence on predictive performance than noise robustness, accounting for less than \~10\% of the variance in robustness. The interaction term between representation and model has a stronger impact; some models like SVM and full BNNs remain robust across all representations, while RF and NNs are robust only with certain ones. While the pattern of noise has a strong impact on predictive performance, it does not influence noise robustness rankings between models or representations much.
+> 
+> The second conclusion concerns whether a model's uncertainty estimates track per-sample label noise. Some models struggle, particularly those like BNNs whose uncertainty comes from a posterior over weights or QRF which does produce a full quantile, but is unable to successfully track noise. 
+> Models that fit a separate, per-sample scale or observation-noise parameter during training are able to track that label noise more effectively. NGBoost identifies noisy labels through a per-sample predicted scale that absorbs large residuals. Similarly, the GP absorbs these larger residuals with a per-sample posterior variance. Among representations, uncertainty tracking collapses with the learned embeddings MHG-GNN and mol2vec, while fingerprints and descriptors produce a viable signal. Neither strong predictive performance nor noise robustness implies noise tracking; again it is up to the model's architecture and how it handles loss. 
+> 
+> Although the choice of representation carries less weight than that of models, we observed an interesting phenomenon. PDVs produce the strongest predictive performance on clean data, but are the least noise-resistant. Embeddings, particularly mol2vec, are the most robust to noise yet perform the worst noise tracking. At the end of the day, the choice of both model and representation comes down to your problem, including the amount of noise in your data, your objectives, and your compute limits. 
 
-**498 words, four paragraphs of 7, 7, 6 and 6 sentences. 3 of 26 sentences carry a decimal.**
-
-*Rank transfer from `d9_rank_agreement.csv`: 83 rows, median ρ 0.356, 20 of 83 with p < 0.05. By dataset:
-logD 0.568, Caco-2 0.306, hERG 0.290. By representation it runs from −0.001 at Sort & Slice to 0.600 at
-ECFP4, which is itself a reason the main-text table names its representation. ⚠️ The censoring row of that
-table shows ρ = 1.000 on two combinations and must not be quoted — two combinations is not a correlation.*
-
-*⚠️ The submitted paper's §4.4 says the assay datasets "confirm that the trends generalize" and that "NGBoost
-ranks first on both QM9 and external datasets". On this run NGBoost ranks first on QM9 at ECFP4 and fourth,
-seventh and third on the three assay datasets, and the median transfer across all combinations is 0.36. The
-subsection has to be rewritten around non-transfer, not around confirmation.*
-
-*⚠️ `paper.tex:560`'s "QRF consistently less robust" is an averaging artefact — the quantile forest is ahead
-of the plain forest on Caco-2 and hERG under Gaussian noise and behind it on logD and QM9.*
 ---
 
 ## MOVEMENT 4 — how uncertainty and noise play together
