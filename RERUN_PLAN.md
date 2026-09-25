@@ -16044,6 +16044,22 @@ They need no cluster time — `results/decisions/figures/R6_representation_profi
 BNN-α (var. head) falls to 0.72 AUC_norm on MHG-GNN and VBLL-β (het.) to 0.74, while every other
 model on every other representation sits between 0.88 and 0.98.
 
+#### 2026-09-25 — the uncertainty subsection needs one analysis re-run
+
+Open, owned by the paper-revision chat, closed when the new harvest is checked against
+`PAPER_REVISION_GUIDE_FINAL.md` §R6. The figure script now writes three things it did not:
+- `total_uncertainty_rise.csv` and table T9 (`tables/T9_uncertainty_rise_<rep>`): mean predicted
+  uncertainty with no noise and at level 1.5, per model, per dataset, with the lowest and highest fold.
+- `per_sample_by_level.csv`: the per-sample correlation for every dataset, model, representation,
+  condition and level, with its folds.
+- `unc_censoring_control.csv`: whether the negative correlation under censoring comes from the clipping
+  or from the clipped molecules having the highest labels. Needs the per-molecule files, so cluster
+  only. The per-file cache generation is bumped to 2, so the first run recomputes every file.
+
+```bash
+cd $QSAR && git pull && sbatch slurm_scripts_analysis/run_paper_analysis.sh
+```
+
 ---
 
 ### 13.27 THE COMMAND SHEET — what failed, what gets deleted, what gets resubmitted

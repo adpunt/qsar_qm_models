@@ -2034,33 +2034,56 @@ referee expects, and the third is the hard one.
 
 ### §R6. Uncertainty under label noise *(replaces `paper.tex:613–658`; rewritten 2026-09-25)*
 
-**How this block is built.** Everything below is your current `paper.tex:613–658`, copied unchanged,
-with three exceptions. First, one sentence at the end of the paragraph at `paper.tex:649` is cut. Second,
-six new decomposition paragraphs sit between Figure~\ref{fig:uncertainty_combined} and the paragraph at
-`paper.tex:658`. Third, those paragraphs cite two figures, F6 and F6b, whose blocks are in the figures
-section. Your population-level and per-sample paragraphs are untouched, including their stale table.
-The new paragraphs connect to four earlier parts of the paper:
+**How this block is built (updated later on 2026-09-25).** You said your population-level and per-sample
+text will be replaced, so the block below is new text around the decomposition paragraphs. Your three
+paragraphs from `paper.tex:615`, `:649` and `:658` are kept word for word under "Your text this
+replaces", after the TODO list, so nothing is lost. The order is: the question, the population-level
+rise (new table), the decomposition (unchanged from this morning), then per-sample tracking.
+The decomposition paragraphs connect to four earlier parts of the paper:
 - the Methods expectation that the aleatoric component rises while the epistemic one holds (`paper.tex:281`);
 - the variance decomposition, where representation carries 9.2\% of the variance in \aucnorm;
 - the noise-conditions subsection, where shape did not matter and grouped-shifted did;
 - the counterparts subsection, where the variance head cost the neural networks almost no \aucnorm.
 
-**Cut from `paper.tex:649`:** "Although we expect to see aleatoric uncertainty increase with injected
-noise, for VBLL both the aleatoric and epistemic components increased
-(Figure~\ref{fig:uncertainty_combined}b)." The VBLL transformation's aleatoric component is one number per
-fit (`paper.tex:293–294`), so it has no per-sample rise to compare. The new paragraphs replace this
-sentence.
+**Model names.** α is the DNN architecture and β the MLP, as in the figures: BNN-α (var. head) is
+`dnn_bnn_full_mve` and VBLL-β (het.) is `mlp_vbll_hetero`.
 
 ```latex
 \subsection{Uncertainty under label noise}
 
-Until now we've discussed how much accuracy a model is able to retain whilst its training labels are corrupted with noise. Now, we consider how confident the model reports its own predictions are in the presence of noise, and whether or not those estimates match the increased label noise. \citet{Kolmar2021} found that the mean predicted uncertainty derived from the GPs increases with the amount of label noise in the training data. We go beyond the population level and instead ask if a model's per-sample uncertainty tracks label noise. One key sign that a model is able to handle noise is its ability to track it, represented by the per-sample Spearman correlation between predicted uncertainty and noise magnitude (Table~\ref{tab:top_unc_noise}). 
+Until now we have asked how much accuracy a model keeps when its training labels are corrupted. We now
+ask what the model reports about its own confidence. \citet{Kolmar2021} found that the mean uncertainty
+predicted by GPs rises with the amount of label noise in the training data. We test that for every
+probabilistic model in the study, and then ask two further questions. The first is why the uncertainty
+rises: whether the model attributes the added noise to the labels or to itself. The second is whether a
+model's uncertainty on one molecule tracks the noise on that molecule's label.
 
-% [Table tab:top_unc_noise, paper.tex:619-647, unchanged]
-
-Samples containing label noise tend to produce large residuals in training, and every model has its own way of handling them. NGBoost contains predicted scales that increase to absorb residual \citep{Duan2020}. The GP contains has a single global observation noise term. It does not absorb individual residuals, so its per-sample uncertainty derives primarily from the posterior variance rather than label noise  \citep{Rasmussen2005, Obrezanova2007}. BNNs treat these large residuals differently; they broaden their weight posteriors, increasing predicted uncertainty without explicitly modeling observation noise \citep{gal2016, kendall2017}. VBLL adds a learned noise variance to the BNN loss \citep{Harrison2024}, but this value is a global scalar, independent of the input. As seen in Table~\ref{tab:top_unc_noise} and Additional file~9, both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations. Among models that learn separate distributional parameters during training, GP and NGBoost produced the strongest correlations between uncertainty and label noise, though QRF, which separates parameters using quantile distributions, produced both poor label predictions and uncertainty-noise correlations. At the population level, mean predicted uncertainty increases with artificial noise.
-
-% [Figure fig:uncertainty_combined, paper.tex:651-656, unchanged]
+On QM9, mean predicted uncertainty rises with label noise for every model, representation and noise
+condition, in every fold (Table~\ref{tab:uncertainty_rise}). Here "rises" means the uncertainty at the
+highest noise level is above its value with no noise. On the three assay data sets it rises in every fold
+for NGBoost, both GPs, QRF and VBLL-$\alpha$ (het.). Every exception is a neural network. The full-BNNs
+without a variance head fail to rise in at least one fold on several configurations. BNN-$\alpha$ fails
+on all three assay data sets and all six representations. BNN-$\beta$ fails on hERG $K_i$ and Caco-2 with
+Avalon, ChemBERTa, MHG-GNN and Sort \& Slice. With a variance head, both full-BNNs fail on MHG-GNN for
+hERG $K_i$ and Caco-2. BNN-$\beta$ with a variance head also fails on
+ChemBERTa for hERG $K_i$ and Caco-2. VBLL-$\beta$ (het.) fails on logD with Avalon, ChemBERTa and
+MHG-GNN, and on Caco-2 with Avalon. So Kolmar's finding carries from the GP to every probabilistic model
+on the computed property. On measured labels it breaks for some networks, most often on learned
+embeddings.
+% Single-fold exceptions not named in the text: BNN-beta (var. head) on hERG, PDV, outlier; VBLL-alpha
+% on hERG, PDV, Student-t; VBLL-beta on hERG, PDV, grouped-shifted. All on held-out molecules.
+% PLACEHOLDER -- needs the next harvest. The table is built by the figure script as
+% tables/T9_uncertainty_rise_pdv.tex (main text) and T9_uncertainty_rise_<rep>.tex for the other five
+% (additional file). Paste the fragment here once the analysis has been re-run.
+\begin{table}[htbp]
+\centering
+\caption{Mean predicted uncertainty with no added noise and at the highest noise level, PDV, Gaussian
+noise, held-out molecules. [TODO: final caption once the table is in.]}
+\label{tab:uncertainty_rise}
+% [T9_uncertainty_rise_pdv.tex]
+\end{table}
+% TODO (next harvest): re-check every exception named in this paragraph against
+% total_uncertainty_rise.csv. The names above are from the 16 September harvest.
 
 % ---- NEW: uncertainty decomposition ----
 A rise in total uncertainty tells us that a model is less sure, but not why. We expected the aleatoric
@@ -2127,15 +2150,70 @@ they grow more confident as their labels lose information.
 % NGBoost). The spread is computed on whole data sets, not per training fold.
 % ---- end NEW ----
 
-The choice of representation has a much stronger impact on per-sample uncertainty tracking than on noise robustness. Fingerprints and physicochemical descriptors provided a clear signal with which models such as GP and NGBoost could separate noise-induced residuals from structural variation. However, learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations (Table~\ref{tab:top_unc_noise}). Although these learned embeddings can be effective representations for many tasks, this research suggests that they provide challenges for per-sample noise tracking. However, there is room for further investigation, as only two embeddings were tested. 
+% ---- NEW: per-sample tracking ----
+Finally, we ask whether a model's uncertainty on one molecule tracks the noise on that molecule's label.
+We measure this as the Spearman correlation between predicted uncertainty and the size of the injected
+noise, per fold and per noise level. Each training molecule is scored by a model fitted without it. The
+question is therefore whether a model can flag noisy labels it never saw. Under six of the seven noise
+conditions, nothing about a molecule says how much noise it received. Gaussian, Laplace, Student-$t$ and
+grouped-shifted noise give every molecule the same noise scale. Outlier noise widens a random tenth of the
+labels. Grouped-wider noise widens whole scaffold groups, and each scaffold group falls in a single fold.
+Under these six conditions the correlation stays between $-0.16$ and $0.16$ for every model,
+representation and data set, in every fold and at every noise level. Folds that fall outside the range
+expected by chance do so on both sides, not in one direction. The one lean is on QM9 under
+grouped-wider noise, which is slightly negative, down to $-0.11$, for every model and representation
+except NGBoost on ChemBERTa.
+
+Censoring is the one condition where the noise follows the label, because only the highest labels are
+clipped. It is also the only condition with large correlations, and they are mostly negative. A negative
+correlation means the model is least uncertain on the labels that were clipped the most. On QM9 with half
+the labels clipped, on PDV, the correlation across folds is $-0.84$ to $-0.80$ for NGBoost. It is $-0.84$
+to $-0.40$ for BNN-$\alpha$ with a variance head, and $-0.47$ to $-0.41$ for the GP. On logD with half the
+labels clipped, every fold is at $-0.29$ or lower for every model except the two GPs, on every
+representation. For most models the correlation becomes more negative as more labels are clipped. One
+likely reason is that the clipped labels share one value, so the models see little spread around them.
+That fits the fall in total uncertainty with label spread described above, but it has not been tested
+molecule by molecule.
+% PLACEHOLDER -- needs the next harvest (unc_censoring_control.csv). The clipped molecules are also the
+% ones with the highest true labels. Keep ONE of these two sentences once the result is in:
+% (a) "The same fits with nothing clipped already show this correlation, so it comes from the high
+%     labels, not from the clipping."
+% (b) "The same fits with nothing clipped show no such correlation, so the clipping causes it."
+% If it is (a), the "one likely reason" sentence above and the "negative result" paragraph below
+% both need rewriting. Check `rule_check` first: if it is not near 1, the control is not valid.
+
+Three exceptions qualify the censoring result. On Caco-2 with a tenth of the labels clipped, the correlation is positive
+or near zero for every model, up to $0.41$ for VBLL-$\alpha$ on PDV. For NGBoost, QRF and the
+heteroscedastic GP it is negative in every fold once a third of the labels are clipped. The GP stays
+between $-0.07$ and $0.16$ on all three assay data sets, at every level and in every fold. On QM9 it
+does not. On hERG $K_i$, the full-BNNs with a variance head reach $-0.52$ on ECFP4 but stay between
+$-0.10$ and $0.14$ on PDV and ChemBERTa. Representation therefore decides, for these networks, whether
+their uncertainty is inverted under censoring.
+
+This is a negative result, and a worse one than no tracking. Under censoring, a user who trusts low
+uncertainty would trust the corrupted labels first. None of the seven models scored out of fold flags
+noisy labels on molecules it did not train on. Where the noise is tied to the label value, most of them
+point the wrong way.
+% The seven: NGBoost, GP, heteroscedastic GP, QRF, BNN-alpha and BNN-beta with a variance head, VBLL-alpha,
+% on PDV, ECFP4 and ChemBERTa.
+% TODO: uncertainty on the molecules a model was trained on was never recorded, so tracking in that
+% setting is untested. See the TODO list.
+% ---- end NEW ----
 ```
 
 **Where every new number comes from.** All are in `results/decisions_arc_20260916/`:
 - the epistemic growth divided by the aleatoric growth, from `decomposition_ratio.csv`;
 - the censoring spread and the matching uncertainty ratios, from `censoring_spread.csv`;
-- the slopes and clean-label starting values, from `unc_q5.csv` as drawn in F6b.
+- the slopes and clean-label starting values, from `unc_q5.csv` as drawn in F6b;
+- which configurations rise in every fold, from `total_uncertainty_rise.csv`. One row is one data set,
+  model, representation, noise condition and molecule set; the ratio is the mean uncertainty at the top
+  level divided by its value with no noise, lowest and highest fold;
+- every per-sample correlation, from `per_sample_by_level.csv`. One row is one data set, model,
+  representation, noise condition and level; it gives the median, lowest and highest fold, and how many
+  folds fall above and below chance. It is built from `d7_q4.csv`, column `rho_plain_NOT_THE_ANSWER`,
+  which is out-of-fold training molecules only.
 
-`scripts/uncertainty_followups.py` writes the first two files. "Cost almost no \aucnorm" refers to your
+`scripts/uncertainty_followups.py` writes all four of those files. "Cost almost no \aucnorm" refers to your
 own sentence at `paper.tex:603` and adds no new number.
 
 **TODOs, not paper text:**
@@ -2148,6 +2226,63 @@ own sentence at `paper.tex:603` and adds no new number.
 - **The active-learning paragraph** has no citation yet.
 - **Contradiction in Models.** `paper.tex:228` still says the BNN variants and QRF are not decomposed,
   which contradicts `paper.tex:283–299` and these paragraphs.
+- 🔴 **Everything below waits on one re-run of the analysis.** Every number in the new paragraphs
+  is from the 16 September harvest. The figure script now writes the table and the clipping test, but
+  neither exists until it is re-run:
+  ```bash
+  cd $QSAR && git pull && sbatch slurm_scripts_analysis/run_paper_analysis.sh
+  ```
+  Then re-check each number and exception in §R6 against the new `total_uncertainty_rise.csv`,
+  `per_sample_by_level.csv` and `unc_censoring_control.csv`.
+- **Table `tab:uncertainty_rise` (T9).** Built by the figure script, one table per representation:
+  `tables/T9_uncertainty_rise_<rep>.csv` and `.tex`. One row is one model. For each data set it gives
+  the mean predicted SD with no noise and at level 1.5 (median over folds, eV or log units), and the
+  top value divided by the no-noise value in its lowest and highest fold. † marks a model that fails
+  to rise in some fold. Held-out molecules, Gaussian noise. Built locally from the 16 September
+  numbers, it has 12 or 13 rows per representation. The alternative layout, one table per data set
+  with the noise levels as columns, is not built.
+- **A value to look at in T9.** BNN-β (var. head) on MHG-GNN, hERG $K_i$: a mean predicted SD of
+  17.9 log units with no noise and 18.3 at level 1.5. BNN-α (var. head) on the same pairing: 6.6 with
+  no noise. The other models on hERG $K_i$ at MHG-GNN sit between 0.26 and 2.28 with no noise. Not investigated.
+- **QM9 is missing rows in T9.** On QM9 at PDV, the heteroscedastic GP, both plain full-BNNs, VBLL-β
+  and both heteroscedastic VBLLs have no Gaussian held-out rows. This is the QM9 no-condition
+  question below.
+- **QM9 held-out rows with no noise condition.** Many QM9 held-out rows in `unc_q5.csv` carry no
+  condition, so only six or seven models appear under Gaussian there. What those rows are is not
+  established.
+- **Clipping or high labels.** Under censoring, the clipped molecules are the ones with the highest true
+  labels. The test: take each censoring configuration's no-clipping fits (level 0, which exist). Mark the
+  molecules that would be clipped at each fraction, by the same rule, with their would-be clipped
+  amount. Compute the same correlation. If it is already negative with nothing clipped, the high labels
+  cause it; if it is near zero, the clipping does. No new fits. **Now in the figure script**
+  (`censoring_control` in `scripts/figlib_uncertainty.py`), written as `unc_censoring_control.csv` on
+  the next run. One row is one data set, model, representation, fold and clipped fraction:
+  `rho_clipped` is the reported correlation, `rho_unclipped` the control, and `rule_check` whether
+  the clipping rule reproduces the injector (it should be near 1).
+- **Chance range.** The per-sample paragraph's "expected by chance" is 1.96/√(n−1) per fold: ±0.016 on
+  QM9 up to ±0.065 on hERG $K_i$. It is my approximation, and it assumes molecules are independent, which
+  grouped noise breaks. The permutation band in `d7_q4.csv` is for the error, not the uncertainty.
+- **Coverage of the per-sample result.** No out-of-fold rows exist for the full-BNNs without a variance
+  head, VBLL-β, either heteroscedastic VBLL, or for Avalon, Sort & Slice and MHG-GNN. On QM9 the
+  heteroscedastic GP has one fold, on ECFP4 under Gaussian. QM9 censoring ran at PDV on three models.
+- **Molecules the model trained on.** Uncertainty on those was never recorded, so whether a model's
+  uncertainty tracks the noise on labels it fitted is untested.
+- **§R7 now conflicts with this.** §R7 reads the censoring gain from dividing error by uncertainty as a
+  model recognising a clipped label. The per-sample paragraph shows the division works because the
+  uncertainty is *lowest* on clipped labels. §R7 also says censoring ran on five pairings; for the
+  uncertainty runs it ran on every out-of-fold model on the three assay data sets.
+
+**Your text this replaces**, kept word for word from `paper.tex:615`, `:649` and `:658`. The table
+`tab:top_unc_noise` (`paper.tex:619–647`) and Figure `fig:uncertainty_combined` (`paper.tex:651–656`)
+go with it. Your mechanism sentences in the second paragraph (how NGBoost, the GP, BNNs and VBLL handle
+large residuals) are not results and can come back if you want them. "A single global observation noise
+term" holds for the RBF GP, not the heteroscedastic GP.
+
+> Until now we've discussed how much accuracy a model is able to retain whilst its training labels are corrupted with noise. Now, we consider how confident the model reports its own predictions are in the presence of noise, and whether or not those estimates match the increased label noise. \citet{Kolmar2021} found that the mean predicted uncertainty derived from the GPs increases with the amount of label noise in the training data. We go beyond the population level and instead ask if a model's per-sample uncertainty tracks label noise. One key sign that a model is able to handle noise is its ability to track it, represented by the per-sample Spearman correlation between predicted uncertainty and noise magnitude (Table~\ref{tab:top_unc_noise}).
+>
+> Samples containing label noise tend to produce large residuals in training, and every model has its own way of handling them. NGBoost contains predicted scales that increase to absorb residual \citep{Duan2020}. The GP contains has a single global observation noise term. It does not absorb individual residuals, so its per-sample uncertainty derives primarily from the posterior variance rather than label noise  \citep{Rasmussen2005, Obrezanova2007}. BNNs treat these large residuals differently; they broaden their weight posteriors, increasing predicted uncertainty without explicitly modeling observation noise \citep{gal2016, kendall2017}. VBLL adds a learned noise variance to the BNN loss \citep{Harrison2024}, but this value is a global scalar, independent of the input. As seen in Table~\ref{tab:top_unc_noise} and Additional file~9, both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations. Among models that learn separate distributional parameters during training, GP and NGBoost produced the strongest correlations between uncertainty and label noise, though QRF, which separates parameters using quantile distributions, produced both poor label predictions and uncertainty-noise correlations. At the population level, mean predicted uncertainty increases with artificial noise. Although we expect to see aleatoric uncertainty increase with injected noise, for VBLL both the aleatoric and epistemic components increased (Figure~\ref{fig:uncertainty_combined}b).
+>
+> The choice of representation has a much stronger impact on per-sample uncertainty tracking than on noise robustness. Fingerprints and physicochemical descriptors provided a clear signal with which models such as GP and NGBoost could separate noise-induced residuals from structural variation. However, learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations (Table~\ref{tab:top_unc_noise}). Although these learned embeddings can be effective representations for many tasks, this research suggests that they provide challenges for per-sample noise tracking. However, there is room for further investigation, as only two embeddings were tested.
 
 ---
 

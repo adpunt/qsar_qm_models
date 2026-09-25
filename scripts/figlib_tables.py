@@ -635,3 +635,74 @@ def t3b_variance_clean(anova_clean, output_dir):
                  'as in the noise decomposition. The assay datasets have no '
                  'true replicates and get no band: their five scaffold folds '
                  'partition one dataset rather than repeating an experiment.')
+
+
+# ---------------------------------------------------------------------------
+# T9 -- mean predicted uncertainty against the noise level
+# ---------------------------------------------------------------------------
+
+#: Units of the predicted SD on each dataset. QM9's is in eV once multiplied
+#: by `label_scale`, which `q5_mean_uncertainty` has already done.
+_UNITS = {'qm9': 'eV', 'logd': 'log units', 'caco2': 'log units',
+          'herg': 'log units'}
+
+
+def t9_uncertainty_rise(rise, output_dir, rep, condition='gaussian',
+                        split='test'):
+    """Does mean predicted uncertainty rise with label noise, model by model?
+
+    The author, 2026-09-25: the population paragraph of the uncertainty
+    subsection had no table behind it. One table per representation; one row
+    per model; for each dataset the mean predicted SD with no noise and at the
+    top level (median over folds), and the top divided by the clean value in
+    its lowest and highest fold. † marks a model that fails to rise in at least
+    one fold. Held-out molecules, because they cover the most models. Every
+    probabilistic model is kept, variants included: they are the subject here.
+    """
+    frame = rise[(rise['rep'] == rep) & (rise['condition'] == condition)
+                 & (rise['split'] == split)].copy()
+    if not len(frame):
+        return None
+    # The uncertainty side writes the long names; C.canonical_dataset does not
+    # know them, and changing it would move every caller.
+    long = {'openadmet-logd': 'logd', 'openadmet-caco2_efflux': 'caco2',
+            'chembl-herg-ki': 'herg'}
+    frame['dataset'] = frame['dataset'].map(
+        lambda d: long.get(str(d), C.canonical_dataset(d)))
+    G.declare(frame, 'T9', fixed={'rep': rep, 'condition': condition},
+              varies=('model', 'dataset'))
+    datasets = [d for d in C.DATASET_ORDER if d in set(frame['dataset'])]
+    rows = []
+    for model in C.sort_models(frame['model'].unique()):
+        row = {'Model': C.model_label(model)}
+        for d in datasets:
+            r = frame[(frame['model'] == model) & (frame['dataset'] == d)]
+            name = C.dataset_label(d)
+            if not len(r):
+                row[f'{name}: no noise'] = row[f'{name}: level {_top(frame)}'] = np.nan
+                row[f'{name}: ratio, folds'] = MISSING_CELL
+                continue
+            r = r.iloc[0]
+            row[f'{name}: no noise'] = r['clean_median']
+            row[f'{name}: level {_top(frame)}'] = r['top_median']
+            mark = '' if r['rises_in_every_fold'] else ' †'
+            row[f'{name}: ratio, folds'] = (f'{r["ratio_lowest_fold"]:.2f}–'
+                                            f'{r["ratio_highest_fold"]:.2f}{mark}')
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    units = ', '.join(f'{C.dataset_label(d)} in {_UNITS.get(d, "label units")}'
+                      for d in datasets)
+    return write(table, output_dir, f'T9_uncertainty_rise_{rep}',
+                 f'Mean predicted uncertainty (SD) with no added noise and at '
+                 f'the highest noise level, on {C.rep_label(rep)}, '
+                 f'{C.condition_label(condition)} noise, held-out molecules. '
+                 f'Each value is the median over folds ({units}). "Ratio, '
+                 f'folds" is the value at the highest level divided by the '
+                 f'value with no noise, in the lowest and the highest fold. '
+                 f'† marks a model whose uncertainty fails to rise in at least '
+                 f'one fold. A dash is a combination that was not run.')
+
+
+def _top(frame):
+    levels = frame['top_level'].dropna().unique()
+    return f'{levels.max():g}' if len(levels) else 'top'

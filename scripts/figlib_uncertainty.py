@@ -257,6 +257,68 @@ def q7(df):
     return unc.q7_group_correlated_error(df)
 
 
+def censoring_control(df, split='train_oof'):
+    """Is the negative correlation under censoring caused by the clipping, or
+    by the clipped molecules having the highest labels? (the author, 2026-09-25)
+
+    Under censoring the uncertainty is lowest on the labels clipped hardest.
+    The clipped molecules are also the ones with the highest clean labels, so a
+    model that is simply less unsure about high-label molecules would show the
+    same thing with nothing clipped. For each fold and clipped fraction this
+    reports three correlations with predicted uncertainty:
+
+    `rho_clipped`   -- at that fraction, against the amount actually clipped
+                       (|injected_noise|). The number the paper reports.
+    `rho_unclipped` -- the SAME fold's fit with nothing clipped (level 0),
+                       against the amount each molecule WOULD be clipped at
+                       that fraction. The control. Near `rho_clipped` means
+                       the high labels cause it; near zero means the clipping
+                       does.
+    `rule_check`    -- at that fraction, the would-be amount computed by the
+                       rule below against the amount actually clipped. It
+                       should be near 1; if not, the rule does not reproduce
+                       the injector and `rho_unclipped` is not the control.
+
+    The rule is the injector's (`NoiseInject._censored_set`, side 'upper'): the
+    top round(fraction * n) clean labels by rank are set to the k-th largest.
+    It is applied to the molecules of this fold's out-of-fold rows, which may
+    not be exactly the injector's reference set; `rule_check` says how close.
+    """
+    need = ['condition', 'sigma', 'fold', 'split', 'uncertainty',
+            'injected_noise', 'y_true_clean']
+    if any(c not in df.columns for c in need):
+        return pd.DataFrame()
+    d = df[(df['condition'] == 'censoring') & (df['split'] == split)]
+    if not len(d):
+        return pd.DataFrame()
+
+    def would_clip(y, frac):
+        y = np.asarray(y, dtype=float)
+        k = int(round(frac * len(y)))
+        if k == 0:
+            return np.zeros(len(y))
+        limit = y[np.argsort(-y, kind='stable')[k - 1]]
+        return np.maximum(y - limit, 0.0)
+
+    rows = []
+    keys = ['dataset', 'model', 'rep', 'fold']
+    for key, g in d.groupby(keys, dropna=False):
+        clean = g[g['sigma'] == 0]
+        for frac, cell in g[g['sigma'] > 0].groupby('sigma'):
+            rec = dict(zip(keys, key), condition='censoring', sigma=frac,
+                       split=split, n=len(cell), n_unclipped=len(clean))
+            rec['rho_clipped'] = unc._spearman(
+                cell['uncertainty'], np.abs(cell['injected_noise']))
+            rec['rule_check'] = unc._spearman(
+                would_clip(cell['y_true_clean'], frac),
+                np.abs(cell['injected_noise']))
+            rec['rho_unclipped'] = (unc._spearman(
+                clean['uncertainty'], would_clip(clean['y_true_clean'], frac))
+                if len(clean) else np.nan)
+            rows.append(rec)
+    return pd.DataFrame(rows)
+
+
 def component_slopes(q5_frame):
     """Per pair and condition: how fast each component rises with the noise.
 
@@ -468,7 +530,8 @@ def load(sources, dataset_name=None, strict=True, where='per-molecule rows',
 #:
 #:   1  2026-09-17  `outside_null` moves from the error's band to the gain's,
 #:                  gains `adds_signal`, and stops counting unmeasured cells.
-STATS_CACHE_GENERATION = 1
+#:   2  2026-09-25  adds `censoring_control` (clipping or high labels).
+STATS_CACHE_GENERATION = 2
 
 
 def _stats_fingerprint(files, **settings):
@@ -491,7 +554,7 @@ def _stats_fingerprint(files, **settings):
 
 
 _CACHE_KEYS = ('support', 'q4', 'q5', 'q6', 'q7', 'slopes',
-               'retention', 'enrichment')
+               'retention', 'enrichment', 'censoring_control')
 
 
 def _read_stats_cache(directory):
@@ -565,6 +628,7 @@ def _summarise_one(args):
         got['q5'] = q5(df)
         got['q6'] = q6(df)
         got['q7'] = q7(df)
+        got['censoring_control'] = censoring_control(df)
         got.update(curves(df))
     except Exception as exc:  # noqa: BLE001
         return path.name, None, f'{type(exc).__name__}: {exc}', []
@@ -629,7 +693,7 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
           f'worker holds ONE file, so the whole set still never has to fit in '
           f'memory')
     parts = {'support': [], 'q4': [], 'q5': [], 'q6': [], 'q7': [],
-             'retention': [], 'enrichment': []}
+             'retention': [], 'enrichment': [], 'censoring_control': []}
     skipped, unmapped_seen = [], set()
     work = [(str(f), dataset_name, strict, permutations) for f in files]
 

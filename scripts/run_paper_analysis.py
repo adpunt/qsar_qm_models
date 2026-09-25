@@ -101,6 +101,7 @@ import figlib_metrics as M  # noqa: E402
 import figlib_figures as FIG  # noqa: E402
 import figlib_tables as TAB  # noqa: E402
 import figlib_uncertainty as U  # noqa: E402
+import uncertainty_followups as UF  # noqa: E402
 
 STAGE_2_MESSAGE = (
     'The decisions come first and the figures are drawn from them, not '
@@ -339,10 +340,26 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
                 got = stats.get(key)
                 if got is not None and len(got):
                     tables[f'_unc_{key}'] = got
+            # Under censoring: is the negative correlation caused by the
+            # clipping, or by the clipped molecules having the highest labels?
+            # (the author, 2026-09-25). Needs the per-molecule rows, so it can
+            # only be computed here, in the streaming pass.
+            got = stats.get('censoring_control')
+            if got is not None and len(got):
+                tables['unc_censoring_control'] = got
             if support is not None and len(support):
                 tables['unc_support'] = support
             if slopes is not None and len(slopes):
                 tables['unc_slopes'] = slopes
+    # The two per-configuration tables the uncertainty subsection quotes
+    # (guide section R6, 2026-09-25): whether mean uncertainty rises with the
+    # noise in EVERY fold, and every per-sample correlation by level, folds
+    # reported, not pooled.
+    if tables.get('unc_q5') is not None and len(tables['unc_q5']):
+        tables['total_uncertainty_rise'] = UF.total_uncertainty_rise(
+            tables['unc_q5'])
+    if q4 is not None and len(q4) and 'rho_plain_NOT_THE_ANSWER' in q4.columns:
+        tables['per_sample_by_level'] = UF.per_sample_by_level(q4)
     collect(D.d7_uncertainty_option(q4, q6, support))
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
@@ -684,6 +701,12 @@ def build_tables(args, tables, verdicts):
             support, tables.get('d7_q4'), tables.get('d7_q6'),
             tables.get('d8_component_slopes'), out,
             name='T6b_uncertainty_every_dataset'))
+    if tables.get('total_uncertainty_rise') is not None:
+        # One table per representation, PDV the main-text one (the author's
+        # layout question, 2026-09-25; the alternative is one per dataset).
+        rise = tables['total_uncertainty_rise']
+        for r in sorted(rise['rep'].dropna().unique()):
+            built.append(TAB.t9_uncertainty_rise(rise, out, r))
     if tables.get('d9_rank_transfer') is not None:
         built.append(TAB.t7_rank_transfer(tables['d9_rank_transfer'], out))
     if tables.get('standout_pairs') is not None:
