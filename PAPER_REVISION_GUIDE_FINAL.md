@@ -1140,8 +1140,9 @@ records as moving to the availability statement on your call.
 > the choice of model buy at a realistic amount of label error, and does making a model probabilistic change
 > how noise hurts it? Third, does the kind of noise matter, or only the amount, and do the answers reached on
 > a computed property hold when the labels are laboratory measurements? Fourth, how do a model's uncertainty
-> estimates behave as its training labels are corrupted: does it become less sure, does its uncertainty still
-> rank which predictions to trust, and can it point to which labels were the corrupted ones?
+> estimates behave as its training labels are corrupted: does it become less sure, does it attribute the
+> added noise to the labels rather than to itself, does its uncertainty still rank which predictions to
+> trust, and can it point to which labels were the corrupted ones?
 
 *Four questions, not three, because the noise-condition question is now the paper's differentiator and was
 folded into the third aim before. Six sentences, 148 words. Dablander closes on six bulleted research
@@ -1165,11 +1166,11 @@ aims and the finding together.
 > deal more of it, and costs more on the assay datasets than on the computed property. LightGBM and XGBoost
 > sit mid-table on the computed property, and lose most of that standing on Caco-2 and hERG $K_i$ under every
 > condition that runs the whole roster. Testing a computed property and laboratory endpoints together is what
-> makes that difference visible. The same division runs through the uncertainty results. A model's ability to
-> separate what it does not know from what cannot be known holds up under independent noise, and degrades when
-> whole scaffold families share an offset delivering that same amount. Under clipped labels alone, on the
-> computed property and on each of the three assay datasets, every model in the roster grows more confident as
-> its labels grow more wrong.
+> makes that difference visible. The uncertainty decomposition carries the same lesson. Only the Bayesian
+> networks with a variance head place added label noise in the aleatoric component on every representation
+> and noise condition. For the other models, whether the decomposition works depends on the representation,
+> and a shared offset across a scaffold family disturbs it most. Under clipped labels, most models grow more
+> confident as their labels lose information.
 
 *197 words, seven sentences. No number smaller than "a tenth", per the style specification's rule 10.*
 
@@ -1501,137 +1502,118 @@ axis: the clean fit is made once per replicate and every noise condition starts 
 ```
 ## MOVEMENT 2 — what the choice of model buys, and whether probabilistic machinery helps
 
-### §R2. What label noise costs *(replaces `paper.tex:431–467`)*
+### §R2. Robustness and clean accuracy *(rewrites `paper.tex:416–448`)*
 
-🔴 **TODO — recompute after the matched-settings re-run.** The AUC$_{norm}$-by-model and clean-R$^2$ numbers here rank models against one another.
+**Rewritten 2026-09-25 from the figures themselves.** QM9 only — anything about the assay datasets
+belongs in "Robustness on the three assay datasets". Every number below was read off a figure in
+`results/decisions_arc/figures/` or checked against `auc_norm_qm9.csv`, and each bullet says which.
 
-> **Robustness and clean accuracy**
->
-> The decomposition says which of the two choices moves the outcome, not how far any one model falls or what
-> it gives up in clean accuracy to fall less. Figure~\ref{fig:curves} shows what label noise costs on QM9. The
-> bottom axis is the noise put into the training labels, as a fraction of the spread of the clean training
-> labels. The side axis is $R^2$ on held-out molecules, where higher is the better fit. One line is one model,
-> drawn at each of two representations, and the eight drawn are those with the highest AUC$_{norm}$ under
-> Gaussian noise on ECFP4. The HOMO--LUMO gap is a computed property with no measurement error of its own, so
-> a level on this dataset has no equivalent in published assay error.
->
-> Curves fall at very different rates, and a curve's starting height does not predict how steeply it falls.
-> The eight lie in a narrower band of AUC$_{norm}$ on PDV than on ECFP4. NGBoost has the highest AUC$_{norm}$
-> of the thirteen base models on all six representations, on the computed property under Gaussian noise. It is
-> also ranked between eleventh and thirteenth of thirteen for clean accuracy on every one of them. Its clean
-> $R^2$ runs from 0.706 on ECFP4 to 0.865 on PDV, the widest range across the six representations of any model
-> in the roster. Its AUC$_{norm}$ across the same six varies over the narrowest range in the roster. What the
-> representation buys NGBoost is accuracy, and it buys it almost no robustness at all.
->
-> The robustness column alone would make NGBoost this study's recommendation, and it is not one. Every figure
-> and table in this paper therefore prints the clean $R^2$ beside the AUC$_{norm}$. NGBoost alone might
-> explain that split between accuracy and robustness, so we tested it across the whole roster. Within the
-> single dataset and single representation the figure holds, clean accuracy and AUC$_{norm}$ rank in opposite
-> directions across the thirteen models, at a rank correlation of $-0.18$ that does not reach significance. We
-> also rescaled both quantities inside each dataset, from its worst pairing to its best, over the seventy-five
-> model-and-representation pairings that ran on all four datasets. Across those pairings the two rank in
-> opposite directions at a Spearman correlation of $-0.35$. That correlation is taken over pairings drawn from
-> four datasets, and it says the two orderings disagree rather than by how much on any one endpoint.
->
-> One row of Table~\ref{tab:pairs} is one of those pairings, with its clean $R^2$ beside its AUC$_{norm}$ on
-> each of the four datasets. It lists the twelve of the seventy-five that rank highest on both, and nine of
-> the twelve are a Gaussian process or a forest. Twenty-one of the twenty-four combinations of dataset and
-> representation carry all thirteen base models, the other three short because ChemBERTa lost models on Caco-2
-> and on hERG $K_i$ and MHG-GNN lost one on Caco-2. Across those twenty-one, the random forest and the
-> quantile forest are the only two whose AUC$_{norm}$ rank never falls below eighth of thirteen. For labels of
-> unknown noisiness, either of those two is the safer choice, at the cost of a median clean $R^2$ rank of
-> eighth of thirteen.
->
-> Among the seven models that are not neural networks, LightGBM and XGBoost are the bottom two in AUC$_{norm}$
-> on Caco-2 and hERG $K_i$, the two measured endpoints with the lowest clean $R^2$. That holds under every
-> condition that runs the whole roster, where the two sit mid-table on the computed property. Laplace,
-> Student-$t$ and the outlier condition cannot test it, because they ran on the random forest, the support
-> vector machine, the Gaussian process and NGBoost only. Why the two gradient-boosted models lose so much more
-> on those two endpoints than the random forest and the quantile forest do, we cannot say. A study run on the
-> computed property alone would have missed what LightGBM loses on the two measured endpoints, which is why
-> both kinds of dataset were run.
->
-> AUC$_{norm}$ is a share of a model's own clean accuracy, so a model that was barely accurate to begin with
-> can keep nearly all of a very small number. Four combinations of model, representation and noise condition
-> retained more accuracy with noise added than without it. All four began from a clean $R^2$ between 0.33 and
-> 0.37, against the floor of 0.30 below which a replicate is excluded. We report those rather than patching
-> the metric. This instability is a detriment of a normalised metric. The alternative of an unnormalised slope
-> carries the opposite defect, since a model with more accuracy to lose then loses more of it by construction.
-> No summary of robustness is safe to read on its own, whichever way it has been normalised.
+---
 
-**786 words, six paragraphs of 6, 7, 7, 5, 5 and 7 sentences. 2 of 37 sentences carry a decimal.**
+#### What the figures actually show
 
-**Paragraphs 2, 4 and 5 are the author's second, third and fourth Q1 conclusions.** All three were in working
-notes and in none of the paper text until this pass. Every number below was recomputed this session from the
-16 September harvest.
+**F4a `fig:curves`** — accuracy against noise level, the eight most robust models, ECFP4 and PDV.
 
-*Paragraph 1, the curves.* The eight drawn are the top eight by AUC_norm at ECFP4 under Gaussian noise:
-NGBoost, RF, QRF, XGBoost, the Gaussian process, LightGBM, SVM and the VBLL network on the first
-architecture. Range at ECFP4 0.926–0.979, at PDV 0.935–0.975. **The earlier draft said the model at the top
-of one panel is not the model at the top of the other, and that is false** — NGBoost tops both, and over
-those eight the two panels agree at a rank correlation of 0.93. The claim that survives is about all
-thirteen, where ECFP4's ordering agrees with MHG-GNN's at 0.505, with PDV's at 0.654, with Sort & Slice's at
-0.775, with ChemBERTa's at 0.758 and with Avalon's at 0.808.
+- Every line is together until about 0.5 of the label spread and then fans out. That is where your
+  existing sentence comes from and the figure supports it plainly.
+- **NGBoost's line is flat and sits below everything else on ECFP4** — it starts at 0.705 against
+  0.83 to 0.845 for the rest and ends at 0.669 against 0.69 to 0.74. It never crosses anyone. Being
+  the most robust model on ECFP4 never makes it the most accurate one at any level tested.
+- **On PDV it does cross.** It starts lowest at 0.866 against about 0.90 for the rest, and by 1.5 it
+  is the highest line on the panel. The crossover sits between levels 1.0 and 1.15.
+- That contrast is the paragraph. Whether a robust-but-weak model ever overtakes a strong-but-
+  fragile one is a property of the pairing, not of the model — and the same two panels that were
+  drawn to show the models also show that.
+- **LightGBM starts highest on ECFP4 at 0.845 and ends lowest of the eight at 0.693.** Your
+  existing claim, visible on the panel.
+- RF ends highest on ECFP4 at 0.741, the GP second at 0.733.
 
-*Paragraph 2, NGBoost.* From `auc_norm_qm9.csv`, QM9 under Gaussian noise, thirteen base models:
+**R16 `R16_decoupling_ecfp4.png`** — clean accuracy against robustness, one point per model, one
+panel per noise condition. **This figure is in no version of the paper and it is the subsection's
+argument drawn.**
 
-| representation | NGBoost clean R² | NGBoost AUC_norm | its clean-accuracy rank of 13 |
-|---|---|---|---|
-| ECFP4 | 0.706 | 0.979 | 13 |
-| Sort & Slice | 0.748 | 0.975 | 13 |
-| ChemBERTa | 0.762 | 0.980 | 13 |
-| Avalon | 0.786 | 0.982 | 13 |
-| MHG-GNN | 0.852 | 0.967 | 11 |
-| PDV | 0.865 | 0.975 | 12 |
+- The points are not scattered, they are in three groups. Trees and kernels sit top right, good at
+  both. The plain and Bayesian neural networks sit bottom right — **the best clean accuracy on the
+  panel and the worst robustness.** NN-β has the highest clean $R^2$ of the thirteen at 0.851 and an
+  AUC$_{norm}$ of 0.892, near the bottom. NGBoost sits alone top left.
+- That is why the Spearman correlation is $-0.18$ and misses significance. It is not "no
+  relationship" — it is two groups with opposite characters plus one outlier, and a rank correlation
+  over that returns nearly nothing. **Reporting the $-0.18$ without saying what the picture looks
+  like throws away the finding.**
+- Panel b) is the same arrangement pushed down. Under grouped-shifted the correlation strengthens to
+  $-0.50$ at $p = 0.082$, still short of significance with thirteen models.
 
-*It is the most robust of the thirteen on every one of the six. Its clean-R² spread of 0.159 is the widest in
-the roster, against 0.114 for the next and 0.050 for the narrowest. Its AUC_norm spread of 0.015 is the
-narrowest, against 0.063 for the widest.*
+**F3 `fig:grid`** — robustness by model and representation. **It sits in this subsection now and no
+sentence refers to it.** The paragraph that read it was deleted at some point and it was right:
 
-*Paragraph 3, the decoupling.* Spearman $-0.350$, p = 0.0021, over 75 pairings, recomputed from
-`standout_pairs.csv` with the min-to-max rescaling `figlib_decisions.py` uses, which is the author's shape
-from 2026-09-14. A z-score rescaling instead gives $-0.326$, p = 0.004, so the sign and the significance do
-not depend on the choice and the third decimal does. Within one dataset at ECFP4 it is $-0.18$ over thirteen
-models and not significant, which is the R16 panel — and `RERUN_PLAN.md` §14.15b warns the two must not be
-conflated. **T8's twelve rows are six Gaussian processes, two random forests, one quantile forest, two
-networks and one support vector machine, so "every one of them is a Gaussian process or a forest" was
-wrong and is now "nine of the twelve".**
+- **The six neural models are the six widest rows.** Their spread across the six representations
+  runs 0.039 to 0.063 of AUC$_{norm}$; every tree and kernel model is between 0.015 and 0.030.
+- Between ECFP4 and PDV specifically, the four plain and Bayesian networks give up 0.043, 0.045,
+  0.054 and 0.063. Every tree and kernel model moves by 0.011 or less, and three of them move the
+  other way.
+- **The two variational networks do not follow the family**, moving 0.009 and 0.019 between those
+  two representations. So "neural networks are representation-sensitive" is not a clean family
+  statement and should not be written as one.
 
-*Paragraph 4, the boosted trees.* Median AUC_norm over the six representations, one row per model:
+---
 
-| | QM9 | logD | Caco-2 | hERG K$_i$ |
-|---|---|---|---|---|
-| NGBoost | 0.977 | 0.925 | 0.859 | 0.855 |
-| RF | 0.961 | 0.937 | 0.863 | 0.900 |
-| QRF | 0.956 | 0.927 | 0.903 | 0.891 |
-| XGBoost | 0.945 | 0.869 | **0.709** | **0.720** |
-| LightGBM | 0.944 | 0.871 | **0.603** | **0.646** |
-| GP | 0.936 | 0.902 | 0.852 | 0.857 |
-| SVM | 0.936 | 0.886 | 0.842 | 0.851 |
+#### The takeaways this subsection has to land
 
-*Spread across those seven: 0.041 on QM9, 0.068 on logD, 0.300 on Caco-2, 0.254 on hERG. The same ordering
-holds under grouped-wider and grouped-shifted noise, where the two of them are again last and second to last
-on Caco-2 and hERG and again inside 0.044 of the rest on QM9. The three depth conditions cannot test this,
-because they ran on RF, SVM, the Gaussian process and NGBoost only.*
+- Robustness and clean accuracy are not the same ranking, and the subsection's job is to say how
+  they differ rather than that they are uncorrelated.
+- **The shape of the disagreement is the finding.** Neural networks buy clean accuracy and pay for
+  it under noise; trees and kernels give up a little accuracy and keep it. NGBoost is a third thing
+  again, flat and weak.
+- **NGBoost is first on AUC$_{norm}$ on all six representations under Gaussian, with RF second on
+  all six.** Checked in `auc_norm_qm9.csv`, not read off a picture.
+- **NGBoost is last of the thirteen base models on clean $R^2$ on four of the six representations**,
+  12th on PDV and 11th on MHG-GNN. Your text says "one of the worst", which is softer than what the
+  data supports.
+- **NGBoost's lead is Gaussian-specific.** Under grouped-shifted, RF takes first place on ECFP4,
+  Avalon and ChemBERTa; NGBoost keeps it on PDV, MHG-GNN and Sort & Slice. A sentence built on
+  NGBoost being the most robust model needs "under Gaussian noise" in it.
+- **The metric divides the clean baseline out, so part of the decoupling is arithmetic.** R16's own
+  caption says it: a model with a weak baseline scores well by having less to lose, and NGBoost is
+  exactly that model. This caveat has to be in the paragraph, not left for a reader to find. It is
+  also the reason F4a matters — the crossover on PDV is in raw $R^2$ and owes nothing to the ratio.
+- Whether the choice of representation moves a model's robustness is a question about families, and
+  it splits: trees and kernels barely move, plain and Bayesian networks move a lot, variational
+  networks do not. That is F3's paragraph and it needs writing again.
 
-*Paragraph 5, the forests.* Over the 21 dataset-and-representation combinations that carry all thirteen base
-models under Gaussian noise — three of the 24 are short because ChemBERTa lost models on Caco-2 and hERG and
-MHG-GNN lost one on Caco-2:
+---
 
-| model | worst robustness rank | median robustness rank | median clean-accuracy rank |
-|---|---|---|---|
-| RF | 8 | 2 | 8 |
-| QRF | 8 | 3 | 8 |
-| Gaussian process | 9 | 7 | 1 |
-| NGBoost | 11 | 3 | 12 |
-| SVM | 11 | 6 | 5 |
-| everything else | 12 or 13 | 7 to 11 | 3 to 13 |
+#### Claims in the current text, checked
 
-***The earlier working note said twenty-four combinations and said every other model drops to eleventh or
-worse. Both are wrong.*** *It is twenty-one, and the Gaussian process also never falls below ninth, which is
-why the text now names it. The Gaussian process is the most accurate model at the median, which is a point
-worth having and is what §R3's Gaussian-process sentence rests on.*
+| Claim | Verdict |
+|---|---|
+| All models lose accuracy as labels are corrupted | **True on QM9** — no AUC$_{norm}$ exceeds 1. Do not generalise; the exceptions are on the assay datasets and belong in that subsection |
+| Loss stays small until about half the label spread | **True**, visible on both F4a panels |
+| NGBoost has the highest AUC$_{norm}$ across all representations | **True**, first on all six — add "under Gaussian noise" |
+| NGBoost clean $R^2$ 0.706 on ECFP4 to 0.865 on PDV | **True** |
+| One of the worst on clean data | **True and understated** — last on four of six |
+| No other model has such a wide range across representations | **True**, 0.159 against 0.114 for the next. The margin is thinner than the sentence implies |
+| LightGBM good early, drops sharply after 1.0, ends below most | **True** on ECFP4 — ends lowest of the eight drawn |
+| Spearman $-0.18$, not significant | **True** — Gaussian, ECFP4, thirteen models, $p = 0.57$ |
+| Rescaled within each dataset, Spearman $-0.35$ | 🔴 **No source.** Nothing in the results is a $-0.35$ correlation between clean $R^2$ and AUC$_{norm}$. The nearest number is $+0.356$, the median rank agreement between QM9 and the assay datasets over 83 combinations — a different question, positive, and belonging to the assay subsection. **Do not use it** |
+| "predictive accuracy is not just a poor indicator of noise robustness," | Sentence ends on a comma |
 
+---
+
+#### Figures and tables this subsection should carry
+
+| Slot | State | Call |
+|---|---|---|
+| F4a `fig:curves` | in the paper | keep — the crossover on PDV is the best evidence in the subsection |
+| F3 `fig:grid` | in the paper, unreferenced | keep, and write its paragraph |
+| **R16** `R16_decoupling_ecfp4.png` | generated, never in the paper | **this is the argument drawn.** My call would be to promote it; without it the $-0.18$ is a number with no picture |
+| T4 `tab:robustness` | in the condition subsection | cite it from here too — it is where clean $R^2$ sits beside AUC$_{norm}$ for every model |
+| R18 `R18_ecfp4_against_pdv_gaussian.png` | generated, never in the paper | optional. Robustness on one representation against another, paired on the model, Spearman 0.51. Says what holding one representation costs |
+
+🔴 **TODO — the per-level numbers.** Everything above about curve shape is read off F4a. The table
+behind it, `r2_by_level.csv`, does not exist until the next figures run. Nothing in this subsection
+should quote a level-by-level number from a picture.
+
+---
 ### §R3. Does making a model probabilistic help *(replaces `paper.tex:468–497`)*
 
 🔴 **TODO — every number in this section is superseded and nothing below has been rewritten.** The
@@ -1911,159 +1893,125 @@ less sure when its training labels are corrupted? Does its uncertainty still ran
 And can it point at which labels were the corrupted ones? The first was already known, the second is what a
 referee expects, and the third is the hard one.
 
-### §R6. Uncertainty under label noise *(replaces `paper.tex:498–541`)*
+### §R6. Uncertainty under label noise *(replaces `paper.tex:613–658`; rewritten 2026-09-25)*
 
-> **Uncertainty under label noise**
->
-> Everything so far measures how much accuracy a model keeps under label noise. How precise a model reports
-> itself to be is a separate question, and nothing so far says whether a model registers what the noise cost
-> it. Surprisingly, a model can grow more certain as its labels grow more wrong, and censoring is where that
-> happens. Every uncertainty here is computed from the fitted model at a molecule's representation, never
-> from the label it is scored against, and none is calibrated after fitting. When the total predicted
-> uncertainty rises, does the model attribute the rise to the observations or to itself? A model that
-> registers the noise should raise the aleatoric component, the noise it attributes to a label, and leave the
-> epistemic component where it was.
->
-> Figure~\ref{fig:decomposition} shows the two components against the noise level, one panel per model. The
-> bottom axis is the noise added to the training labels, and the side axis is the mean predicted uncertainty
-> over one out-of-fold pass, in the label's own units. \citet{Kolmar2021} showed that a Gaussian process's
-> mean predicted uncertainty rises with the label noise in its training data. That holds across the six
-> conditions that add error to a label, where between 92 and 100 per cent of combinations of model,
-> representation and fold give a rising slope and the median slope runs from 0.30 to 0.42. The rise holds on
-> the computed property and on each of the three measured endpoints taken separately. Under censoring the
-> sign reverses on every model, on the computed property and on each of the three measured endpoints. Fewer
-> than 5 per cent of those combinations rise, and the median slope is $-0.41$.
->
-> Censoring removes information from a label rather than adding error to it, and it is the only condition
-> that narrows the spread of the labels. Replacing every value past the assay limit with the limit itself may
-> pull the training labels together, and a model fitted to closer targets may then report itself more
-> certain. The runs carried only the clean training spread, so that reading is not a measurement, and
-> recording the spread at each noise level would settle it. Under the one mechanism that industrial assays
-> report most often, a model grows more confident as its labels grow more wrong.
->
-> Most of the roster has to be excluded before the two components can be read apart, and which models are
-> excluded is itself a result. Seven of the thirteen models that emit an uncertainty have one of the two
-> components fixed at a single number per fit, or missing altogether. NGBoost fits one distribution and has
-> no term for its own ignorance, the Gaussian processes and the variational networks report one
-> observation-noise number per fit, and the plain Bayesian networks predict a mean alone. No line is drawn
-> for those models, and the two support columns of Table~\ref{tab:uncertainty} say so, one row per model and
-> noise condition on the computed property at PDV.
->
-> Among the six models whose two components both vary per molecule, the separation works for most and fails
-> completely for one. The Gaussian process that predicts each molecule's observation noise and the two
-> networks with a variance head raise the aleatoric component while the epistemic component holds, in roughly
-> two of every three combinations of dataset, representation and noise condition. The variational networks
-> separate most cleanly of all, and they carry the lowest clean R$^2$ on the roster, between 0.42 and 0.53.
-> Separating cleanly is therefore not a robustness result, because AUC$_{norm}$ is a share of a model's own
-> clean accuracy and a small clean R$^2$ lifts their score. The quantile forest separates in none of those
-> combinations where its verdict can be read. Both components rise together in 90 of them, and both are
-> computed from the same set of fitted trees, which may be why they cannot move apart.
->
-> Whether the separation works depends on the noise as well as on the model. Take the same
-> model-and-representation pairs across the three conditions that ran on the whole grid, at the same noise
-> levels, counting the computed property and the three measured endpoints together. The separation holds in
-> 78 of the 109 comparisons that can be read at all under Gaussian noise, and in 58 of 110 under
-> grouped-shifted, where a whole scaffold family shares an offset. Modelling label noise as independent
-> therefore understates how much accuracy is lost, and it also hides where a model's own uncertainty stops
-> working.
->
-> The second question has a steadier answer. Within a fixed amount of noise, a model's total predicted
-> uncertainty still orders its predictions by how wrong they are against the clean label, weakly but almost
-> always. The statistic is the Spearman correlation between that total and the out-of-fold error, and a
-> higher value means the ordering is closer. It is positive in 95.1 per cent of the 1,003 combinations of
-> dataset, model, representation and noise condition, and above 0.3 in 5.2 per cent of them. Those
-> combinations cover the computed property and the three measured endpoints together. The quantile forest has
-> the highest median correlation of the roster while its own decomposition fails everywhere, and the plain
-> Bayesian networks the lowest. A model that separates the two components and a model whose uncertainty ranks
-> its own error are not the same model, and neither follows from a high AUC$_{norm}$.
+**How this block is built.** Everything below is your current `paper.tex:613–658`, copied unchanged,
+with three exceptions. First, one sentence at the end of the paragraph at `paper.tex:649` is cut. Second,
+six new decomposition paragraphs sit between Figure~\ref{fig:uncertainty_combined} and the paragraph at
+`paper.tex:658`. Third, those paragraphs cite two figures, F6 and F6b, whose blocks are in the figures
+section. Your population-level and per-sample paragraphs are untouched, including their stale table.
+The new paragraphs connect to four earlier parts of the paper:
+- the Methods expectation that the aleatoric component rises while the epistemic one holds (`paper.tex:281`);
+- the variance decomposition, where representation carries 9.2\% of the variance in \aucnorm;
+- the noise-conditions subsection, where shape did not matter and grouped-shifted did;
+- the counterparts subsection, where the variance head cost the neural networks almost no \aucnorm.
 
-**894 words, seven paragraphs of 6, 7, 4, 4, 6, 4 and 7 sentences. 3 of 38 sentences carry a decimal.**
+**Cut from `paper.tex:649`:** "Although we expect to see aleatoric uncertainty increase with injected
+noise, for VBLL both the aleatoric and epistemic components increased
+(Figure~\ref{fig:uncertainty_combined}b)." The VBLL transformation's aleatoric component is one number per
+fit (`paper.tex:293–294`), so it has no per-sample rise to compare. The new paragraphs replace this
+sentence.
 
-*The last sentence of the second paragraph is the author's own, written out in `RERUN_PLAN.md` under "Q7 —
-the one sentence, for the Results text", and placed where that note asks for it.*
+```latex
+\subsection{Uncertainty under label noise}
 
-**The second paragraph is new in this pass and it is the answer to "does a model become less sure", which
-every earlier draft of this subsection skipped.** From `unc_q5.csv`, the slope of mean predicted uncertainty
-against noise level, one cell per dataset, model, representation and fold, on the held-out split:
+Until now we've discussed how much accuracy a model is able to retain whilst its training labels are corrupted with noise. Now, we consider how confident the model reports its own predictions are in the presence of noise, and whether or not those estimates match the increased label noise. \citet{Kolmar2021} found that the mean predicted uncertainty derived from the GPs increases with the amount of label noise in the training data. We go beyond the population level and instead ask if a model's per-sample uncertainty tracks label noise. One key sign that a model is able to handle noise is its ability to track it, represented by the per-sample Spearman correlation between predicted uncertainty and noise magnitude (Table~\ref{tab:top_unc_noise}). 
 
-| condition | median slope | cells | share of cells with a rising slope |
-|---|---|---|---|
-| Gaussian | +0.303 | 3,183 | 95.8% |
-| Grouped, wider | +0.313 | 3,180 | 97.3% |
-| Grouped, shifted | +0.336 | 3,180 | 98.1% |
-| Laplace | +0.410 | 1,053 | 96.9% |
-| Outlier (10%) | +0.418 | 1,053 | 96.7% |
-| Student-$t$ ($\nu=5$) | +0.420 | 1,053 | 96.8% |
-| **Censoring** | **$-0.405$** | **880** | **2.0%** |
+% [Table tab:top_unc_noise, paper.tex:619-647, unchanged]
 
-*Per dataset the censoring share is 0.4% on Caco-2, 1.1% on logD, 4.1% on hERG K$_i$ and 4.3% on QM9, against
-92% to 100% for every other condition on every dataset, so the reversal is not one dataset carrying it. The
-92% floor is Caco-2 under the outlier condition.*
+Samples containing label noise tend to produce large residuals in training, and every model has its own way of handling them. NGBoost contains predicted scales that increase to absorb residual \citep{Duan2020}. The GP contains has a single global observation noise term. It does not absorb individual residuals, so its per-sample uncertainty derives primarily from the posterior variance rather than label noise  \citep{Rasmussen2005, Obrezanova2007}. BNNs treat these large residuals differently; they broaden their weight posteriors, increasing predicted uncertainty without explicitly modeling observation noise \citep{gal2016, kendall2017}. VBLL adds a learned noise variance to the BNN loss \citep{Harrison2024}, but this value is a global scalar, independent of the input. As seen in Table~\ref{tab:top_unc_noise} and Additional file~9, both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations. Among models that learn separate distributional parameters during training, GP and NGBoost produced the strongest correlations between uncertainty and label noise, though QRF, which separates parameters using quantile distributions, produced both poor label predictions and uncertainty-noise correlations. At the population level, mean predicted uncertainty increases with artificial noise.
 
-⚠️ *The narrowing-spread explanation is the reading and not yet a measurement on these runs.* The only label
-column the statistics carried was the clean training spread, which is the same number at every level, so
-nothing in this harvest can show the recorded labels narrowing. `q5_mean_uncertainty` now also writes
-`recorded_label_sd` and `label_spread_ratio`, which are the clean label plus the amount injected, and
-`scripts/test_recorded_label_spread.py` shows the ratio climbing above 1 under additive noise and falling
-below it under censoring on constructed data. **On the real runs it arrives with the re-run.** If it does not
-hold there, the sentence naming the mechanism comes out and the measured reversal stays.
+% [Figure fig:uncertainty_combined, paper.tex:651-656, unchanged]
 
-**The numbers behind it, recomputed this session from `unc_slopes.csv` and `d7_q6.csv`.**
+% ---- NEW: uncertainty decomposition ----
+A rise in total uncertainty tells us that a model is less sure, but not why. We expected the aleatoric
+component to rise with injected label noise while the epistemic component stayed relatively
+consistent. That expectation has a practical side. A rising aleatoric component tells a user that the
+labels are noisy and repeat measurements are needed. A rising epistemic component instead points to
+missing training data near that molecule. The expectation can only be tested where both components vary
+per sample: the full-BNNs with a variance head, the heteroscedastic GP and QRF
+(Table~\ref{tab:uncertainty}).
+% TODO: the two heteroscedastic VBLLs also vary per sample in both components, but they were not
+% scored out of fold, so they are not in the comparison.
 
-Which models can be asked at all — thirteen models, from the support flags:
+The full-BNNs with a variance head behave as expected (Figure~\ref{fig:decomposition}). As the noise
+level rises, almost all of the added uncertainty goes to the aleatoric component. The epistemic component
+grows by at most 0.43 of the aleatoric growth, on all four data sets, all six representations and every
+noise condition. The variance head cost these networks almost no \aucnorm; what it buys is uncertainty
+that attributes label noise to the labels. QRF does not behave as expected. Both of its components rise
+with the noise, and on several representations the epistemic component rises faster than the aleatoric.
 
-| what the model reports | models | can the split be read? |
-|---|---|---|
-| only the model-ignorance term varies per molecule | BNN-α, BNN-β, VBLL-α, VBLL-β, GP, GP (Tanimoto) | no |
-| only the data-noise term varies per molecule | NGBoost | no |
-| **both vary per molecule** | **BNN-α (var. head), BNN-β (var. head), VBLL-α (het.), VBLL-β (het.), GP (het.), QRF** | yes |
+This matters most where the epistemic component chooses the next experiment. Active learning selects the
+molecules with the highest epistemic uncertainty for measurement. With QRF, noisy labels inflate that
+component, so the loop would keep selecting molecules whose labels are unreliable. We did not run such a
+loop, so this follows from the measurements rather than being one.
+% TODO: cite an active-learning study that selects on epistemic uncertainty.
 
-Verdicts for the six that can, over every dataset, representation and condition:
+Molecular representation carries under a tenth of the variance in \aucnorm, but it decides whether some
+decompositions work. For QRF, the epistemic growth is 0.63 to 1.09 times the aleatoric growth on the
+three fingerprints (ECFP4, Avalon and SNS). It is 1.01 to 1.45 times on PDV, and 1.28 to 2.05 times on
+ChemBERTa and MHG-GNN. The heteroscedastic GP keeps its epistemic growth below about a quarter of its
+aleatoric growth on PDV, ChemBERTa and MHG-GNN under every noise condition. On ECFP4 under grouped-shifted
+noise, both of its components grow by about the same amount. As with the neural networks' robustness, the
+representation matters through its pairing with the model. A decomposition checked on one representation
+cannot be assumed to hold on another.
+% TODO: Avalon, SNS and MHG-GNN come from held-out molecules on the three assay data sets only, under
+% Gaussian, grouped-wider and grouped-shifted. PDV, ECFP4 and ChemBERTa have out-of-fold molecules under
+% all six conditions. The heteroscedastic GP ran on QM9 at ECFP4 alone.
 
-| model | separates | both rise | neither moves |
-|---|---|---|---|
-| VBLL-α (het.) | 52 | 2 | 0 |
-| VBLL-β (het.) | 68 | 4 | 9 |
-| BNN-α (var. head) | 63 | 31 | 15 |
-| GP (het.) | 59 | 23 | 9 |
-| BNN-β (var. head) | 57 | 20 | 22 |
-| **QRF** | **0** | **90** | **9** |
+The noise conditions repeat the pattern seen for robustness. The shape of the error made no measurable
+difference to \aucnorm, and the three heavy-tailed conditions leave the full-BNNs' and the
+heteroscedastic GP's decomposition where Gaussian noise left it. For QRF they lower the epistemic share
+slightly, by a median of 0.11 to 0.14. Grouped-shifted, the condition that cost the most \aucnorm,
+is also the one that moves added noise into the epistemic component. It raises the epistemic share of
+the heteroscedastic GP and QRF in every pairing of data set and representation, most for the GP on
+fingerprints. One reading is that a scaffold family sharing one offset looks to these models like
+structure in the data rather than noise on its labels.
 
-By condition, on the **237 pairs that ran all three full-grid conditions**, so this is like for like:
+The aleatoric component shows that label noise increased, but not by how much
+(Figure~\ref{fig:aleatoric_injected}). For each unit of added noise it rises by 0.36 to 0.99 units,
+depending on model, data set and representation. The full-BNNs with a variance head and NGBoost already
+report 0.31 to 1.26 label units on clean labels. That starting point, not their rate of rise, brings
+them close to the injected amount at high noise. The heteroscedastic GP starts near zero and ends within
+a tenth of the injected amount on PDV, but not on ECFP4. The aleatoric component can compare noise
+between data sets or noise levels, but it does not estimate an assay's measurement error.
 
-| condition | separates | both rise | share that separates |
-|---|---|---|---|
-| Gaussian | 78 | 31 | **72%** |
-| Grouped, wider | 74 | 37 | 67% |
-| **Grouped, shifted** | **58** | **52** | **53%** |
+Censoring ran on five pairings in the robustness experiments, but on every uncertainty model on the
+three assay data sets. Clipping labels narrows their spread: with half the labels clipped, the spread
+falls to between 0.27 and 0.61 of its clean value, depending on the data set. NGBoost and QRF shrink
+their total uncertainty in step with that spread on all four data sets. The GPs do so on hERG $K_i$ and
+Caco-2, and the full-BNNs with a variance head shrink far less. On hERG $K_i$ and Caco-2, the
+heteroscedastic GP's aleatoric component holds steady up to a quarter of labels clipped, while its
+epistemic component falls by about half. None of these models treats a clipped label as a noisy one, so
+they grow more confident as their labels lose information.
+% TODO: on QM9, censoring ran at PDV alone on three models (the variance-head full-BNN, the RBF GP and
+% NGBoost). The spread is computed on whole data sets, not per training fold.
+% ---- end NEW ----
 
-*The other 128 rows of each condition are the models whose split cannot be read, and they are identical
-across the three by construction.*
+The choice of representation has a much stronger impact on per-sample uncertainty tracking than on noise robustness. Fingerprints and physicochemical descriptors provided a clear signal with which models such as GP and NGBoost could separate noise-induced residuals from structural variation. However, learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations (Table~\ref{tab:top_unc_noise}). Although these learned embeddings can be effective representations for many tasks, this research suggests that they provide challenges for per-sample noise tracking. However, there is room for further investigation, as only two embeddings were tested. 
+```
 
-Q6, from `d7_q6.csv`, recounted on 2026-09-18: **1,003 cells carry a named condition**, median 0.168, 95.1%
-positive, 5.2% above 0.3. By model the median runs from 0.072 for the second plain Bayesian network to 0.255
-for the quantile forest. By condition it is 0.17 to 0.19 everywhere except censoring, at 0.071. *The earlier
-1,076 / 95.0% / 4.9% in this note counted the 55 blank-condition rows of `RERUN_PLAN.md` §13.23z more than
-once; §R6's last paragraph now prints the recounted figures.*
+**Where every new number comes from.** All are in `results/decisions_arc_20260916/`:
+- the epistemic growth divided by the aleatoric growth, from `decomposition_ratio.csv`;
+- the censoring spread and the matching uncertainty ratios, from `censoring_spread.csv`;
+- the slopes and clean-label starting values, from `unc_q5.csv` as drawn in F6b.
 
-🔴 **The two counts above the Q6 line — 78 of 109 and 58 of 110 — are the ones to re-check first after the
-next harvest, and §R6's fifth paragraph pastes them straight into the paper.** They are keyed on the noise
-condition, and 55 rows of `d7_q6.csv` lost theirs before the fix landed, so each count may be short by as many
-as 55. The fix is in `scripts/uncertainty_stats.py` and guarded by
-`scripts/test_blank_condition_is_not_a_cell.py`, but it reaches the numbers only when the analysis runs again
-on the cluster. The direction of the finding is not at risk — 72% against 53% is a wide gap — but the two
-fractions in the paper text are.
+`scripts/uncertainty_followups.py` writes the first two files. "Cost almost no \aucnorm" refers to your
+own sentence at `paper.tex:603` and adds no new number.
 
-**⚠️ The two claims in the submitted paper's §4.3 that this replaces.** *"GPs and NGBoost gave the strongest
-correlations"* was a per-sample correlation pooled across noise levels, which measures the population trend
-and not per-sample detection. And *"for VBLL both the aleatoric and epistemic components increased"* is now
-the quantile forest's result, not the variational networks' — on this run the heteroscedastic variational
-networks are the cleanest separators on the roster and the quantile forest is the one that fails.
+**TODOs, not paper text:**
+- **F6 has to change.** The F6 on disk shows QM9 at ECFP4 under Gaussian noise, in three panels. The
+  representation paragraph needs a figure that shows the representation effect. One option: rows are the
+  variance-head full-BNN, the heteroscedastic GP and QRF; columns are ECFP4, PDV and ChemBERTa; one assay
+  data set. Not built.
+- **The heteroscedastic VBLLs.** They have no out-of-fold rows.
+- **More representation evidence.** See the TODO comment in the representation paragraph.
+- **The active-learning paragraph** has no citation yet.
+- **Contradiction in Models.** `paper.tex:228` still says the BNN variants and QRF are not decomposed,
+  which contradicts `paper.tex:283–299` and these paragraphs.
 
-**⚠️ And the variational networks must not be ranked on robustness off the back of this.** They separate
-cleanly and they carry the lowest clean R² on the roster, 0.42 to 0.53, so AUC_norm divides their
-score by a small clean R$^2$ and lifts it, which is the case §R2 describes. `RERUN_PLAN.md` §14.17b marks both as not for publication as a robustness
-result.
+---
+
 
 ### §R7. Can uncertainty point at the corrupted labels — and what is not settled
 
@@ -2320,6 +2268,32 @@ The readings come from the fitted slopes and not from the picture.}
 *127 words. Cut: the per-panel verdicts, which are findings and belong in §R6 — no caption in any of the
 three target-journal papers states a result. Kept: the support rule, the band definition, the units, and the
 warning that the readings are from slopes.*
+
+**TODO (2026-09-25):** the decomposition paragraphs in §R6 now rest on the representation effect, which this
+single-representation figure cannot show. See the TODO list under §R6.
+
+---
+
+### F6b — the aleatoric component against the noise added *(new 2026-09-25)*
+
+File: `results/decisions_arc_20260916/figures/F6b_aleatoric_against_injected.png`, drawn by
+`f6b_aleatoric_against_injected` in `scripts/figlib_figures.py`.
+
+```latex
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{F6b_aleatoric_against_injected.png}
+\caption{The aleatoric component against the amount of noise added to the training labels, under
+Gaussian noise. The top row is PDV and the bottom row ECFP4. The columns are the QM9 HOMO--LUMO gap,
+logD, hERG $K_i$ and Caco-2. The bottom axis is the standard deviation of the added noise, in eV for QM9
+and log units for the assay datasets. The side axis is the mean predicted aleatoric standard deviation
+over the molecules of one out-of-fold pass, in the same units. Each line is one model, drawn as the median
+over folds, and the band spans the folds. The dashed line marks where the reported noise equals the added
+noise. The heteroscedastic Gaussian process was not run on QM9 at PDV. The two heteroscedastic variational
+networks were not scored out of fold and are not drawn.}
+\label{fig:aleatoric_injected}
+\end{figure}
+```
 
 ---
 
