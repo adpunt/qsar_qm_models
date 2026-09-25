@@ -1614,6 +1614,91 @@ behind it, `r2_by_level.csv`, does not exist until the next figures run. Nothing
 should quote a level-by-level number from a picture.
 
 ---
+#### SAMPLE TEXT
+
+One block, one argument: clean accuracy does not predict robustness (R16), robustness only pays off
+if you started close enough (F4a), and how much the representation matters depends on the family
+(F3). Your sentences kept wherever they work. Numbers read off F4a are marked in the note below the
+block; everything else is from `auc_norm_qm9.csv`. R16 is cited as `fig:decoupling` and is not yet in
+the paper.
+
+```latex
+\subsection{Robustness and clean accuracy}
+
+The variance decomposition tells us what aspect of QSAR modeling moves the needle on accuracy and
+robustness, however it does not tell us about the characteristics of individual models. All models
+lose accuracy as the labels get increasingly corrupted with noise (Figure~\ref{fig:curves},
+Table~\ref{tab:robustness}). The loss remains small until the artificial noise reaches about half
+the spread of the clean training labels, and then it begins to drop. The rate it drops and the
+quantity of noise retained is not necessarily correlated to the model's predictive accuracy on clean
+labels. Comparing clean $R^2$ against \aucnorm across all models for Gaussian noise with ECFP4, the
+two rank in opposite directions at a Spearman correlation of $-0.18$, which does not reach
+significance.
+
+That correlation is close to zero because the models do not sit on a line, but in three groups
+(Figure~\ref{fig:decoupling}). The forests, the boosted trees and the kernel models occupy the top
+right of the panel: strong on clean labels and strong under noise. The plain and Bayesian neural
+networks occupy the bottom right, holding the highest clean accuracy on the panel and the lowest
+robustness with it. NN-$\beta$ is the clearest case, with the highest clean $R^2$ of the thirteen
+base models at 0.851 and an \aucnorm of 0.892, near the bottom of the panel. NGBoost sits alone in
+the top left. A rank correlation over two groups of opposite character and one outlier returns
+almost nothing, so the number understates a real pattern: neural networks buy clean accuracy and
+give it back under noise, while trees and kernels give up a little accuracy and keep it.
+
+NGBoost is the standout case. Under Gaussian noise it holds the highest \aucnorm on every one of the
+six molecular representations, with the random forest second on all six. However, it is one of the
+worst performing models with respect to $R^2$ on clean data, ranging from 0.706 on ECFP4 to 0.865 on
+PDV, and it is the least accurate of the thirteen base models on four of the six representations. No
+other model displayed such a wide range of predictive performance across representations. Because
+\aucnorm is the area under a curve divided by its own clean starting point, a model that begins
+poorly has less to lose and scores well for it, so NGBoost's position is partly a property of the
+metric. The curves show what it means in absolute terms. On ECFP4, NGBoost begins below every other
+model drawn and remains below them at every noise level tested, so its robustness never makes it the
+more accurate choice. On PDV it begins lowest and ends highest, overtaking the rest between noise
+levels of 1.0 and 1.5. Robustness therefore only pays when a model starts close enough to those it
+is being compared against, and whether it does is a property of the pairing rather than of the model.
+The ranking is also specific to the noise condition: under grouped-shifted noise the random forest
+takes first place on ECFP4, Avalon and ChemBERTa, and NGBoost keeps it only on PDV, MHG-GNN and Sort
+\& Slice. LightGBM tells a different story again, performing well under smaller quantities of label
+noise, yet dropping sharply beyond a noise level of 1.0 to end below every other model drawn on
+ECFP4.
+
+Which molecular representation a model is given matters to its robustness, but only for some
+families (Figure~\ref{fig:grid}). The six neural models span the six widest ranges of \aucnorm across
+the six representations, between 0.039 and 0.063, while every tree and kernel model stays within
+0.030. Between ECFP4 and PDV in particular, the four plain and Bayesian networks give up between
+0.043 and 0.063 of \aucnorm, where no tree or kernel model moves by more than 0.011 and three of them
+move in the opposite direction. This does not hold for the family as a whole: the two variational
+networks move by 0.009 and 0.019 between the same two representations, no more than the trees. So
+while molecular representation is not the driving factor in whether a model is noise robust, the
+choice of which representation to use matters a great deal for particular architectures, and the
+neural networks that are most sensitive to it are the same ones that gave up the most robustness in
+the first place.
+```
+
+**Author notes.**
+
+- `fig:decoupling` is R16, `R16_decoupling_ecfp4.png`. It is generated and has never been in the
+  paper. The second paragraph does not work without it.
+- Read off Figure~\ref{fig:curves} rather than from a table: that NGBoost stays below every other
+  line on ECFP4 at every level, and that it ends highest on PDV between 1.0 and 1.5. Confirm both
+  against `r2_by_level.csv` when the next figures run produces it, and replace "between noise levels
+  of 1.0 and 1.5" with the level it actually crosses at.
+- Dropped from the old text: the Spearman of $-0.35$ after rescaling within each data set. No such
+  number exists in the results. The nearest is $+0.356$, the median rank agreement between QM9 and
+  the assay datasets over 83 combinations, which is a different question and belongs in the assay
+  subsection.
+- Dropped: "That correlation is taken over pairings drawn from four datasets" and the twelve-pairings
+  sentence that cites `tab:pairs`. Both are about all four datasets, so they belong in the assay
+  subsection. `tab:pairs` is T8, `T8_pairs_across_datasets.tex`, generated and defined nowhere in
+  `paper.tex`.
+- The unfinished sentence "predictive accuracy is not just a poor indicator of noise robustness,"
+  is replaced by the second paragraph's closing sentence, which says what it was reaching for.
+- "All models lose accuracy" is left as it stands because it is true on QM9. Four cells exceed an
+  \aucnorm of 1 on the assay datasets, every one with a clean $R^2$ near 0.35; that exception belongs
+  in the assay subsection.
+---
+
 ### §R3. Does making a model probabilistic help *(replaces `paper.tex:468–497`)*
 
 🔴 **TODO — every number in this section is superseded and nothing below has been rewritten.** The
