@@ -1469,6 +1469,9 @@ within its own replicate-to-replicate spread of its Gaussian value, with GP-Hete
 single exception. This coincides with \cite{Heid2023}, who found no difference between Gaussian,
 uniform, hyperbolic and bimodal errors drawn at a matched mean and standard deviation. Thus we see
 that the shape of the error injected does not change how well a model tolerates it.
+% TODO (2026-09-25): "GP-Hetero on PDV the single exception" is wrong. SVM also moves beyond its
+% replicate range under all three shapes at every representation, by 0.008 to 0.018, and GP-Hetero
+% moves at ChemBERTa too. Suggested sentence and source in the TODO list under section R5.
 
 Censoring was the exception to all of it. On the pairings it was run on, \aucnorm fell to between
 0.77 and 0.82, against 0.94 to 0.98 for those same pairings under Gaussian noise. Censoring is the
@@ -2082,14 +2085,18 @@ Caco-2 and hERG $K_i$ it costs up to 0.22 and 0.21. The two VBLL networks are th
 on logD they keep more \aucnorm under grouped-shifted than under Gaussian noise, on every
 representation.
 
-The other noise conditions separate the models in a way that holds on every dataset. Grouped-wider,
-outlier, Laplace and Student-$t$ noise put the same total amount of error on fewer labels than
-Gaussian noise does. Against Gaussian noise, SVM never loses \aucnorm under any of the four, on any dataset or
-representation that ran them. Its gain is 0.01 to 0.02 on QM9 and reaches 0.10 on the assay
-datasets. NGBoost moves the other way. On Caco-2 and hERG $K_i$ it loses \aucnorm under all four, by
-up to 0.15, with one exception at Avalon on Caco-2. On QM9 and logD it moves by 0.04 or less. RF and
-the GP never lose more than 0.03 under any of the four. Under grouped-wider noise, RF gains up to
-0.09 on Caco-2.
+As on QM9, the shape of the noise matters little for most models on the assay datasets.
+Grouped-wider, outlier, Laplace and Student-$t$ noise put the same total amount of error on fewer
+labels than Gaussian noise does. Laplace, Student-$t$ and outlier noise ran on four of the base
+models: RF, the GP, SVM and NGBoost. RF and the GP never lose more than 0.03 of \aucnorm under any
+of the four conditions, on any dataset. SVM and NGBoost are the exceptions, and they move in
+opposite directions on every dataset. SVM never loses \aucnorm under any of the four, and gains
+0.01 to 0.02 on QM9 and up to 0.10 on the assay datasets. NGBoost loses under all four on Caco-2
+and hERG $K_i$, by up to 0.15, with one exception at Avalon on Caco-2. On QM9 and logD it moves by
+0.04 or less. These comparisons carry a caveat that the QM9 ones do not. The assay labels already
+hold measurement error of unknown size and shape, and every added condition sits on top of it. Even
+so, the shape of the added noise changes the outcome for only two of the four models.
+% RF gains up to 0.09 under grouped-wider on Caco-2 (Avalon, Sort & Slice), inside the fold spread.
 % Grouped-wider and the boosted trees, checked because the author's first reading was that it hurts
 % XGBoost, LightGBM and NGBoost: it hurts NGBoost (above). XGBoost loses 0.09 to 0.14 on hERG at
 % ECFP4, MHG-GNN and Sort & Slice, and moves 0.08 or less elsewhere. LightGBM does not lose: it
@@ -2107,7 +2114,8 @@ representation. Its clean $R^2$ sits in the middle of the thirteen or below. The
 accurate model on clean labels on all three assay datasets, first or second at every
 representation, and ranks third to eighth for \aucnorm. On the assay datasets SVM never leads either
 list and never falls to the bottom of either. It ranks third to tenth for clean $R^2$ and fourth to
-ninth for \aucnorm.
+ninth for \aucnorm. On QM9 it stands out less, at third to ninth for clean $R^2$ and sixth to
+eleventh for \aucnorm.
 
 NGBoost, the most robust model on QM9 at every representation, does not stay there. It ranks first
 to third on logD, second to eleventh on Caco-2 and sixth to ninth on hERG $K_i$. Its clean $R^2$
@@ -2119,8 +2127,11 @@ on clean labels at most of them. VBLL-$\alpha$ is the reverse case. It ranks fir
 \aucnorm on hERG $K_i$ at every representation and last on logD at every representation. Its clean
 $R^2$ is among the lowest everywhere except Caco-2 at Avalon. An \aucnorm close to 1 on a weak baseline is partly the ratio
 itself, since a model with little to lose loses little.
-% TODO: plain NNs and full-BNNs vary by dataset and representation with no single pattern. Say so
-% in one sentence, or leave them to the figure.
+The other networks vary more. The plain networks mostly rank in the lower half for \aucnorm.
+NN-$\alpha$ is seventh to twelfth on every dataset and representation. NN-$\beta$ is eighth to
+thirteenth, except on Caco-2 at MHG-GNN and PDV and on hERG $K_i$ at ECFP4. The full-BNNs have no
+single pattern: BNN-$\alpha$ ranges from first to thirteenth depending on dataset and
+representation.
 
 Clean accuracy does not predict robustness on the assay datasets either. The rank correlation
 between clean $R^2$ and \aucnorm across the thirteen base models is never positive and significant.
@@ -2184,8 +2195,13 @@ repeat across representations and datasets.
   slightly. XGBoost loses only on hERG $ at three representations. LightGBM does not lose at all.
 - **The clean-accuracy paragraph** (`paper.tex:532`) still waits on the regenerated F2b.
 - **Additional file number** for the PDV version of F8c.
-- **Plain NNs and full-BNNs** have no single pattern across datasets. One sentence, or leave them to the
-  figure.
+- **The noise-conditions subsection needs one change** (`paper.tex:455` and the guide's own version of
+  it, "every model's \aucnorm sat within its own replicate-to-replicate spread of its Gaussian value,
+  with GP-Hetero on PDV the single exception"). On QM9, SVM gains under Laplace, Student-$t$ and
+  outlier noise beyond its replicate range at every representation that ran them, by 0.008 to 0.018.
+  The heteroscedastic GP gains 0.05 to 0.07 at ChemBERTa and PDV. Suggested sentence: "The one base
+  model the shape moves is SVM, which keeps 0.01 to 0.02 more \aucnorm under the three heavier-tailed
+  shapes than under Gaussian noise." From `auc_norm_qm9.csv`, replicate ranges not overlapping.
 
 **Your text this replaces** (`paper.tex:559`, `577–581` and `584–593`), kept word for word. The
 paragraphs at `584–593` read as conclusions for the whole paper, so they may belong in the
