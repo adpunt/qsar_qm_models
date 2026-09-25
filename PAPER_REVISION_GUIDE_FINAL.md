@@ -1635,6 +1635,17 @@ labels. Comparing clean $R^2$ against \aucnorm across all models for Gaussian no
 two rank in opposite directions at a Spearman correlation of $-0.18$, which does not reach
 significance.
 
+\begin{table}[htbp]
+\centering
+\caption{Robustness (\aucnorm) of each model under each noise condition on the QM9 HOMO--LUMO gap at
+ECFP4, with clean $R^2$ in the first column as the quantity the rest are a fraction of. A dash is a
+pairing that condition was not run on: Laplace, Student-$t$ and outlier noise were given to a named
+subset of model architectures, and censoring to a named subset of pairings. Values are medians over
+replicates.}
+\label{tab:robustness}
+\input{T4_robustness_qm9_ecfp4}
+\end{table}
+
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{F4a_models_under_noise.png}
@@ -1717,11 +1728,12 @@ excluded configurations in Additional file~5.}
 
 - `fig:decoupling` is R16, `R16_decoupling_ecfp4.png`. It is generated and has never been in the
   paper. The second paragraph does not work without it.
-- **`tab:robustness` is T4 and lives in "Artificial noise conditions"**, cited from here rather
-  than repeated. It is the only place clean $R^2$ sits beside \aucnorm for every model, so it is
-  arguably this subsection's table rather than that one's. If you would rather it sat here, move
-  the `\begin{table}` block and cite it from the condition subsection instead; a table belongs in
-  one place and either reading is defensible.
+- **`tab:robustness` is T4 and now belongs to this subsection** (the author's call, 2026-09-25).
+  It is the only place clean $R^2$ sits beside \aucnorm for every model, which is this
+  subsection's whole argument. In `paper.tex` the block currently sits in "Artificial noise
+  conditions" and has to be cut from there and pasted here; that subsection keeps citing it,
+  which is fine, a table belongs in one place. **`paper.tex` has not been touched** — the move
+  is one block and it is yours to make or to tell me to make.
 - Read off Figure~\ref{fig:curves} rather than from a table: that NGBoost stays below every other
   line on ECFP4 at every level, and that it ends highest on PDV between 1.0 and 1.5. Confirm both
   against `r2_by_level.csv` when the next figures run produces it, and replace "between noise levels
@@ -2548,8 +2560,8 @@ Nothing was deleted. The two blocks that came out are commented in place with a 
 | Line | Subsection | Figures | Tables |
 |---|---|---|---|
 | 387 | Variance decomposition | F2 `fig:variance` | T3 `tab:variance` |
-| 426 | Robustness and clean accuracy | F4a `fig:curves`, F3 `fig:grid` | — |
-| 487 | Artificial noise conditions | F4b `fig:conditions`, R19 `fig:deep` | T4 `tab:robustness` |
+| 426 | Robustness and clean accuracy | F4a `fig:curves`, F3 `fig:grid`, R16 `fig:decoupling` | T4 `tab:robustness` |
+| 487 | Artificial noise conditions | F4b `fig:conditions`, R19 `fig:deep` | — (cites `tab:robustness`) |
 | 548 | Robustness on the three assay datasets | F8 `fig:assay`, F2b `fig:variance_clean`, R9 `fig:transfer` | T3b `tab:variance_clean` |
 
 ### What moved, and where it went
@@ -2565,7 +2577,7 @@ Nothing was deleted. The two blocks that came out are commented in place with a 
 | What | Where | Needs |
 |---|---|---|
 | T3 `tab:variance` | Variance decomposition, between the second paragraph and F2 | `T3_variance_decomposition_qm9.tex` on the graphics path |
-| T4 `tab:robustness` | Artificial noise conditions, after the paragraph that cites it | `T4_robustness_qm9_ecfp4.tex` |
+| T4 `tab:robustness` | **Robustness and clean accuracy** as of 2026-09-25; the block is still sitting in Artificial noise conditions in `paper.tex` and has to be cut and pasted up | `T4_robustness_qm9_ecfp4.tex` |
 | R19 `fig:deep` | Artificial noise conditions, after `fig:conditions` | `R19_deep_conditions_qm9.png` |
 | T3b `tab:variance_clean` | The assay subsection, after F2b | `T3b_variance_decomposition_clean.tex` |
 
