@@ -1782,13 +1782,41 @@ in `auc_norm_qm9.csv` as `auc_norm_spread`, and the last two columns of T12 carr
 
 #### The four takeaways, and what carries each
 
-**1. The distribution the errors are drawn from makes no difference.** All six dose-matched conditions
-deliver the same amount of error — 0.3083 requested in the label's own units, all six landing within 0.005 of
-it (`F1_delivered_dose.csv`). So any difference between them is a difference of pattern. Laplace, Student-*t*
-and outlier change no model's AUC$_{norm}$ by more than that model's own replicate spread: outlier on none of
-the twenty-one model-and-representation combinations it ran on, Laplace and Student-*t* on one apiece. That
-one is GP (het.) on PDV, whose replicate spread reaches 0.32 on ChemBERTa and whose numbers are not stable
-enough to quote anywhere. *Carried by R19 and F4b.*
+**1. Changing the distribution the errors are drawn from costs far less than making the error systematic,
+but it is not nothing, and two models respond to it consistently.** All six dose-matched conditions deliver
+the same amount of error — 0.3083 requested in the label's own units, all six landing within 0.005 of it
+(`F1_delivered_dose.csv`) — so any difference between them is a difference of pattern.
+
+Four patterns are visible in R19, and they are different patterns with different caveats.
+
+- **Group-shifted is the darkest cell in every row of every panel.** Twenty-one rows, no exception. Nothing
+  else in the figure is uniform like that. *No caveat: it clears each model's own replicate spread on
+  eighteen of the twenty-one.*
+- **RF's and GP's rows are flat** across Gaussian, Student-*t*, outlier and Laplace. RF spans 0.006 on ECFP4,
+  0.005 on PDV, 0.007 on ChemBERTa; GP spans 0.004, 0.002, 0.005. For these two the shape of the error is
+  genuinely nothing. *No caveat: a span that small is below the replicate spread on every representation and
+  has no direction either.*
+- **SVM's row brightens from left to right and NGBoost's darkens**, on all three panels. SVM on PDV reads
+  0.937 Gaussian, 0.947 Student-*t*, 0.952 outlier, 0.955 Laplace, 0.955 grouped-wider. NGBoost on ECFP4
+  reads 0.979 Gaussian, 0.969 Student-*t*, 0.966 Laplace, 0.963 outlier — Gaussian is its brightest cell of
+  the four on all three panels. Extending to grouped-wider across all six representations, SVM is above
+  Gaussian on fifteen of fifteen cells and NGBoost below it on fifteen of fifteen. *Caveat, and it is a real
+  one: each individual change is 0.008 to 0.018, and those models' replicate spreads are 0.022 to 0.043 for
+  SVM and 0.019 to 0.041 for NGBoost. No single cell carries this. What carries it is that the direction
+  never once flips, across four conditions and six representations.* The mechanism is consistent with it —
+  NGBoost fits a per-molecule error scale by maximum likelihood under a normal assumption, and all four
+  conditions it loses under break that assumption; SVM's loss ignores residuals inside a margin, so errors
+  concentrated on few molecules cost it less than the same amount spread evenly — but the study does not test
+  the mechanism and the paper should say so.
+- **GP (het.) has bright cells at Student-*t*, outlier and Laplace that its Gaussian cell does not have**:
+  0.905 Gaussian against 0.977, 0.980 and 0.975 on ChemBERTa, and 0.918 against 0.971 and 0.970 on PDV. Its
+  row spans 0.075 and 0.054 where every other row spans 0.002 to 0.019. *Caveat: this is the one row in the
+  figure that cannot be read at all. Its replicate spread is 0.32 on ChemBERTa, 0.24 on MHG-GNN and 0.16 on
+  ECFP4, four to twenty times every other model's, so its cells move further between two runs of the same
+  configuration than between two conditions. It is also one of the six variant models. Quote nothing from
+  this row.*
+
+*Carried by R19, with F4b showing the same thing as curves for one model.*
 
 **2. Systematic error is what costs accuracy, and the amount differs by model family.** Grouped-shifted
 exceeds the replicate spread for RF, NGBoost and GP on all six representations, and for SVM, XGBoost,
@@ -1840,17 +1868,26 @@ adding it in proportion to the spread of the clean labels on the training set, s
 in outcome between two conditions is a difference of pattern rather than of amount. One condition,
 censoring, could not be held to a set amount as its levels count the fraction of labels clipped.
 
-Changing the distribution the errors are drawn from changes nothing. On the HOMO--LUMO gap on QM9,
-Laplace, Student-$t$ and outlier noise were run alongside Gaussian on NGBoost, RF, SVM, GP,
-GP~(het.), BNN-Full-MVE and VBLL-Full-Hetero, at ECFP4, PDV and ChemBERTa
-(Figure~\ref{fig:deep}, Table~\ref{tab:robustness}). Their accuracy curves lie on one another over the
-whole noise range (Figure~\ref{fig:conditions}). We compared each model against the spread of
-its own ten replicates, since a change smaller than the run-to-run variation is smaller than the
-measurement. Outlier noise moved no model past that spread on any of the three representations, and
-Laplace and Student-$t$ moved only GP~(het.) on PDV, a pairing whose replicate spread reaches 0.32
-on ChemBERTa and which we do not read a result from. This reproduces what \citet{Heid2023} found
-comparing four distributions on a single architecture, and extends it to nineteen models, six
-representations and each model's own measurement error.
+Changing the distribution the errors are drawn from costs far less than making the error
+systematic, but it is not nothing. On the HOMO--LUMO gap on QM9, Laplace, Student-$t$ and outlier
+noise were run alongside Gaussian on NGBoost, RF, SVM, GP, GP~(het.), BNN-Full-MVE and
+VBLL-Full-Hetero, at ECFP4, PDV and ChemBERTa (Figure~\ref{fig:deep},
+Table~\ref{tab:robustness}), and their accuracy curves lie on one another over the whole noise range
+(Figure~\ref{fig:conditions}). For the random forest and the Gaussian process the shape of the error
+is genuinely nothing: their \aucnorm spans 0.006 and 0.004 across the four shapes at ECFP4, and less
+again on PDV and ChemBERTa. Two models do respond. SVM gained under every departure from Gaussian on
+every representation it was given, reading 0.937 under Gaussian noise against 0.947, 0.952 and 0.955
+under Student-$t$, outlier and Laplace at PDV, while NGBoost lost under every one, its Gaussian cell
+the highest of the four on all three representations. Counting group-wider alongside them, SVM sat
+above Gaussian on all fifteen model-and-representation cells it ran and NGBoost below it on all
+fifteen. No single one of those changes exceeds the spread across that pairing's own ten replicates,
+which runs 0.022 to 0.043 for SVM and 0.019 to 0.041 for NGBoost, so what carries this is the
+consistency of the direction rather than the size of any one cell. It is consistent with what each
+model optimises: NGBoost fits a per-molecule error scale by maximum likelihood under a normal
+assumption, which all four of these conditions violate, while SVM's loss is insensitive to residuals
+falling within a margin. We did not test that mechanism directly. The broader result reproduces
+\citet{Heid2023}, who found no difference between four error distributions drawn at a matched mean
+and standard deviation, and locates the two architectures where a difference does show.
 
 \begin{figure}[htbp]
 \centering
@@ -1863,7 +1900,10 @@ are medians over replicates and colour is on one fixed range across all panels. 
 rather than on the curves because its level is a fraction of labels clipped rather than a fraction
 of the label spread; its \aucnorm is therefore an area over a different quantity and is not
 comparable to the columns beside it. A grey square marked ``not run'' is a pairing it was never
-given.}
+given. The GP~(het.) row spans 0.075 of \aucnorm across the four error shapes on panel c), where every
+other row spans at most 0.019, but its spread across the ten replicates of one configuration reaches
+0.32 on that panel, so its cells move further between two runs of one setting than between two
+conditions and that row is not read here.}
 \label{fig:deep}
 \end{figure}
 
@@ -1956,8 +1996,13 @@ noise condition begins to decide the outcome.}
 |---|---|---|
 | Six conditions land within 0.005 of a request of 0.3083 | `F1_delivered_dose.csv` | ✅ |
 | Outlier exceeds no model's replicate spread on any of 21 pairings | `auc_norm_qm9.csv` | ✅ |
-| Laplace and Student-*t* exceed it only for GP (het.) on PDV, $+0.052$ and $+0.054$ against 0.025 | `auc_norm_qm9.csv` | ✅ |
-| GP (het.) replicate spread 0.32 ChemBERTa, 0.16 ECFP4, 0.24 MHG-GNN | `auc_norm_qm9.csv` | ✅ |
+| RF spans 0.006 / 0.005 / 0.007 and GP 0.004 / 0.002 / 0.005 across the four error shapes, on ECFP4 / PDV / ChemBERTa | `auc_norm_qm9.csv` | ✅ |
+| SVM above Gaussian on 15 of 15 cells; NGBoost below on 15 of 15 (4 shapes × 3 reps, plus grouped-wider × 6 reps) | `auc_norm_qm9.csv` | ✅ |
+| SVM at PDV: 0.937 Gaussian, 0.947 Student-*t*, 0.952 outlier, 0.955 Laplace | `auc_norm_qm9.csv` | ✅ |
+| NGBoost's Gaussian cell highest of the four shapes on all three representations | `auc_norm_qm9.csv` | ✅ |
+| Those changes are 0.008–0.018 against replicate spreads of 0.022–0.043 (SVM) and 0.019–0.041 (NGBoost) | `auc_norm_qm9.csv` | ✅ |
+| GP (het.) row spans 0.075 ChemBERTa, 0.054 PDV; replicate spread 0.32 ChemBERTa, 0.24 MHG-GNN, 0.16 ECFP4 | `auc_norm_qm9.csv` | ✅ |
+| The mechanism for SVM and NGBoost | ⚠️ **not tested** — stated as consistent with what each model optimises, nothing more | — |
 | Grouped-shifted beats the spread: RF, NGBoost, GP 6 of 6; SVM, XGBoost, LightGBM, QRF, NN-$\alpha$ 5 of 6 | T12 | ✅ |
 | RF loses 0.024–0.038; NN-$\alpha$ loses up to 0.082 on Avalon | T12 | ✅ |
 | BNN beats its plain counterpart 6 of 6, both families | `auc_norm_qm9.csv` | ✅ |
