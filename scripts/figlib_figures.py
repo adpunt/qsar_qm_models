@@ -2560,3 +2560,86 @@ def f4d_conditions_by_representation(accuracy, output_dir, dataset='qm9',
             fig, Path(output_dir) /
             f'F4d_conditions_by_representation_{model}.png'))
     return written
+
+
+# ---------------------------------------------------------------------------
+# F8c -- the curves on every dataset
+# ---------------------------------------------------------------------------
+
+#: The columns of F8c. Outlier is here because it was the odd one on QM9 and had
+#: no drawing at all (the author, 2026-09-25); it ran on a named subset of
+#: models, so its column holds fewer lines.
+F8C_CONDITIONS = ('gaussian', 'grouped_wider', 'grouped_shifted', 'outlier_p10')
+
+
+def f8c_curves_every_dataset(accuracies, output_dir, rep,
+                             conditions=F8C_CONDITIONS, models=None):
+    """Held-out accuracy against noise level on all four datasets, so the
+    patterns can be compared dataset by dataset (the author, 2026-09-25).
+
+    Rows are datasets, columns noise conditions, one line per base model, the
+    median over replicates (QM9) or scaffold folds (assay). Each row has its own
+    side axis because clean accuracy differs by a factor of two between QM9 and
+    Caco-2; within a row the panels share it, so the conditions can be read
+    against each other. One file per representation. The numbers are in
+    r2_by_level_<dataset>.csv.
+    """
+    frames = [f for f in accuracies if f is not None and len(f)]
+    if not frames:
+        return None
+    acc = pd.concat(frames, ignore_index=True)
+    acc = acc.assign(dataset=acc['dataset'].map(C.canonical_dataset))
+    acc = C.cross_model(acc[(acc['rep'] == rep)
+                            & acc['condition'].isin(conditions)], 'F8c')
+    if models is not None:
+        acc = acc[acc['model'].isin(models)]
+    datasets = [d for d in C.DATASET_ORDER if d in set(acc['dataset'])]
+    columns = [c for c in conditions if c in set(acc['condition'])]
+    if not datasets or not columns:
+        return None
+    G.declare(acc, 'F8c', fixed={'rep': rep},
+              varies=('dataset', 'condition', 'model', 'sigma'),
+              aggregates=('replicate',))
+    fig, axes = _fig(height=1.9 * len(datasets) + 0.8, nrows=len(datasets),
+                     ncols=len(columns), sharex=True, sharey='row')
+    axes = np.atleast_2d(axes)
+    letters = iter('abcdefghijklmnopqrstuvwxyz')
+    for i, dataset in enumerate(datasets):
+        for j, condition in enumerate(columns):
+            ax = axes[i, j]
+            here = acc[(acc['dataset'] == dataset)
+                       & (acc['condition'] == condition)]
+            letter = next(letters)
+            # The dataset is the row, named on the side axis; the title
+            # carries the condition alone, or four titles overrun each other.
+            S.title(ax, letter, C.condition_label(condition))
+            ax.spines[['top', 'right']].set_visible(False)
+            if not len(here):
+                ax.text(0.5, 0.5, 'not run', transform=ax.transAxes,
+                        ha='center', va='center', color='#888888')
+                continue
+            curves = (here.groupby(['model', 'sigma'], as_index=False)['r2']
+                      .median())
+            order = C.sort_models(curves['model'].unique())
+            curves['model'] = pd.Categorical(curves['model'], order,
+                                             ordered=True)
+            S.line_chart(ax, curves, 'sigma', 'r2', 'model',
+                         labeller=C.model_label, legend=False)
+            if j == 0:
+                ax.set_ylabel(f'{C.dataset_label(dataset).split(" (")[0]}\n'
+                              f'{G.metric_label("r2")}')
+            if i == len(datasets) - 1:
+                ax.set_xlabel('Noise level')
+    S.shared_legend(fig, list(axes.ravel()))
+    caption('F8c', f"""
+        Held-out accuracy against the amount of noise added to the training
+        labels, on every dataset, at {C.rep_label(rep)}. Rows are datasets,
+        named on the side axis, and columns noise conditions; one line per base model, the median over
+        replicates on QM9 and over scaffold folds on the assay datasets. Each
+        row has its own side axis, shared across that row. Bottom axis: the
+        noise level, a fraction of the clean training label spread. Outlier
+        noise ran on a named subset of models, so its column has fewer lines;
+        a panel marked "not run" had none. Censoring is absent because its
+        level is a fraction of labels clipped. The numbers are in
+        r2_by_level_<dataset>.csv.""")
+    return S.save(fig, Path(output_dir) / f'F8c_curves_every_dataset_{rep}.png')

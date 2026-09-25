@@ -471,6 +471,15 @@ def draw_figures(args, tables, verdicts):
                                                 'gaussian'))
         drawn.append(FIG.r16_decoupling(qm9, out, rep,
                                         conditions=conditions))
+    # F8c: the curves on all four datasets, so a pattern seen on QM9 can be
+    # checked on the assay endpoints (the author, 2026-09-25). ECFP4 is the
+    # representation the section reads at; PDV because NGBoost at PDV was the
+    # QM9 standout.
+    assay_accuracy = tables.get('_assay_accuracy')
+    for held in dict.fromkeys([rep, 'ecfp4', 'pdv']):
+        if held:
+            drawn.append(FIG.f8c_curves_every_dataset(
+                [accuracy, assay_accuracy], out, held))
     if assay is not None and len(assay) and rep:
         drawn.append(FIG.f8_assay(assay, out, rep,
                                   excluded=tables.get('excluded_assay')))
@@ -701,6 +710,13 @@ def build_tables(args, tables, verdicts):
             support, tables.get('d7_q4'), tables.get('d7_q6'),
             tables.get('d8_component_slopes'), out,
             name='T6b_uncertainty_every_dataset'))
+    # T10: held-out R2 at one noise level on all four datasets (the author,
+    # 2026-09-25). ECFP4 and PDV, the two representations the assay
+    # subsection reads at.
+    accuracies = [tables.get('_qm9_accuracy'), tables.get('_assay_accuracy')]
+    for held in dict.fromkeys([rep, 'ecfp4', 'pdv']):
+        if held:
+            built.append(TAB.t10_accuracy_at_level(accuracies, out, held))
     if tables.get('total_uncertainty_rise') is not None:
         # One table per representation, PDV the main-text one (the author's
         # layout question, 2026-09-25; the alternative is one per dataset).

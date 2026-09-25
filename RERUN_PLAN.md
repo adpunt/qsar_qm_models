@@ -16055,6 +16055,9 @@ Open, owned by the paper-revision chat, closed when the new harvest is checked a
 - `unc_censoring_control.csv`: whether the negative correlation under censoring comes from the clipping
   or from the clipped molecules having the highest labels. Needs the per-molecule files, so cluster
   only. The per-file cache generation is bumped to 2, so the first run recomputes every file.
+- F8c (`figures/F8c_curves_every_dataset_<rep>.png`, ECFP4 and PDV): held-out R² against noise level
+  on all four datasets, one row per dataset, one column per condition including outlier. And T10
+  (`tables/T10_accuracy_at_level_<rep>`): R² with no noise and at level 1.0. Both feed guide §R5.
 
 ```bash
 cd $QSAR && git pull && sbatch slurm_scripts_analysis/run_paper_analysis.sh

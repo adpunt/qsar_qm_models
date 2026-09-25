@@ -706,3 +706,55 @@ def t9_uncertainty_rise(rise, output_dir, rep, condition='gaussian',
 def _top(frame):
     levels = frame['top_level'].dropna().unique()
     return f'{levels.max():g}' if len(levels) else 'top'
+
+
+# ---------------------------------------------------------------------------
+# T10 -- held-out accuracy at one noise level, on every dataset
+# ---------------------------------------------------------------------------
+
+def t10_accuracy_at_level(accuracies, output_dir, rep, level=1.0,
+                          conditions=('gaussian', 'grouped_wider',
+                                      'grouped_shifted')):
+    """Held-out R2 with no noise and at one noise level, per model, on all four
+    datasets (the author, 2026-09-25: "I need to see held out accuracy at a
+    given noise level").
+
+    One row is one base model. For each dataset: clean R2, then R2 at `level`
+    under each condition, each the median over replicates (QM9) or scaffold
+    folds (assay). The clean column is the Gaussian ladder's level 0; every
+    condition starts from the same clean fit.
+    """
+    frames = [f for f in accuracies if f is not None and len(f)]
+    if not frames:
+        return None
+    acc = pd.concat(frames, ignore_index=True)
+    acc = acc.assign(dataset=acc['dataset'].map(C.canonical_dataset))
+    acc = C.cross_model(acc[(acc['rep'] == rep)
+                            & acc['condition'].isin(conditions)], 'T10')
+    if not len(acc):
+        return None
+    G.declare(acc, 'T10', fixed={'rep': rep},
+              varies=('model', 'dataset', 'condition', 'sigma'),
+              aggregates=('replicate',))
+    med = (acc.groupby(['dataset', 'model', 'condition', 'sigma'])['r2']
+           .median())
+    datasets = [d for d in C.DATASET_ORDER if d in set(acc['dataset'])]
+    rows = []
+    for model in C.sort_models(acc['model'].unique()):
+        row = {'Model': C.model_label(model)}
+        for d in datasets:
+            short = C.dataset_label(d).split(' (')[0]
+            row[f'{short}: clean'] = med.get((d, model, 'gaussian', 0.0), np.nan)
+            for c in conditions:
+                row[f'{short}: {C.condition_label(c)}'] = med.get(
+                    (d, model, c, level), np.nan)
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    return write(table, output_dir, f'T10_accuracy_at_level_{rep}',
+                 f'Held-out R² with no added noise and at a noise level of '
+                 f'{level:g} (a fraction of the clean training label spread), '
+                 f'on {C.rep_label(rep)}. One row per base model; for each '
+                 f'dataset the clean value, then one column per noise '
+                 f'condition. Medians over ten replicates on QM9 and over the '
+                 f'scaffold folds on the assay datasets. A dash is a '
+                 f'combination that was not run.')
