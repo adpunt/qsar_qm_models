@@ -1723,19 +1723,38 @@ def _murcko(smiles):
     says so rather than silently returning a number.
     """
     try:
-        from rdkit import Chem
+        from rdkit import Chem, RDLogger
         from rdkit.Chem.Scaffolds import MurckoScaffold
     except Exception:
         return None
-    out = []
-    for s in smiles:
+    # RDKit prints a parse error per failed molecule. Eight workers doing that at
+    # once filled the 2026-09-27 log with interleaved "SMILES Parse Error" lines
+    # and nothing else. A failed parse already becomes '' below, and is dropped.
+    RDLogger.DisableLog('rdApp.*')
+    # A file repeats every molecule once per noise level and fold, so each
+    # distinct SMILES is parsed once.
+    scaffold_of = {}
+    for s in pd.unique(pd.Series(smiles, dtype=object).astype(str)):
         try:
-            mol = Chem.MolFromSmiles(str(s))
-            out.append(MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
-                       if mol is not None else '')
+            mol = Chem.MolFromSmiles(s)
+            scaffold_of[s] = (MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
+                              if mol is not None else '')
         except Exception:
-            out.append('')
-    return out
+            scaffold_of[s] = ''
+    return [scaffold_of[str(s)] for s in smiles]
+
+
+def _looks_like_row_numbers(identifiers):
+    """True when the molecule identifiers are integers, not SMILES.
+
+    The laboratory writer names a molecule by `mol_idx`, its row in the full
+    dataset, and `_normalise_kirby` puts that under `mol_id`. RDKit cannot parse
+    a row number, so every one failed, one error line each, and the statistic
+    came out NaN after the work.
+    """
+    as_text = pd.Series(identifiers, dtype=object).dropna().astype(str)
+    return bool(len(as_text)) and bool(
+        as_text.str.fullmatch(r'-?\d+(\.0+)?').all())
 
 
 def q7_group_correlated_error(df, split='train_oof', min_n=_DEFAULT_MIN_N,
@@ -1790,6 +1809,12 @@ def q7_group_correlated_error(df, split='train_oof', min_n=_DEFAULT_MIN_N,
         if not pd.notna(identifiers).any():
             rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
                        reason=f'{smiles_column} is empty on every row')
+            rows.append(rec)
+            continue
+        if _looks_like_row_numbers(identifiers):
+            rec.update(group_share=np.nan, n_groups=0, mean_group_size=np.nan,
+                       reason=f'{smiles_column} holds row numbers, not SMILES '
+                              f'(the laboratory writer records mol_idx only)')
             rows.append(rec)
             continue
         scaffolds = _murcko(identifiers)
