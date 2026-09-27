@@ -7,9 +7,9 @@ Journal of Cheminformatics is a BMC title, so the submission system takes each
 Additional file as its own upload rather than as one appendix bound to the paper.
 This writes `additional_files/`, which is a STAGING folder and not a source of
 truth: it is deleted and rebuilt on every run, and nothing should ever be edited
-inside it. The sources stay where they are, so `scripts/generate_supp_table1.py`
-keeps writing `additional_files.tex` at the repository root and keeps passing
-`scripts/test_supp_table1.py`.
+inside it. The sources are in `supplementary/` (see supplementary/README.md);
+`scripts/build_additional_files.py` assembles `additional_files.tex` from them,
+and this script copies that file and its figures here.
 
 What lands in the folder:
 

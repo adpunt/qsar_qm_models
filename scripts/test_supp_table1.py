@@ -11,8 +11,9 @@ hand-typed table this replaces:
 2. The two settings that are NOT in models/model_defaults.py are still where
    generate_supp_table1.py says they are. Each is looked for as an exact line in
    its source file, and must appear exactly once.
-3. The block in additional_files.tex is what the generator emits right now. A
-   hand edit inside the markers fails here.
+3. The three item files in supplementary/items/ are what the generator emits
+   right now, and additional_files.tex is what scripts/build_additional_files.py
+   builds from the index and the items. A hand edit to either fails here.
 4. The values the hand-typed table got wrong are right: both forests at
    min_samples_leaf 5 and max_features 0.3, and neither at 'sqrt'.
 5. Additional file 12, the representation-specific SVM kernel table, is gone,
@@ -82,15 +83,19 @@ except ImportError as exc:
     print(f'SKIP  the variance-head loss clamp -- {exc}')
 
 # 3 -----------------------------------------------------------------------
-tex_text = open(G.TEX_PATH).read()
-has_markers = G.BEGIN_MARK in tex_text and G.END_MARK in tex_text
-check('additional_files.tex carries the generated markers', has_markers)
-if has_markers:
-    start = tex_text.index(G.BEGIN_MARK)
-    end = tex_text.index(G.END_MARK) + len(G.END_MARK)
-    check('the block in additional_files.tex is what the generator emits',
-          tex_text[start:end] == body,
-          'run: python scripts/generate_supp_table1.py --write')
+items, *_ = G.build_items()
+for name in G.ITEM_NAMES:
+    path = os.path.join(G.ITEMS_DIR, name + '.tex')
+    on_disk = open(path).read() if os.path.exists(path) else None
+    check(f'supplementary/items/{name}.tex is what the generator emits',
+          on_disk == G.item_text(name, items[name]),
+          'run: python3 scripts/generate_supp_table1.py --write')
+import build_additional_files as B     # noqa: E402
+built, _ = B.build()
+tex_text = open(G.TEX_PATH).read() if os.path.exists(G.TEX_PATH) else ''
+check('additional_files.tex is what build_additional_files.py builds',
+      tex_text == built,
+      'run: python3 scripts/build_additional_files.py')
 
 # 4 -----------------------------------------------------------------------
 for forest in ('rf', 'qrf'):

@@ -1,0 +1,26 @@
+% Preamble for the paper's Additional files document.
+% scripts/build_additional_files.py copies this file, then the items, into
+% additional_files.tex. Edit the preamble here, never in additional_files.tex.
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}% provides [H] to pin tables/figures exactly in place (no floating)
+\usepackage{longtable}% multi-page tables that break across pages and stay under their title
+\usepackage{microtype}
+
+\graphicspath{{results/paper_figures/}}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\captionsetup{labelformat=empty,justification=raggedright,singlelinecheck=false}
+
+% \SuppFile prints "Additional file N," in front of an item's caption. The build
+% redefines it before each Additional file, so no item ever carries its own number.
+\newcommand{\SuppFile}{}
