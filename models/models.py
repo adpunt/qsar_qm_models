@@ -8536,8 +8536,9 @@ def train_heteroscedastic_gp(
         # PDV at the 100 epochs the cluster runs: R2 0.936 started from the
         # data against 0.892 started at 0.69. It does not collapse here: the 28
         # QM9 het_gp_rbf combinations of representation and noise condition
-        # already on disk hold 1,717 rows and every one records gp_collapsed = 0
-        # (results/decisions_arc/d0_coverage.csv), with clean R2 from 0.8345 on
+        # already on disk hold 1,717 rows. d0_coverage.csv reports gp_collapsed 0
+        # for them, but that is a blank counted as zero: this model did not write
+        # the flag until 2026-09-27 (see its save_results call). Clean R2 from 0.8345 on
         # ECFP4 to 0.8914 on Sort & Slice. Nothing is being rescued. All 1,717
         # are a different fit from this one, so all 1,717 are a resubmission.
         #
@@ -8680,8 +8681,14 @@ def train_heteroscedastic_gp(
     
     # Save results
     model_name = f"het_gp_{kernel_type}"
+    # The flag the declared "collapsed Gaussian process" filter reads. This call
+    # never passed it, so every het_gp_rbf row had it blank and the filter could
+    # not see a failed fit. On the 2026-09-27 harvest, copies of one replicate
+    # read R2 -0.086 and 0.840 -- a flat prediction averaged with a real one.
+    collapsed, _ = gp_fit_collapsed(pred_mean, y_train, label='the test fit')
     save_results(args.filepath, s, iteration, model_name, rep,
-                args.sample_size, metrics, 'default', 'het_gp')
+                args.sample_size, metrics, 'default', 'het_gp',
+                gp_collapsed=int(collapsed))
     
     # Save uncertainty (total std as uncalibrated)
     if args.uncertainty:
