@@ -367,13 +367,17 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
 # F2 -- Q1: model, representation, or their pairing
 # ---------------------------------------------------------------------------
 
-#: FOUR BARS, AND THE WHISKERS STAY TOO. The author dropped the residual bar on
+#: SIX BARS SINCE 2026-09-28 (model family, model within family and split
+#: added with the family ANOVA). THE WHISKERS STAY TOO. The author dropped the residual bar on
 #: 2026-09-16 and reinstated it on 2026-09-17 after reading the whiskers on the
 #: rendered figure: they are narrow everywhere except grouped-shifted, so they
 #: do not crowd it. RERUN_PLAN.md 14.11ab. Neither the residual nor the spread
 #: may leave without her word -- test_figure_slots checks for both.
-FACTOR_COLUMNS = [('eta2_model', 'Model'), ('eta2_rep', 'Representation'),
+FACTOR_COLUMNS = [('eta2_model', 'Model family'),
+                  ('eta2_model_in_family', 'Model within family'),
+                  ('eta2_rep', 'Representation'),
                   ('eta2_interaction', 'Interaction'),
+                  ('eta2_split', 'Split'),
                   ('eta2_residual', 'Residual')]
 
 

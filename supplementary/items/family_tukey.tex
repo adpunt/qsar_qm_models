@@ -1,0 +1,22 @@
+% Supplementary item: family_tukey
+% Made 2026-09-28: the evidence for the model families in the ANOVA.
+% The numbers come from scripts/run_paper_analysis.py (figlib_metrics.pair_check / family_tukey, figlib_tables.t13_families).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{lllcccc}
+\caption{\textbf{\SuppFile{} Tukey HSD between the members of each model family.}
+One test per representation and outcome, after removing each split's mean. Each cell counts the representations, of six, on which the pair differs at adjusted $p < 0.05$, followed by the range of the absolute difference. With ten splits the test detects differences smaller than the split-to-split variation, so the size of each difference is given beside it.}
+\label{supp:family_tukey}\\
+\toprule
+\textbf{Family} & \textbf{Model A} & \textbf{Model B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Family} & \textbf{Model A} & \textbf{Model B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endhead
+\input{results/decisions_arc/tables/T13_family_tukey_qm9_rows.tex}
+\bottomrule
+\end{longtable}}

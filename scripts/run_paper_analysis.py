@@ -281,6 +281,13 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     if primary is not None and len(qm9_summary):
         collect(D.d3_condition_separation(qm9_per, qm9_summary, primary))
 
+    # THE EVIDENCE FOR THE MODEL FAMILIES the ANOVA groups by (the author,
+    # 2026-09-28): every candidate pair against its split-to-split spread,
+    # and Tukey HSD within each family. figlib_config.MODEL_FAMILIES.
+    if len(qm9_per):
+        tables['family_pair_check'] = M.pair_check(qm9_per)
+        tables['family_tukey'] = M.family_tukey(qm9_per)
+
     anova_rows = []
     if len(qm9_per):
         anova_rows.append(M.two_way_eta2_by_condition(qm9_per, 'auc_norm')
@@ -706,6 +713,9 @@ def build_tables(args, tables, verdicts):
         # This is the whole grid, with each model's own replicate spread beside
         # it as the bar a change has to clear.
         built.append(TAB.t12_condition_cost(qm9, out))
+    if tables.get('family_pair_check') is not None:
+        built.append(TAB.t13_families(tables.get('family_pair_check'),
+                                      tables.get('family_tukey'), out))
     if assay is not None and len(assay) and rep:
         # Every assay dataset that landed gets its own T4. logd used to be
         # hardcoded here, which silently dropped caco2 and herg -- a dataset is

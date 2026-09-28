@@ -379,6 +379,9 @@ def grid_height(n_rows, n_panels=1):
 
 ANOVA_FACTOR_COLORS = {
     'Model': '#6BAED6',
+    'Model family': '#6BAED6',
+    'Model within family': '#C6DBEF',
+    'Split': '#8C8C8C',
     'Representation': '#FC8D59',
     'Interaction': '#B39DDB',
     'Residual': '#BDBDBD',
@@ -593,6 +596,36 @@ VARIANT_MODELS = {
 #: Same set, kept under its old name because the ANOVA is one of the places it
 #: applies.
 ANOVA_MODELS_EXCLUDE = set(VARIANT_MODELS)
+
+#: MODEL FAMILIES IN THE ANOVA (the author, 2026-09-28). The variance
+#: decomposition enters model FAMILY, then model within family, so a method
+#: that appears in two near-identical versions does not count twice towards
+#: the model share. A family groups models that are one method by construction
+#: AND whose AUC_norm and clean R2 differ by less than their split-to-split
+#: standard deviation on most representations (figlib_metrics.pair_check). A
+#: model not named is its own family. How the grouping was reached, including
+#: the candidates that failed, is in the Methods and scripts/family_anova.py.
+MODEL_FAMILIES = {
+    'rf': 'Forest', 'qrf': 'Forest',
+    'xgboost': 'Boosting', 'lgb': 'Boosting',
+    'dnn': 'NN-α', 'dnn_bnn_full': 'NN-α',
+    'mlp': 'NN-β', 'mlp_bnn_full': 'NN-β',
+    'dnn_vbll': 'VBLL', 'mlp_vbll': 'VBLL',
+}
+
+#: Every pair that was considered for a family, kept or not. The pair check
+#: reports all of them, so the rejected groupings are on the record.
+CANDIDATE_MODEL_PAIRS = [
+    ('rf', 'qrf'),
+    ('xgboost', 'lgb'), ('xgboost', 'ngboost'), ('lgb', 'ngboost'),
+    ('dnn', 'dnn_bnn_full'), ('dnn', 'dnn_vbll'), ('dnn_bnn_full', 'dnn_vbll'),
+    ('mlp', 'mlp_bnn_full'), ('mlp', 'mlp_vbll'), ('mlp_bnn_full', 'mlp_vbll'),
+    ('dnn_vbll', 'mlp_vbll'), ('dnn', 'mlp'), ('dnn_bnn_full', 'mlp_bnn_full'),
+]
+CANDIDATE_REP_PAIRS = [('ecfp4', 'sns')]
+
+#: Bootstrap draws over splits for the interval on every variance share.
+ANOVA_BOOTSTRAP = 1000
 
 
 def cross_model(frame, where='this figure', column='model'):

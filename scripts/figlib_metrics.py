@@ -258,26 +258,108 @@ def drop_variant_models(df, where='the ANOVA'):
     return df[~drop]
 
 
-def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
-                              where='the ANOVA'):
-    """One decomposition per noise condition, with a real sensitivity band.
+SHARES = ('eta2_split', 'eta2_model', 'eta2_model_in_family', 'eta2_rep',
+          'eta2_interaction', 'eta2_residual')
 
-    ⚠️ THE SPREAD IS LEAVE-ONE-REPLICATE-OUT, NOT PER-REPLICATE, AND THAT IS THE
-    WHOLE POINT.
 
-    Decomposing a SINGLE replicate gives each (model, representation) cell
-    exactly one observation. The saturated fit then reproduces the data exactly,
-    the residual is arithmetically zero, and the other three shares are inflated
-    to sum to 100 with no error term at all. Done that way, every condition
-    reports a residual spread of exactly 0.0 while the other three carry spreads
-    of fifteen to twenty-five points -- which is what the first real run
-    produced, and it is failure mode 3 with a different face.
+def family_eta2(df, response, families=None):
+    """Type I eta-squared by model FAMILY, with the split as a block.
 
-    So the band is a jackknife: drop one replicate, decompose the remaining
-    nine, repeat. Every fit keeps nine observations per cell and a residual that
-    means something, and the spread across the ten fits says how much the answer
-    depends on any one replicate.
+    Terms in order: split, model family, model within family, representation,
+    family x representation, the rest of the model x representation pairing,
+    residual. `eta2_model` is the FAMILY share and `eta2_interaction` is the
+    last two pairing terms together, so every reader of the old four columns
+    still reads the same question. Families are figlib_config.MODEL_FAMILIES
+    (the author, 2026-09-28); a model not named is its own family.
+
+    The split is a block because QM9's replicate seed depends only on the
+    replicate number: replicate r is the same data split and the same noise draw
+    for every model and representation. On the assay datasets the fold plays
+    the same part.
     """
+    families = C.MODEL_FAMILIES if families is None else families
+    d = df.dropna(subset=[response, 'model', 'rep', 'replicate'])
+    y = d[response].to_numpy(dtype=float)
+    if len(y) < 4:
+        return None
+    total = float(((y - y.mean()) ** 2).sum())
+    if total == 0:
+        return None
+    model = d['model'].astype(str).to_numpy().astype(str)
+    rep = d['rep'].astype(str).to_numpy().astype(str)
+    family = np.array([families.get(m, m) for m in model], dtype=str)
+    if len(y) == len(set(zip(model, rep))):
+        raise G.GuardError(
+            f'a decomposition was asked for on {len(y)} rows in {len(y)} '
+            f'cells: one observation each, so the residual is arithmetically '
+            f'zero. Keep the replicate axis (RERUN_PLAN.md 0.6, guard 3).')
+    steps = [
+        ('eta2_split', d['replicate'].astype(str).to_numpy().astype(str)),
+        ('eta2_model', family),
+        ('eta2_model_in_family', model),
+        ('eta2_rep', rep),
+        ('family_x_rep', np.char.add(np.char.add(family, '|'), rep)),
+        ('rest_of_pairing', np.char.add(np.char.add(model, '|'), rep)),
+    ]
+    X = np.ones((len(y), 1))
+    previous = total
+    out = {}
+    for name, labels in steps:
+        dummies = pd.get_dummies(pd.Series(labels), drop_first=True)
+        X = np.hstack([X, dummies.to_numpy(dtype=float)])
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        rss = float(((y - X @ beta) ** 2).sum())
+        out[name] = (previous - rss) / total * 100
+        previous = rss
+    out['eta2_interaction'] = out.pop('family_x_rep') + out.pop('rest_of_pairing')
+    out['eta2_residual'] = previous / total * 100
+    out.update(n_models=int(len(set(model))), n_families=int(len(set(family))),
+               n_reps=int(len(set(rep))), n=int(len(y)))
+    return out
+
+
+def _with_bootstrap(group, response, n_boot=None, seed=0):
+    """The point shares, and a percentile 95% interval from resampling whole
+    splits with replacement. A split drawn twice is two blocks."""
+    n_boot = C.ANOVA_BOOTSTRAP if n_boot is None else n_boot
+    overall = family_eta2(group, response)
+    if overall is None:
+        return None
+    # The loader carries tables in .attrs; concat compares them and fails.
+    group = group.copy()
+    group.attrs = {}
+    splits = np.array(sorted(group['replicate'].dropna().unique()))
+    by_split = {s: group[group['replicate'] == s] for s in splits}
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_boot if len(splits) > 1 else 0):
+        picked = rng.choice(splits, size=len(splits), replace=True)
+        sample = pd.concat([by_split[s].assign(replicate=f'{s}#{i}')
+                            for i, s in enumerate(picked)], ignore_index=True)
+        try:
+            got = family_eta2(sample, response)
+        except G.GuardError:
+            continue
+        if got is not None:
+            draws.append(got)
+    record = dict(overall)
+    for share in SHARES:
+        values = np.array([dr[share] for dr in draws])
+        lo, hi = ((np.quantile(values, 0.025), np.quantile(values, 0.975))
+                  if len(values) > 1 else (np.nan, np.nan))
+        record[f'{share}_lo'] = float(lo)
+        record[f'{share}_hi'] = float(hi)
+        record[f'{share}_spread'] = float(hi - lo)
+    record['n_replicates'] = int(len(splits))
+    record['n_bootstrap'] = len(draws)
+    record['spread_is'] = '95% bootstrap interval over splits'
+    return record
+
+
+def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
+                              where='the ANOVA', n_boot=None):
+    """One decomposition per noise condition, by model family, with the split
+    as a block and a bootstrap interval over splits (family_eta2)."""
     min_cell = C.MIN_CELL_ITERS if min_cell is None else min_cell
     min_models = MIN_MODELS_FOR_ANOVA if min_models is None else min_models
     df = drop_variant_models(df, where=where)
@@ -291,35 +373,14 @@ def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
             continue
         G.assert_replicates(group, ['model', 'rep'], min_n=min_cell,
                             where=f'{where}, condition {condition}')
-        overall = two_way_eta2(group, response)
-        if overall is None:
-            continue
-
-        replicates = sorted(group['replicate'].dropna().unique())
-        jackknife = []
-        for left_out in replicates:
-            kept = group[group['replicate'] != left_out]
-            if kept['replicate'].nunique() < 2:
-                continue          # one replicate left is the saturated case
-            got = two_way_eta2(kept, response)
-            if got is not None:
-                jackknife.append(got)
-
-        record = dict(condition=condition, response=response, **overall)
-        for share in ('eta2_model', 'eta2_rep', 'eta2_interaction',
-                      'eta2_residual'):
-            values = [p[share] for p in jackknife]
-            record[f'{share}_spread'] = (float(np.max(values) - np.min(values))
-                                         if len(values) > 1 else np.nan)
-        record['n_replicates'] = int(len(replicates))
-        record['n_jackknife'] = len(jackknife)
-        record['spread_is'] = 'leave-one-replicate-out'
-        rows.append(record)
+        record = _with_bootstrap(group, response, n_boot)
+        if record is not None:
+            rows.append(dict(condition=condition, response=response, **record))
     return pd.DataFrame(rows)
 
 
 def clean_accuracy_eta2_by_dataset(df, min_cell=None, min_models=None,
-                                   where='the clean-label ANOVA'):
+                                   where='the clean-label ANOVA', n_boot=None):
     """One decomposition per DATASET, on accuracy with no noise added.
 
     The companion to `two_way_eta2_by_condition`, and the one place in the study
@@ -332,10 +393,7 @@ def clean_accuracy_eta2_by_dataset(df, min_cell=None, min_models=None,
 
     So the rows are collapsed to one per replicate first, and a disagreement
     between two conditions at level 0 is a defect worth printing rather than
-    averaging away.
-
-    The band is the same leave-one-replicate-out jackknife as the per-condition
-    decomposition: drop one replicate, decompose the rest, repeat.
+    averaging away. The decomposition is family_eta2, as under noise.
     """
     min_cell = C.MIN_CELL_ITERS if min_cell is None else min_cell
     min_models = MIN_MODELS_FOR_ANOVA if min_models is None else min_models
@@ -373,29 +431,92 @@ def clean_accuracy_eta2_by_dataset(df, min_cell=None, min_models=None,
             continue
         G.assert_replicates(group, ['model', 'rep'], min_n=min_cell,
                             where=f'{where}, dataset {dataset}')
-        overall = two_way_eta2(group, 'r2')
-        if overall is None:
+        record = _with_bootstrap(group, 'r2', n_boot)
+        if record is None:
             continue
-        replicates = sorted(group['replicate'].dropna().unique())
-        jackknife = []
-        for left_out in replicates:
-            kept = group[group['replicate'] != left_out]
-            if kept['replicate'].nunique() < 2:
-                continue
-            got = two_way_eta2(kept, 'r2')
-            if got is not None:
-                jackknife.append(got)
-        record = dict(dataset=dataset, response='r2_clean', **overall)
-        for share in ('eta2_model', 'eta2_rep', 'eta2_interaction',
-                      'eta2_residual'):
-            values = [p[share] for p in jackknife]
-            record[f'{share}_spread'] = (float(np.max(values) - np.min(values))
-                                         if len(values) > 1 else np.nan)
-        record['n_replicates'] = int(len(replicates))
-        record['n_jackknife'] = len(jackknife)
-        record['spread_is'] = 'leave-one-replicate-out'
+        record = dict(dataset=dataset, response='r2_clean', **record)
         record['conditions_collapsed'] = int(clean['condition'].nunique())
         rows.append(record)
+    return pd.DataFrame(rows)
+
+
+def pair_check(per_replicate, clean_frame=None, dataset='qm9'):
+    """Is each candidate pair the same model (or representation) in practice?
+
+    For every pair in figlib_config.CANDIDATE_MODEL_PAIRS (and _REP_PAIRS), on
+    each outcome and at each level of the other factor: the mean difference
+    between the two, paired on the split, against their split-to-split standard
+    deviation. `within_noise` is True where the difference is the smaller. The
+    outcomes are clean R2 and AUC_norm under each condition every
+    representation ran. The evidence behind figlib_config.MODEL_FAMILIES.
+    """
+    per = per_replicate[per_replicate['dataset'] == dataset]
+    per = C.cross_model(per, 'pair check')
+    outcomes = {'Clean R2': per[per['condition'] == 'gaussian']
+                .assign(y=lambda d: d['baseline_r2'])}
+    n_reps = per['rep'].nunique()
+    for condition, group in per.groupby('condition'):
+        if group['rep'].nunique() == n_reps:
+            outcomes[f'AUC_norm, {C.condition_label(condition)}'] = \
+                group.assign(y=group['auc_norm'])
+    rows = []
+    for outcome, frame in outcomes.items():
+        for pairs, across, within in (
+                (C.CANDIDATE_MODEL_PAIRS, 'model', 'rep'),
+                (C.CANDIDATE_REP_PAIRS, 'rep', 'model')):
+            for level, sub in frame.groupby(within):
+                wide = sub.pivot_table(index='replicate', columns=across,
+                                       values='y')
+                for a, b in pairs:
+                    if a not in wide or b not in wide:
+                        continue
+                    diff = (wide[a] - wide[b]).dropna()
+                    if len(diff) < 3:
+                        continue
+                    noise = float(np.sqrt((wide[a].var() + wide[b].var()) / 2))
+                    rows.append({'outcome': outcome, 'kind': across,
+                                 'a': a, 'b': b, 'at': level,
+                                 'difference': float(abs(diff.mean())),
+                                 'split_sd': noise,
+                                 'within_noise': bool(abs(diff.mean()) < noise),
+                                 'n_splits': int(len(diff))})
+    return pd.DataFrame(rows)
+
+
+def family_tukey(per_replicate, dataset='qm9'):
+    """Tukey HSD between the members of each family in MODEL_FAMILIES, one
+    test per representation and outcome, the split block removed first.
+    Reported beside the size of each difference: with ten splits it flags
+    differences far smaller than the split-to-split spread."""
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    per = per_replicate[per_replicate['dataset'] == dataset]
+    per = C.cross_model(per, 'family Tukey')
+    groups = {}
+    for m, f in C.MODEL_FAMILIES.items():
+        groups.setdefault(f, []).append(m)
+    outcomes = {'Clean R2': per[per['condition'] == 'gaussian']
+                .assign(y=lambda d: d['baseline_r2'])}
+    n_reps = per['rep'].nunique()
+    for condition, group in per.groupby('condition'):
+        if group['rep'].nunique() == n_reps:
+            outcomes[f'AUC_norm, {C.condition_label(condition)}'] = \
+                group.assign(y=group['auc_norm'])
+    rows = []
+    for outcome, frame in outcomes.items():
+        for family, members in groups.items():
+            for rep, sub in frame[frame['model'].isin(members)].groupby('rep'):
+                sub = sub.dropna(subset=['y'])
+                if sub['model'].nunique() < 2:
+                    continue
+                y = sub['y'] - sub.groupby('replicate')['y'].transform('mean')
+                res = pairwise_tukeyhsd(y.to_numpy(float),
+                                        sub['model'].astype(str).to_numpy())
+                data = res.summary().data
+                for r in data[1:]:
+                    rows.append({'outcome': outcome, 'family': family,
+                                 'rep': rep, 'a': r[0], 'b': r[1],
+                                 'difference': abs(float(r[2])),
+                                 'p_adj': float(r[3]), 'differs': bool(r[6])})
     return pd.DataFrame(rows)
 
 

@@ -24,10 +24,13 @@ The thesis keeps its own copies and its own index at `KIRBy/thesis_appendix/nois
 | hyperparameters_default | table | Default hyperparameters for every model configuration | scripts/generate_supp_table1.py | 1 | current | 214, 228, 708 | Table A |
 | hyperparameters_tuned | table | Tuned settings that replace a default, per dataset | scripts/generate_supp_table1.py | 1 | current | 214 | Table B |
 | pdv_descriptors | table | The 200 descriptors that make up PDV | scripts/generate_supp_table1.py | 1 | current | 210 ("Additional file 1, Table C") | Table C |
-| model_redundancy | table | Pairwise Spearman correlations between model NDS profiles | scripts/generate_supp_tables.py (old study) | 2 | stale | 349 ("Additional files 2--4") | paper.tex:348 TODO says these tables are not in the additional files; they are, but under NDS |
-| representation_redundancy | table | Pairwise Spearman correlations between representation NDS profiles | scripts/generate_supp_tables.py (old study) | 3 | stale | 349 | |
-| model_icc | table | ICC(1,1) for model pairs | scripts/generate_supp_tables.py (old study) | 4 | stale | 349 | |
-| excluded_configurations | table | Configurations excluded from the robustness analysis | scripts/generate_supp_tables.py (old study) | 5 | stale | 324, 531 | Text says excluded at clean R² < 0.3; this table uses R² ≤ 0.6 |
+| model_redundancy | table | Spearman correlations between models on clean R²; the ANOVA filter | scripts/run_paper_analysis.py (T13) | — | stale | 349 ("Additional files 2--4") | Superseded 2026-09-28 by the family ANOVA; the correlation filter was dropped |
+| representation_redundancy | table | Spearman correlations between representations on clean R²; the ANOVA filter | scripts/run_paper_analysis.py (T13) | — | stale | 349 | Superseded 2026-09-28 by the family ANOVA; the correlation filter was dropped |
+| model_icc | table | ICC(1,1) between models on clean R² | scripts/run_paper_analysis.py (T13) | — | stale | 349 | Superseded 2026-09-28 by the family ANOVA; the correlation filter was dropped |
+| family_pairs_models | table | Candidate model families: pairs within split-to-split variation | scripts/run_paper_analysis.py (T13) | 3 | current | Methods, ANOVA paragraph | Made 2026-09-28 |
+| family_pairs_representations | table | Candidate representation groups: pairs within split-to-split variation | scripts/run_paper_analysis.py (T13) | 4 | current | Methods, ANOVA paragraph | |
+| family_tukey | table | Tukey HSD between the members of each model family | scripts/run_paper_analysis.py (T13) | 5 | current | Methods, ANOVA paragraph | |
+| excluded_configurations | table | Configurations excluded from the robustness analysis | scripts/generate_supp_tables.py (old study) | 2 | stale | 324, 531 | Text says excluded at clean R² < 0.3; this table uses R² ≤ 0.6 |
 | ecfp4_overview | figure | Global overview of noise robustness on ECFP4 | scripts/generate_paper_figures_v2.py (old study) | 6 | stale | not cited | Figure is fig1_supp_ecfp4_overview.png |
 | clean_r2_vs_robustness | figure | Clean R² against NDS, PDV, Gaussian | scripts/generate_paper_figures_v2.py (old study) | 7 | stale | not cited | Figure is fig3_ranking_consistency.png |
 | bayesian_transformation_tests | table | Wilcoxon tests of the Bayesian transformations by representation | scripts/generate_supp_tables.py (old study) | 8 | stale | not cited | paper.tex:635 cites Additional file 8 for variant_models_assay, not for this |

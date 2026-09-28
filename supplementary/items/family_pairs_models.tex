@@ -1,0 +1,22 @@
+% Supplementary item: family_pairs_models
+% Made 2026-09-28: the evidence for the model families in the ANOVA.
+% The numbers come from scripts/run_paper_analysis.py (figlib_metrics.pair_check / family_tukey, figlib_tables.t13_families).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{lllcccc}
+\caption{\textbf{\SuppFile{} Candidate model families: how often two models differ by less than their split-to-split variation.}
+Each row is one pair of base models considered for a family. Each cell counts the representations, of six, on which the two differ by less than their split-to-split standard deviation, followed by the range of the absolute difference. Grouped says whether the pair shares a family in the ANOVA. Outcomes are clean $R^2$ and AUC$_\mathrm{norm}$ under the three noise conditions every representation ran, on QM9. The difference is the mean over the ten splits of one member minus the other, paired on the split; the split-to-split standard deviation is that of the two members' values over the splits.}
+\label{supp:family_pairs_models}\\
+\toprule
+\textbf{Model A} & \textbf{Model B} & \textbf{Grouped} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Model A} & \textbf{Model B} & \textbf{Grouped} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endhead
+\input{results/decisions_arc/tables/T13_family_pairs_models_qm9_rows.tex}
+\bottomrule
+\end{longtable}}

@@ -465,223 +465,13 @@ NHOHCount & SlogP\_VSA6 & fr\_benzodiazepine & qed \\
 \newpage
 
 %==============================================================================
-% Additional file 2 — Pairwise Spearman correlations between model NDS profiles
-% Items: model_redundancy
+% Additional file 2 — Configurations excluded from the robustness analysis
+% Items: excluded_configurations
 %==============================================================================
 
 \renewcommand{\SuppFile}{Additional file 2,}
 
 \begin{center}\Large\textbf{Additional file 2}\end{center}
-
-% Supplementary item: model_redundancy
-% Split out of additional_files.tex on 2026-09-27, where it was Additional file 2 (Pairwise model NDS correlations (was Supp Table S3)).
-% Content unchanged apart from: the heading line removed (the build writes it), the old
-% 'Table S*/Figure S*' caption prefix replaced by \SuppFile{}, and the label renamed to supp:model_redundancy.
-% Rules: supplementary/README.md.
-
-{\scriptsize
-\begin{longtable}{llccc}
-\caption{\textbf{\SuppFile{} Pairwise Spearman rank correlations between model noise degradation slope (NDS) profiles on the QM9 HOMO--LUMO gap ($\rho \geq 0.95$).}
-``Model A'' and ``Model B'' label each pair, both treated symmetrically. Checkmarks indicate pairs where one model was excluded from the ANOVA due to near-redundancy. Gauche (RBF) pairs omitted (all $\rho = 1.0$, $n = 6$, PDV-only artifact).}
-\label{supp:model_redundancy}\\
-\toprule
-\textbf{Model A} & \textbf{Model B} & \textbf{$n$} & \textbf{$\rho$} & \textbf{Excluded} \\
-\midrule
-\endfirsthead
-\toprule
-\textbf{Model A} & \textbf{Model B} & \textbf{$n$} & \textbf{$\rho$} & \textbf{Excluded} \\
-\midrule
-\endhead
-VBLL-$\beta$ & NGBoost & 18 & 0.998 &  \\
-LightGBM & XGBoost & 46 & 0.998 &  \\
-Gauche & VBLL-$\beta$ & 18 & 0.996 & \checkmark \\
-QRF & RF & 40 & 0.995 & \checkmark \\
-VBLL-$\alpha$ & LightGBM & 24 & 0.992 &  \\
-RF & XGBoost & 46 & 0.989 &  \\
-NGBoost & XGBoost & 40 & 0.988 &  \\
-NGBoost & RF & 40 & 0.987 &  \\
-LightGBM & RF & 46 & 0.986 &  \\
-VBLL-$\beta$ & SVM & 24 & 0.986 &  \\
-QRF & XGBoost & 40 & 0.986 & \checkmark \\
-NGBoost & QRF & 34 & 0.986 & \checkmark \\
-VBLL-$\alpha$ & NGBoost & 18 & 0.986 &  \\
-VBLL-$\alpha$ & XGBoost & 24 & 0.984 &  \\
-LightGBM & NGBoost & 40 & 0.984 &  \\
-LightGBM & QRF & 40 & 0.984 & \checkmark \\
-VBLL-$\alpha$ & VBLL-$\beta$ & 24 & 0.983 &  \\
-NN-$\alpha$ & NN-$\beta$ & 52 & 0.983 &  \\
-LightGBM & SVM & 46 & 0.982 &  \\
-BNN-$\beta$ & SVM & 34 & 0.981 &  \\
-VBLL-$\alpha$ & SVM & 24 & 0.979 &  \\
-BNN-$\alpha$ & VBLL-$\beta$ & 24 & 0.979 &  \\
-VBLL-$\alpha$ & QRF & 24 & 0.978 & \checkmark \\
-SVM & XGBoost & 46 & 0.978 &  \\
-BNN-$\alpha$ & BNN-$\beta$ & 36 & 0.977 &  \\
-BNN-$\alpha$ & SVM & 34 & 0.976 &  \\
-VBLL-$\alpha$ & Gauche & 18 & 0.975 & \checkmark \\
-VBLL-$\alpha$ & RF & 24 & 0.975 &  \\
-QRF & SVM & 40 & 0.974 & \checkmark \\
-BNN-$\alpha$ & VBLL-$\alpha$ & 24 & 0.974 &  \\
-LightGBM & VBLL-$\beta$ & 24 & 0.973 &  \\
-VBLL-$\alpha$ & BNN-$\beta$ & 24 & 0.972 &  \\
-Gauche & SVM & 40 & 0.972 & \checkmark \\
-Gauche & XGBoost & 44 & 0.970 & \checkmark \\
-NGBoost & SVM & 40 & 0.970 &  \\
-NN-$\alpha$ & BNN-$\beta$ & 36 & 0.970 &  \\
-Gauche & LightGBM & 42 & 0.969 & \checkmark \\
-RF & SVM & 46 & 0.969 &  \\
-BNN-$\beta$ & VBLL-$\beta$ & 24 & 0.968 &  \\
-VBLL-$\beta$ & QRF & 24 & 0.966 & \checkmark \\
-NN-$\alpha$ & BNN-$\alpha$ & 36 & 0.965 &  \\
-VBLL-$\beta$ & XGBoost & 24 & 0.965 &  \\
-NN-$\beta$ & SVM & 46 & 0.962 &  \\
-NN-$\alpha$ & SVM & 46 & 0.960 &  \\
-Gauche & NGBoost & 34 & 0.959 & \checkmark \\
-LightGBM & BNN-$\beta$ & 36 & 0.959 &  \\
-BNN-$\alpha$ & NN-$\beta$ & 36 & 0.958 &  \\
-BNN-$\alpha$ & QRF & 28 & 0.956 & \checkmark \\
-Gauche & QRF & 34 & 0.956 & \checkmark \\
-VBLL-$\beta$ & RF & 24 & 0.955 &  \\
-Gauche & RF & 40 & 0.954 & \checkmark \\
-BNN-$\beta$ & XGBoost & 34 & 0.953 &  \\
-BNN-$\beta$ & QRF & 28 & 0.952 & \checkmark \\
-NN-$\alpha$ & VBLL-$\beta$ & 24 & 0.952 &  \\
-NN-$\beta$ & BNN-$\beta$ & 36 & 0.952 &  \\
-BNN-$\alpha$ & LightGBM & 36 & 0.951 &  \\
-NN-$\beta$ & VBLL-$\beta$ & 24 & 0.950 &  \\
-BNN-$\alpha$ & Gauche & 30 & 0.950 & \checkmark \\
-\bottomrule
-\end{longtable}}
-
-\newpage
-
-%==============================================================================
-% Additional file 3 — Pairwise Spearman correlations between representation NDS profiles
-% Items: representation_redundancy
-%==============================================================================
-
-\renewcommand{\SuppFile}{Additional file 3,}
-
-\begin{center}\Large\textbf{Additional file 3}\end{center}
-
-% Supplementary item: representation_redundancy
-% Split out of additional_files.tex on 2026-09-27, where it was Additional file 3 (Pairwise representation NDS correlations (was Supp Table S4)).
-% Content unchanged apart from: the heading line removed (the build writes it), the old
-% 'Table S*/Figure S*' caption prefix replaced by \SuppFile{}, and the label renamed to supp:representation_redundancy.
-% Rules: supplementary/README.md.
-
-{\scriptsize
-\begin{longtable}{llccc}
-\caption{\textbf{\SuppFile{} Pairwise Spearman rank correlations between representation noise degradation slope (NDS) profiles on the QM9 HOMO--LUMO gap.}
-``Rep A'' and ``Rep B'' label each pair of molecular representations, both treated symmetrically. Checkmarks indicate pairs where one representation was excluded from the ANOVA.}
-\label{supp:representation_redundancy}\\
-\toprule
-\textbf{Rep.\ A} & \textbf{Rep.\ B} & \textbf{$n$} & \textbf{$\rho$} & \textbf{Excluded} \\
-\midrule
-\endfirsthead
-\toprule
-\textbf{Rep.\ A} & \textbf{Rep.\ B} & \textbf{$n$} & \textbf{$\rho$} & \textbf{Excluded} \\
-\midrule
-\endhead
-ECFP4 & Morgan & 60 & 0.995 & \checkmark \\
-MHGGNN & Morgan & 48 & 0.994 & \checkmark \\
-Rand.~SMILES & SMILES & 16 & 0.994 & \checkmark \\
-Rand.~SMILES & SNS & 16 & 0.994 & \checkmark \\
-ECFP4 & MHGGNN & 54 & 0.993 &  \\
-ECFP4 & SNS & 56 & 0.992 & \checkmark \\
-Morgan & SNS & 52 & 0.992 & \checkmark \\
-MHGGNN & SNS & 44 & 0.991 & \checkmark \\
-PDV & ECFP4 & 72 & 0.990 &  \\
-PDV & MHGGNN & 48 & 0.989 &  \\
-SMILES & SNS & 52 & 0.988 & \checkmark \\
-Morgan & Rand.~SMILES & 16 & 0.988 & \checkmark \\
-Morgan & SMILES & 54 & 0.988 & \checkmark \\
-PDV & Morgan & 54 & 0.986 & \checkmark \\
-PDV & Rand.~SMILES & 12 & 0.986 & \checkmark \\
-PDV & SNS & 50 & 0.984 & \checkmark \\
-ECFP4 & SMILES & 72 & 0.984 &  \\
-Mol2Vec & Morgan & 48 & 0.982 & \checkmark \\
-MHGGNN & Mol2Vec & 54 & 0.982 &  \\
-ECFP4 & Mol2Vec & 54 & 0.982 &  \\
-PDV & PDV (binary) & 72 & 0.980 & \checkmark \\
-MHGGNN & SMILES & 48 & 0.980 &  \\
-PDV & Mol2Vec & 48 & 0.979 &  \\
-ECFP4 & Rand.~SMILES & 16 & 0.979 & \checkmark \\
-PDV & SMILES & 66 & 0.978 &  \\
-MHGGNN & PDV (binary) & 54 & 0.972 & \checkmark \\
-Mol2Vec & SNS & 44 & 0.969 & \checkmark \\
-Mol2Vec & SMILES & 48 & 0.966 &  \\
-ECFP4 & PDV (binary) & 78 & 0.965 & \checkmark \\
-Morgan & PDV (binary) & 60 & 0.962 & \checkmark \\
-PDV (binary) & SNS & 56 & 0.961 & \checkmark \\
-Mol2Vec & PDV (binary) & 54 & 0.956 & \checkmark \\
-MHGGNN & Rand.~SMILES & 16 & 0.956 & \checkmark \\
-PDV (binary) & SMILES & 72 & 0.941 & \checkmark \\
-PDV (binary) & Rand.~SMILES & 16 & 0.929 & \checkmark \\
-Mol2Vec & Rand.~SMILES & 16 & 0.891 & \checkmark \\
-\bottomrule
-\end{longtable}}
-
-\newpage
-
-%==============================================================================
-% Additional file 4 — ICC(1,1) for model pairs
-% Items: model_icc
-%==============================================================================
-
-\renewcommand{\SuppFile}{Additional file 4,}
-
-\begin{center}\Large\textbf{Additional file 4}\end{center}
-
-% Supplementary item: model_icc
-% Split out of additional_files.tex on 2026-09-27, where it was Additional file 4 (ICC(1,1) (was Supp Table S5)).
-% Content unchanged apart from: the heading line removed (the build writes it), the old
-% 'Table S*/Figure S*' caption prefix replaced by \SuppFile{}, and the label renamed to supp:model_icc.
-% Rules: supplementary/README.md.
-
-\begin{table}[H]
-\centering
-\caption{\textbf{\SuppFile{} Intraclass correlation coefficients (ICC(1,1)) for model pairs with ICC $\geq 0.5$, assessing within-family consistency of noise degradation slope (NDS) profiles on the QM9 HOMO--LUMO gap.}
-ICC(1,1) measures the proportion of total variance attributable to between-configuration differences; values near 1.0 indicate that two models rank configurations almost identically. Lower (more negative) NDS indicates faster degradation under noise. The Family column groups each pair: ``Tree'' (both tree-based), ``$\alpha$/$\beta$'' (architecture-pair partners such as BNN-$\alpha$/BNN-$\beta$), ``$\alpha$'' (both share the $\alpha$ neural-network backbone), or ``Cross'' (cross-family pair).}
-\label{supp:model_icc}
-\small
-\begin{tabular}{llcccc}
-\toprule
-\textbf{Model A} & \textbf{Model B} & \textbf{$n$} & \textbf{ICC(1,1)} & \textbf{Mean $|\Delta$NDS$|$} & \textbf{Family} \\
-\midrule
-LightGBM & XGBoost & 8 & 0.944 & 0.0060 & Tree \\
-BNN-$\alpha$ & BNN-$\beta$ & 6 & 0.846 & 0.0101 & $\alpha$/$\beta$ \\
-QRF & RF & 7 & 0.810 & 0.0216 & Tree \\
-VBLL-$\alpha$ & VBLL-$\beta$ & 4 & 0.782 & 0.0108 & $\alpha$/$\beta$ \\
-QRF & XGBoost & 7 & 0.754 & 0.0157 & Tree \\
-LightGBM & QRF & 7 & 0.743 & 0.0133 & Tree \\
-VBLL-$\alpha$ & LightGBM & 4 & 0.698 & 0.0115 & Cross \\
-VBLL-$\beta$ & SVM & 4 & 0.689 & 0.0133 & Cross \\
-RF & XGBoost & 8 & 0.678 & 0.0212 & Tree \\
-VBLL-$\alpha$ & XGBoost & 4 & 0.656 & 0.0133 & Cross \\
-BNN-$\alpha$ & VBLL-$\alpha$ & 4 & 0.604 & 0.0134 & $\alpha$ \\
-LightGBM & RF & 8 & 0.586 & 0.0244 & Tree \\
-LightGBM & VBLL-$\beta$ & 4 & 0.577 & 0.0174 & Cross \\
-LightGBM & SVM & 8 & 0.561 & 0.0117 & Cross \\
-BNN-$\alpha$ & VBLL-$\beta$ & 4 & 0.552 & 0.0123 & $\alpha$/$\beta$ \\
-VBLL-$\beta$ & XGBoost & 4 & 0.544 & 0.0195 & Cross \\
-VBLL-$\alpha$ & QRF & 4 & 0.540 & 0.0229 & Cross \\
-VBLL-$\alpha$ & SVM & 4 & 0.522 & 0.0124 & Cross \\
-Gauche & VBLL-$\beta$ & 3 & 0.519 & 0.0113 & Cross \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\newpage
-
-%==============================================================================
-% Additional file 5 — Configurations excluded from the robustness analysis
-% Items: excluded_configurations
-%==============================================================================
-
-\renewcommand{\SuppFile}{Additional file 5,}
-
-\begin{center}\Large\textbf{Additional file 5}\end{center}
 
 % Supplementary item: excluded_configurations
 % Split out of additional_files.tex on 2026-09-27, where it was Additional file 5 (Excluded configurations (was Supp Table S2)).
@@ -709,6 +499,136 @@ NGBoost & --- & --- & 6 & 4 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\newpage
+
+%==============================================================================
+% Additional file 3 — Candidate model families: pairs within split-to-split variation
+% Items: family_pairs_models
+%==============================================================================
+
+\renewcommand{\SuppFile}{Additional file 3,}
+
+\begin{center}\Large\textbf{Additional file 3}\end{center}
+
+% Supplementary item: family_pairs_models
+% Made 2026-09-28: the evidence for the model families in the ANOVA.
+% The numbers come from scripts/run_paper_analysis.py (figlib_metrics.pair_check / family_tukey, figlib_tables.t13_families).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{lllcccc}
+\caption{\textbf{\SuppFile{} Candidate model families: how often two models differ by less than their split-to-split variation.}
+Each row is one pair of base models considered for a family. Each cell counts the representations, of six, on which the two differ by less than their split-to-split standard deviation, followed by the range of the absolute difference. Grouped says whether the pair shares a family in the ANOVA. Outcomes are clean $R^2$ and AUC$_\mathrm{norm}$ under the three noise conditions every representation ran, on QM9. The difference is the mean over the ten splits of one member minus the other, paired on the split; the split-to-split standard deviation is that of the two members' values over the splits.}
+\label{supp:family_pairs_models}\\
+\toprule
+\textbf{Model A} & \textbf{Model B} & \textbf{Grouped} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Model A} & \textbf{Model B} & \textbf{Grouped} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endhead
+% --- inlined from results/decisions_arc/tables/T13_family_pairs_models_qm9_rows.tex ---
+% T13_family_pairs_models_qm9: data rows only, for a longtable.
+% Generated by scripts/run_paper_analysis.py; do not edit.
+RF & QRF & yes & 6 of 6 (0.000--0.008) & 2 of 6 (0.005--0.010) & 6 of 6 (0.011--0.016) & 2 of 6 (0.001--0.009) \\
+XGBoost & LightGBM & yes & 5 of 6 (0.001--0.022) & 6 of 6 (0.000--0.006) & 6 of 6 (0.001--0.016) & 6 of 6 (0.000--0.004) \\
+XGBoost & NGBoost & no & 0 of 6 (0.044--0.125) & 0 of 6 (0.015--0.043) & 3 of 6 (0.007--0.047) & 0 of 6 (0.008--0.028) \\
+LightGBM & NGBoost & no & 0 of 6 (0.045--0.138) & 0 of 6 (0.021--0.040) & 2 of 6 (0.018--0.041) & 0 of 6 (0.011--0.028) \\
+NN-$\alpha$ & BNN-$\alpha$ & yes & 5 of 6 (0.001--0.023) & 6 of 6 (0.004--0.016) & 5 of 6 (0.012--0.046) & 4 of 6 (0.005--0.026) \\
+NN-$\alpha$ & VBLL-$\alpha$ & no & 0 of 6 (0.024--0.073) & 2 of 6 (0.008--0.023) & 0 of 6 (0.031--0.105) & 4 of 6 (0.004--0.069) \\
+BNN-$\alpha$ & VBLL-$\alpha$ & no & 0 of 6 (0.042--0.066) & 2 of 6 (0.004--0.039) & 2 of 6 (0.002--0.059) & 2 of 6 (0.001--0.043) \\
+NN-$\beta$ & BNN-$\beta$ & yes & 5 of 6 (0.000--0.054) & 5 of 6 (0.003--0.021) & 4 of 6 (0.011--0.086) & 4 of 6 (0.007--0.065) \\
+NN-$\beta$ & VBLL-$\beta$ & no & 0 of 6 (0.044--0.089) & 2 of 6 (0.004--0.048) & 0 of 6 (0.052--0.072) & 2 of 6 (0.009--0.049) \\
+BNN-$\beta$ & VBLL-$\beta$ & no & 1 of 6 (0.035--0.076) & 4 of 6 (0.003--0.056) & 1 of 6 (0.022--0.065) & 4 of 6 (0.000--0.054) \\
+VBLL-$\alpha$ & VBLL-$\beta$ & yes & 5 of 6 (0.001--0.037) & 5 of 6 (0.003--0.017) & 6 of 6 (0.001--0.010) & 4 of 6 (0.001--0.022) \\
+NN-$\alpha$ & NN-$\beta$ & no & 4 of 6 (0.003--0.045) & 4 of 6 (0.004--0.035) & 6 of 6 (0.008--0.034) & 4 of 6 (0.007--0.023) \\
+BNN-$\alpha$ & BNN-$\beta$ & no & 4 of 6 (0.005--0.063) & 4 of 6 (0.005--0.032) & 5 of 6 (0.004--0.040) & 4 of 6 (0.002--0.050) \\
+% --- end of results/decisions_arc/tables/T13_family_pairs_models_qm9_rows.tex ---
+\bottomrule
+\end{longtable}}
+
+\newpage
+
+%==============================================================================
+% Additional file 4 — Candidate representation groups: pairs within split-to-split variation
+% Items: family_pairs_representations
+%==============================================================================
+
+\renewcommand{\SuppFile}{Additional file 4,}
+
+\begin{center}\Large\textbf{Additional file 4}\end{center}
+
+% Supplementary item: family_pairs_representations
+% Made 2026-09-28: the evidence for the model families in the ANOVA.
+% The numbers come from scripts/run_paper_analysis.py (figlib_metrics.pair_check / family_tukey, figlib_tables.t13_families).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{llcccc}
+\caption{\textbf{\SuppFile{} Candidate representation groups: how often two representations differ by less than their split-to-split variation.}
+Each row is one pair of representations considered for a group. Each cell counts the base models on which the two differ by less than their split-to-split standard deviation, followed by the range of the absolute difference. No pair was grouped. Outcomes are clean $R^2$ and AUC$_\mathrm{norm}$ under the three noise conditions every representation ran, on QM9. The difference is the mean over the ten splits of one member minus the other, paired on the split; the split-to-split standard deviation is that of the two members' values over the splits.}
+\label{supp:family_pairs_representations}\\
+\toprule
+\textbf{Representation A} & \textbf{Representation B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Representation A} & \textbf{Representation B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endhead
+% --- inlined from results/decisions_arc/tables/T13_family_pairs_representations_qm9_rows.tex ---
+% T13_family_pairs_representations_qm9: data rows only, for a longtable.
+% Generated by scripts/run_paper_analysis.py; do not edit.
+ECFP4 & Sort \& Slice & 0 of 13 (0.035--0.105) & 5 of 13 (0.001--0.041) & 12 of 13 (0.002--0.050) & 4 of 13 (0.001--0.051) \\
+% --- end of results/decisions_arc/tables/T13_family_pairs_representations_qm9_rows.tex ---
+\bottomrule
+\end{longtable}}
+
+\newpage
+
+%==============================================================================
+% Additional file 5 — Tukey HSD between the members of each model family
+% Items: family_tukey
+%==============================================================================
+
+\renewcommand{\SuppFile}{Additional file 5,}
+
+\begin{center}\Large\textbf{Additional file 5}\end{center}
+
+% Supplementary item: family_tukey
+% Made 2026-09-28: the evidence for the model families in the ANOVA.
+% The numbers come from scripts/run_paper_analysis.py (figlib_metrics.pair_check / family_tukey, figlib_tables.t13_families).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{lllcccc}
+\caption{\textbf{\SuppFile{} Tukey HSD between the members of each model family.}
+One test per representation and outcome, after removing each split's mean. Each cell counts the representations, of six, on which the pair differs at adjusted $p < 0.05$, followed by the range of the absolute difference. With ten splits the test detects differences smaller than the split-to-split variation, so the size of each difference is given beside it.}
+\label{supp:family_tukey}\\
+\toprule
+\textbf{Family} & \textbf{Model A} & \textbf{Model B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Family} & \textbf{Model A} & \textbf{Model B} & \textbf{Clean $R^2$} & \textbf{Gaussian} & \textbf{Grouped, shifted} & \textbf{Grouped, wider} \\
+\midrule
+\endhead
+% --- inlined from results/decisions_arc/tables/T13_family_tukey_qm9_rows.tex ---
+% T13_family_tukey_qm9: data rows only, for a longtable.
+% Generated by scripts/run_paper_analysis.py; do not edit.
+Forest & QRF & RF & 3 of 6 (0.000--0.008) & 6 of 6 (0.005--0.010) & 6 of 6 (0.011--0.016) & 5 of 6 (0.001--0.009) \\
+Boosting & LightGBM & XGBoost & 4 of 6 (0.001--0.022) & 3 of 6 (0.000--0.006) & 4 of 6 (0.001--0.017) & 1 of 6 (0.000--0.004) \\
+NN-$\alpha$ & NN-$\alpha$ & BNN-$\alpha$ & 5 of 6 (0.001--0.023) & 3 of 6 (0.004--0.016) & 6 of 6 (0.012--0.046) & 6 of 6 (0.005--0.026) \\
+NN-$\beta$ & NN-$\beta$ & BNN-$\beta$ & 1 of 6 (0.000--0.054) & 2 of 6 (0.003--0.021) & 4 of 6 (0.011--0.086) & 5 of 6 (0.007--0.065) \\
+VBLL & VBLL-$\alpha$ & VBLL-$\beta$ & 5 of 6 (0.001--0.037) & 4 of 6 (0.003--0.017) & 2 of 6 (0.001--0.010) & 4 of 6 (0.001--0.022) \\
+% --- end of results/decisions_arc/tables/T13_family_tukey_qm9_rows.tex ---
+\bottomrule
+\end{longtable}}
 
 \newpage
 

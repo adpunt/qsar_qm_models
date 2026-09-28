@@ -410,9 +410,10 @@ def test_f2_carries_the_residual_and_the_whiskers(out):
     drawn = [column for column, _ in FIG.FACTOR_COLUMNS]
     check('the residual is one of the bars', 'eta2_residual' in drawn,
           ', '.join(drawn))
-    check('all four factor bars are there',
-          drawn == ['eta2_model', 'eta2_rep', 'eta2_interaction',
-                    'eta2_residual'], ', '.join(drawn))
+    check('all six factor bars are there (family ANOVA, 2026-09-28)',
+          drawn == ['eta2_model', 'eta2_model_in_family', 'eta2_rep',
+                    'eta2_interaction', 'eta2_split', 'eta2_residual'],
+          ', '.join(drawn))
 
     source = Path(FIG.__file__).read_text()
     body = source[source.index('def f2_variance_decomposition'):
@@ -478,15 +479,15 @@ def test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate(out):
     check('the seven-fold repeat is collapsed before the fit',
           per_dataset == len(models) * len(reps) * 5,
           f'{per_dataset} values, expected {len(models) * len(reps) * 5}')
-    check('the four shares sum to 100',
-          all(abs(r.eta2_model + r.eta2_rep + r.eta2_interaction
-                  + r.eta2_residual - 100) < 1e-6 for r in got.itertuples()),
-          str(got[['eta2_model', 'eta2_rep', 'eta2_interaction',
-                   'eta2_residual']].sum(axis=1).tolist()))
+    shares = ['eta2_split', 'eta2_model', 'eta2_model_in_family', 'eta2_rep',
+              'eta2_interaction', 'eta2_residual']
+    check('the six shares sum to 100',
+          bool((got[shares].sum(axis=1) - 100).abs().lt(1e-6).all()),
+          str(got[shares].sum(axis=1).tolist()))
     check('the residual is a real within-cell term, not zero',
           bool((got['eta2_residual'] > 0).all()),
           str(got['eta2_residual'].tolist()))
-    check('every row carries a jackknife band',
+    check('every row carries a bootstrap band',
           bool(got[['eta2_model_spread', 'eta2_residual_spread']].notna()
                .all().all()), 'a spread came back NaN')
 

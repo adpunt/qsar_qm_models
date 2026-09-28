@@ -226,6 +226,26 @@ def t2_conditions(output_dir):
 # T3 -- the variance decomposition
 # ---------------------------------------------------------------------------
 
+#: The shares of the family decomposition (figlib_metrics.family_eta2), in the
+#: order they are entered. `eta2_model` is the model FAMILY.
+ETA2_COLUMNS = (('eta2_split', 'Split'), ('eta2_model', 'Model family'),
+                ('eta2_model_in_family', 'Model within family'),
+                ('eta2_rep', 'Representation'),
+                ('eta2_interaction', 'Interaction'),
+                ('eta2_residual', 'Residual'))
+
+
+def _share_cell(r, column):
+    """A share with its 95% bootstrap interval, or alone if it has none."""
+    value = r.get(column, np.nan)
+    if not np.isfinite(value):
+        return ''
+    lo, hi = r.get(f'{column}_lo', np.nan), r.get(f'{column}_hi', np.nan)
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return f'{value:.1f}'
+    return f'{value:.1f} [{lo:.1f}, {hi:.1f}]'
+
+
 def t3_variance(anova, output_dir, dataset='qm9', clean=None):
     """One row per condition and outcome, with the replicate spread beside each
     share. No version of this table has ever carried the spread.
@@ -253,29 +273,20 @@ def t3_variance(anova, output_dir, dataset='qm9', clean=None):
                              if r['condition'] == '__clean__'
                              else C.condition_label(r['condition'])),
                'Outcome': r['outcome']}
-        for column, label in (('eta2_model', 'Model'),
-                              ('eta2_rep', 'Representation'),
-                              ('eta2_interaction', 'Interaction'),
-                              ('eta2_residual', 'Residual')):
-            spread = r.get(f'{column}_spread')
-            row[f'{label} η² (%)'] = (
-                f"{r[column]:.1f}" if not np.isfinite(spread or np.nan)
-                else f"{r[column]:.1f} ± {spread / 2:.1f}")
+        for column, label in ETA2_COLUMNS:
+            row[f'{label} η² (%)'] = _share_cell(r, column)
         row['Models'] = int(r.get('n_models', 0))
+        row['Families'] = int(r.get('n_families', 0))
         row['Representations'] = int(r.get('n_reps', 0))
         row['Replicates'] = int(r.get('n_replicates', 0))
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, f'T3_variance_decomposition_{dataset}',
-                 'Share of variance explained by model, representation, their '
-                 'pairing and the residual, per noise condition. The ± is half '
-                 'the leave-one-replicate-out range: the decomposition is '
-                 'repeated with each replicate dropped in turn, so every fit '
-                 'keeps a real error term. It is NOT a per-replicate spread -- '
-                 'decomposing one replicate leaves one observation per cell, '
-                 'and the residual is then arithmetically zero. The assay '
-                 'datasets have no true replicates and get no band at all for '
-                 'the same reason.')
+                 'Share of variance explained by the split, model family, model '
+                 'within family, representation, their pairing and the '
+                 'residual, per noise condition, entered in that order. The '
+                 'bracket is the 95% bootstrap interval from resampling whole '
+                 'splits.')
 
 
 # ---------------------------------------------------------------------------
@@ -611,30 +622,23 @@ def t3b_variance_clean(anova_clean, output_dir):
     rows = []
     for _, r in anova_clean.iterrows():
         row = {'Dataset': C.dataset_label(r['dataset'])}
-        for column, label in (('eta2_model', 'Model'),
-                              ('eta2_rep', 'Representation'),
-                              ('eta2_interaction', 'Interaction'),
-                              ('eta2_residual', 'Residual')):
-            spread = r.get(f'{column}_spread')
-            row[f'{label} η² (%)'] = (
-                f"{r[column]:.1f}" if not np.isfinite(spread or np.nan)
-                else f"{r[column]:.1f} ± {spread / 2:.1f}")
+        for column, label in ETA2_COLUMNS:
+            row[f'{label} η² (%)'] = _share_cell(r, column)
         row['Models'] = int(r.get('n_models', 0))
+        row['Families'] = int(r.get('n_families', 0))
         row['Representations'] = int(r.get('n_reps', 0))
         row['Replicates'] = int(r.get('n_replicates', 0))
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, 'T3b_variance_decomposition_clean',
                  'Share of the variance in predictive accuracy on CLEAN '
-                 'labels explained by model, representation, their pairing '
-                 'and the residual, one row per dataset. Accuracy is R2 on '
-                 'held-out molecules with no noise added to the training '
-                 'labels. There is no noise-condition column: the clean fit '
-                 'is made once per replicate and every noise condition starts '
-                 'from it. The ± is half the leave-one-replicate-out range, '
-                 'as in the noise decomposition. The assay datasets have no '
-                 'true replicates and get no band: their five scaffold folds '
-                 'partition one dataset rather than repeating an experiment.')
+                 'labels explained by the split, model family, model within '
+                 'family, representation, their pairing and the residual, one '
+                 'row per dataset. Accuracy is R2 on held-out molecules with '
+                 'no noise added to the training labels. The bracket is the '
+                 '95% bootstrap interval from resampling whole splits; on the '
+                 'assay datasets the split is one of five scaffold folds, so '
+                 'their interval rests on five.')
 
 
 # ---------------------------------------------------------------------------
@@ -890,3 +894,84 @@ def t12_condition_cost(summary, output_dir, dataset='qm9',
                  f'the representations where the change exceeds that model\'s '
                  f'own spread on that same representation. Clean accuracy is '
                  f'not repeated here; it is in T4 and in F3.')
+
+
+# ---------------------------------------------------------------------------
+# T13 -- the evidence for the model families in the ANOVA
+# ---------------------------------------------------------------------------
+
+def _rows_only(output_dir, name):
+    """The data rows of a written table, for a longtable whose head and
+    caption live in the supplementary item."""
+    path = Path(output_dir) / f'{name}.tex'
+    if not path.exists():
+        return
+    text = path.read_text()
+    body = text.split('\\midrule\n', 1)[1].split('\\bottomrule', 1)[0]
+    (Path(output_dir) / f'{name}_rows.tex').write_text(
+        f'% {name}: data rows only, for a longtable.\n'
+        f'% Generated by scripts/run_paper_analysis.py; do not edit.\n' + body)
+
+
+def _count_cell(sub, flag):
+    if not len(sub):
+        return ''
+    return (f"{int(sub[flag].sum())} of {len(sub)} "
+            f"({sub['difference'].min():.3f}–{sub['difference'].max():.3f})")
+
+
+def t13_families(pairs, tukey, output_dir, dataset='qm9'):
+    """Three tables: candidate model pairs, candidate representation pairs, and
+    Tukey within the families kept. One row per pair, one column per outcome;
+    each cell counts the representations (or models) where the pair is within
+    split-to-split noise (or, for Tukey, differs), with the range of the
+    difference beside it."""
+    written = []
+    if pairs is not None and len(pairs):
+        outcomes = list(dict.fromkeys(pairs['outcome']))
+        for kind, first, second, label, name in (
+                ('model', 'Model A', 'Model B', C.model_label, 'models'),
+                ('rep', 'Representation A', 'Representation B', C.rep_label,
+                 'representations')):
+            sub = pairs[pairs['kind'] == kind]
+            if not len(sub):
+                continue
+            order = list(dict.fromkeys(zip(sub['a'], sub['b'])))
+            rows = []
+            for a, b in order:
+                one = sub[(sub['a'] == a) & (sub['b'] == b)]
+                row = {first: label(a), second: label(b)}
+                if kind == 'model':
+                    fa, fb = C.MODEL_FAMILIES.get(a), C.MODEL_FAMILIES.get(b)
+                    row['Grouped'] = 'yes' if fa and fa == fb else 'no'
+                for outcome in outcomes:
+                    row[outcome] = _count_cell(one[one['outcome'] == outcome],
+                                               'within_noise')
+                rows.append(row)
+            out = f'T13_family_pairs_{name}_{dataset}'
+            written.append(write(
+                pd.DataFrame(rows), output_dir, out,
+                f'Each cell counts the {"representations" if kind == "model" else "models"} '
+                f'on which the pair differs by less than its split-to-split '
+                f'standard deviation, with the range of the difference.'))
+            _rows_only(output_dir, out)
+    if tukey is not None and len(tukey):
+        outcomes = list(dict.fromkeys(tukey['outcome']))
+        rows = []
+        for (family, a, b), one in tukey.groupby(['family', 'a', 'b'],
+                                                 sort=False):
+            row = {'Family': family, 'Model A': C.model_label(a),
+                   'Model B': C.model_label(b)}
+            for outcome in outcomes:
+                row[outcome] = _count_cell(one[one['outcome'] == outcome],
+                                           'differs')
+            rows.append(row)
+        out = f'T13_family_tukey_{dataset}'
+        written.append(write(
+            pd.DataFrame(rows), output_dir, out,
+            'Tukey HSD between the members of each family, one test per '
+            'representation with the split block removed. Each cell counts '
+            'the representations where the pair differs at adjusted p < 0.05, '
+            'with the range of the difference.'))
+        _rows_only(output_dir, out)
+    return written[0] if written else None
