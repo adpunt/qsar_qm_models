@@ -50,9 +50,9 @@ def row(condition, it, r2, sigma='0.0'):
                 r2=str(r2), pearson_corr='0.9')
 
 
-def write(path, rows):
+def write(path, rows, columns=COLUMNS):
     with open(path, 'w', newline='') as fh:
-        w = csv.DictWriter(fh, fieldnames=COLUMNS)
+        w = csv.DictWriter(fh, fieldnames=columns)
         w.writeheader()
         w.writerows(rows)
 
@@ -164,6 +164,56 @@ def main():
             failures.append(
                 f'the two remaining replicates were not copied; the target has '
                 f'{len(clean_rows(tgt2))} clean row(s) instead of 3')
+
+        # 5. The reference holds two clean blocks at DIFFERENT settings (spec_hash),
+        # which is what the 21 September network re-run left behind. A target matching
+        # the OLD setting's block is not agreement: it must be refreshed to the newest.
+        results3 = results / 'two_settings'
+        results3.mkdir()
+        cols = COLUMNS + ['spec_hash']
+        ref3 = results3 / 'anova_gaussian_chemberta_rf.csv'
+        tgt3 = results3 / 'anova_grouped_wider_chemberta_rf.csv'
+        write(ref3, [dict(row('gaussian', i, 0.800 + i / 1000), spec_hash='old')
+                     for i in range(3)]
+                    + [dict(row('gaussian', i, 0.900 + i / 1000), spec_hash='new')
+                       for i in range(3)]
+                    + [dict(row('gaussian', i, 0.7, sigma='0.5'), spec_hash='new')
+                       for i in range(3)], cols)
+        write(tgt3, [dict(row('grouped_wider', i, 0.800 + i / 1000), spec_hash='old')
+                     for i in range(3)]
+                    + [dict(row('grouped_wider', i, 0.7, sigma='0.5'), spec_hash='new')
+                       for i in range(3)], cols)
+        p = run(results3)
+        if p.returncode != 0:
+            failures.append(f'an old-setting copy stopped the run (exit {p.returncode})\n'
+                            f'{p.stdout[-700:]}')
+        got = clean_rows(tgt3)
+        old = [i for i, r in got.items() if r.get('spec_hash') != 'new'
+               or abs(float(r['r2']) - (0.900 + int(i) / 1000)) > 1e-12]
+        if old:
+            failures.append(f'replicate(s) {old} still hold the superseded setting\'s clean '
+                            f'row, so the curve is divided by a different model\'s score')
+
+        # 6. Same reference, but this condition's NOISY rows were never re-run: they are
+        # still at the old setting, so the old clean row is the right one and stays.
+        results4 = results / 'noisy_not_rerun'
+        results4.mkdir()
+        ref4 = results4 / 'anova_gaussian_chemberta_rf.csv'
+        tgt4 = results4 / 'anova_grouped_wider_chemberta_rf.csv'
+        write(ref4, [dict(row('gaussian', i, 0.800 + i / 1000), spec_hash='old')
+                     for i in range(3)]
+                    + [dict(row('gaussian', i, 0.900 + i / 1000), spec_hash='new')
+                       for i in range(3)], cols)
+        write(tgt4, [dict(row('grouped_wider', i, 0.800 + i / 1000), spec_hash='old')
+                     for i in range(3)]
+                    + [dict(row('grouped_wider', i, 0.7, sigma='0.5'), spec_hash='old')
+                       for i in range(3)], cols)
+        p = run(results4)
+        moved = [i for i, r in clean_rows(tgt4).items() if r.get('spec_hash') != 'old']
+        if moved or p.returncode != 0:
+            failures.append(f'replicate(s) {moved} had their old-setting clean row replaced '
+                            f'although the noisy rows are still at the old setting '
+                            f'(exit {p.returncode})')
 
     if failures:
         print(f'FAIL — {len(failures)} problem(s):\n')

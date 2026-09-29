@@ -232,8 +232,29 @@ def main():
                 if have is None:
                     continue
                 candidates = by_iteration[row['iteration']]
-                if any(all(have.get(c) == candidate.get(c) for c in ACCURACY)
-                       for candidate in candidates):
+                matched = [candidate for candidate in candidates
+                           if all(have.get(c) == candidate.get(c) for c in ACCURACY)]
+                # A MATCH AT A SUPERSEDED SETTING IS NOT AGREEMENT. On 21 September
+                # dnn, mlp, dnn_bnn_full and mlp_bnn_full moved to a shared setting and
+                # the re-run appended to the old files, so gaussian holds a clean block
+                # at each setting. A target whose clean row matches the OLD block used
+                # to count as agreeing and was kept, while the loader drops the old
+                # gaussian rows -- so the grouped conditions divided curves fitted at
+                # the new setting by a clean score fitted at the old one (up to 0.048
+                # R2 apart, NN-alpha on ECFP4). A copy of the old block is refreshed
+                # from the newest, like any other copy of a reference that moved.
+                # Only where this condition's NOISY rows for the replicate were re-run at
+                # the newest setting: if they were not, the old clean row is the one that
+                # matches them, and replacing it would create the mismatch in reverse.
+                newest_spec = row.get('spec_hash') or ''
+                noisy_specs = {r.get('spec_hash') or '' for r in target_rows
+                               if not is_clean(r) and r['iteration'] == row['iteration']}
+                if matched and newest_spec and newest_spec in noisy_specs and all(
+                        (m.get('spec_hash') or '') not in ('', newest_spec)
+                        for m in matched):
+                    stale.append(row['iteration'])
+                    continue
+                if matched:
                     checked += 1
                     continue
                 if (target.name, row['iteration']) in copies:
