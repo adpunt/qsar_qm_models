@@ -407,7 +407,9 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
             long.append({'condition': row['condition'], 'factor': label,
                          'outcome': row['outcome'],
                          'share': row.get(column, np.nan),
-                         'spread': row.get(f'{column}_spread', np.nan)})
+                         'spread': row.get(f'{column}_spread', np.nan),
+                         'lo': row.get(f'{column}_lo', np.nan),
+                         'hi': row.get(f'{column}_hi', np.nan)})
     long = pd.DataFrame(long)
 
     # ONE category list for both panels. A condition can be missing from one
@@ -423,7 +425,8 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         S.grouped_bars(ax, panel, 'condition', 'factor', 'share',
                        spread='spread', labeller=str,
                        colours=C.ANOVA_FACTOR_COLORS, legend=False,
-                       categories=conditions, clip=(0, 100))
+                       categories=conditions, clip=(0, 100),
+                       interval=('lo', 'hi'))
         ax.set_ylabel('Share of variance (%)')
         ax.set_ylim(0, 100)
         # WHICH LEVEL. The accuracy panel is R2 at ONE noise level and the
@@ -454,7 +457,6 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
     S.shared_legend(fig, axes[0], side=True)
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
-    n_reps_less = max(n_reps - 1, 0)
     empty = sorted(set(conditions) - set(
         long[long['outcome'] == outcomes[-1]]['condition']))
     missing_note = (
@@ -467,11 +469,8 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         model, the choice of representation, the pairing of the two, and what is
         left over, on {C.dataset_label(dataset)}. Bars are the share of variance
         from a two-way analysis with sequential sums of squares; the four shares
-        sum to 100 per cent. The whiskers are NOT confidence intervals: they are
-        a leave-one-out jackknife over the {n_reps} replicates -- drop one
-        replicate, decompose the remaining {n_reps_less}, repeat -- so they say
-        how much the answer depends on any one replicate, not how precisely the
-        share is known. The leftover share is the variation between replicates
+        sum to 100 per cent. The whiskers are 95% intervals from {C.ANOVA_BOOTSTRAP:,}
+        bootstrap resamples of whole replicates, of which there are {n_reps}. The leftover share is the variation between replicates
         of one identical configuration: same model, same representation, same
         noise condition, same noise level, different seed.{missing_note}""")
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
@@ -499,7 +498,9 @@ def f2b_clean_decomposition(anova_clean, output_dir):
         for column, label in FACTOR_COLUMNS:
             long.append({'dataset': row['dataset'], 'factor': label,
                          'share': row.get(column, np.nan),
-                         'spread': row.get(f'{column}_spread', np.nan)})
+                         'spread': row.get(f'{column}_spread', np.nan),
+                         'lo': row.get(f'{column}_lo', np.nan),
+                         'hi': row.get(f'{column}_hi', np.nan)})
     long = pd.DataFrame(long)
     order = [d for d in C.DATASET_ORDER if d in set(long['dataset'])]
     order += [d for d in dict.fromkeys(long['dataset']) if d not in order]
@@ -508,7 +509,8 @@ def f2b_clean_decomposition(anova_clean, output_dir):
     S.grouped_bars(ax, long, 'dataset', 'factor', 'share', spread='spread',
                    labeller=str, category_labeller=C.dataset_label,
                    colours=C.ANOVA_FACTOR_COLORS,
-                   legend=False, categories=order, clip=(0, 100))
+                   legend=False, categories=order, clip=(0, 100),
+                   interval=('lo', 'hi'))
     ax.set_ylabel('Share of variance (%)')
     ax.set_xlabel('Dataset')
     ax.set_ylim(0, 100)
@@ -532,13 +534,103 @@ def f2b_clean_decomposition(anova_clean, output_dir):
         one dataset. There is no noise-condition axis: the clean fit is made
         once per replicate and every noise condition's ladder starts from that
         same fit, so a condition axis would repeat each bar seven times. The
-        whiskers are NOT confidence intervals: they are a leave-one-replicate-out
-        jackknife -- drop one replicate, decompose the rest, repeat -- so they
-        say how much the answer depends on any one replicate, not how precisely
-        the share is known. The leftover share is the variation between
+        whiskers are 95% intervals from {C.ANOVA_BOOTSTRAP:,} bootstrap resamples of whole
+        replicates; on an assay dataset a replicate is one of five scaffold
+        folds. The leftover share is the variation between
         replicates of one identical configuration: same model, same
         representation, same dataset, different seed. {spelled}.""")
     return S.save(fig, Path(output_dir) / 'F2b_clean_decomposition.png')
+
+
+#: The three outcomes F2c and T3c put side by side, in the author's order
+#: (2026-09-29): accuracy before noise, accuracy under Gaussian noise, and
+#: robustness under Gaussian noise.
+THREE_OUTCOMES_CONDITION = 'gaussian'
+
+#: F2c's bars, in the author's row order for T3c, with the names she uses.
+THREE_OUTCOME_TERMS = [('eta2_model', 'Model family'),
+                       ('eta2_rep', 'Representation'),
+                       ('eta2_interaction', 'Model × representation'),
+                       ('eta2_split', 'Replicate'),
+                       ('eta2_residual', 'Residual'),
+                       ('eta2_model_in_family', 'Model within family')]
+
+
+def three_outcome_rows(anova, anova_clean, dataset='qm9'):
+    """The clean-label row and the two Gaussian rows for one dataset, as
+    (group label, row) pairs. A missing outcome is left out, not zero-filled."""
+    got = []
+    if anova_clean is not None and len(anova_clean):
+        here = anova_clean[anova_clean['dataset'] == dataset]
+        if len(here):
+            got.append(('Clean R$^2$', here.iloc[0]))
+    if anova is None or not len(anova):
+        return got
+    frame = anova
+    if 'dataset' in frame.columns:
+        frame = frame[frame['dataset'].fillna('qm9') == dataset]
+    elif dataset != 'qm9':
+        return got
+    frame = frame[frame['condition'] == THREE_OUTCOMES_CONDITION]
+    level = C.reporting_level(dataset)
+    accuracy = frame[frame['outcome'].str.startswith('Accuracy')]
+    if len(accuracy):
+        got.append((f'R$^2$ at noise level {float(level)}, Gaussian',
+                    accuracy.iloc[0]))
+    robustness = frame[frame['outcome'].str.startswith('Robustness')]
+    if len(robustness):
+        got.append(('AUC$_{norm}$, Gaussian', robustness.iloc[0]))
+    return got
+
+
+def f2c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
+    """One panel, three groups of bars: clean R2, R2 at the reporting level
+    under Gaussian noise, and AUC_norm under Gaussian noise. One bar per ANOVA
+    term, whiskers the bootstrap interval. The figure the author asked for on
+    2026-09-29 beside T3c, which holds the same numbers without intervals."""
+    rows = three_outcome_rows(anova, anova_clean, dataset)
+    if not rows:
+        return None
+    long = []
+    for group, row in rows:
+        for column, label in THREE_OUTCOME_TERMS:
+            long.append({'outcome': group, 'term': label,
+                         'share': row.get(column, np.nan),
+                         'lo': row.get(f'{column}_lo', np.nan),
+                         'hi': row.get(f'{column}_hi', np.nan)})
+    long = pd.DataFrame(long)
+    colours = {'Model family': C.ANOVA_FACTOR_COLORS['Model family'],
+               'Representation': C.ANOVA_FACTOR_COLORS['Representation'],
+               'Model × representation': C.ANOVA_FACTOR_COLORS['Interaction'],
+               'Replicate': C.ANOVA_FACTOR_COLORS['Split'],
+               'Residual': C.ANOVA_FACTOR_COLORS['Residual'],
+               'Model within family':
+                   C.ANOVA_FACTOR_COLORS['Model within family']}
+    fig, ax = _fig(height=3.2)
+    S.grouped_bars(ax, long, 'outcome', 'term', 'share', labeller=str,
+                   category_labeller=lambda g: g.replace(', ', ',\n'),
+                   colours=colours, legend=False,
+                   categories=[g for g, _ in rows], clip=(0, 100),
+                   interval=('lo', 'hi'))
+    ax.set_ylabel('Share of variance (%)')
+    top = np.nanmax(long['hi'].to_numpy(dtype=float))
+    ax.set_ylim(0, min(100, 10 * np.ceil((top + 2) / 10)))
+    plt_labels = ax.get_xticklabels()
+    ax.set_xticklabels([t.get_text() for t in plt_labels], rotation=0,
+                       ha='center')
+    S.shared_legend(fig, ax, side=True)
+    n_reps = max(int(r.get('n_replicates', 0)) for _, r in rows)
+    caption('F2c', f"""
+        Share of the variance explained by each term of the analysis of
+        variance on {C.dataset_label(dataset)}, for three outcomes: R$^2$ on
+        clean labels, R$^2$ at noise level {C.reporting_level(dataset):g} under
+        Gaussian noise, and AUC$_{{norm}}$ under Gaussian noise. One bar is one
+        term for one outcome; the bars of one outcome sum to 100 per cent. The
+        whiskers are 95% intervals from {C.ANOVA_BOOTSTRAP:,} bootstrap
+        resamples of whole replicates, of which there are {n_reps}.""")
+    name = ('F2c_three_outcomes.png' if dataset == 'qm9'
+            else f'F2c_three_outcomes_{dataset}.png')
+    return S.save(fig, Path(output_dir) / name)
 
 
 # ---------------------------------------------------------------------------

@@ -599,6 +599,28 @@ def t7_rank_transfer(transfer, output_dir, rep=None, condition='gaussian'):
     return written[0] if written else None
 
 
+def t3c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
+    """The author's layout (2026-09-29): one row per term, one column per
+    outcome -- clean R2, R2 at the reporting level under Gaussian noise, and
+    AUC_norm under Gaussian noise. Point shares only; the intervals are in T3
+    and belong in an additional file, not in front of the reader."""
+    from figlib_figures import THREE_OUTCOME_TERMS, three_outcome_rows
+    rows = three_outcome_rows(anova, anova_clean, dataset)
+    if not rows:
+        return None
+    wanted = [t for t in THREE_OUTCOME_TERMS if t[1] != 'Model within family']
+    table = pd.DataFrame({'Term': [label for _, label in wanted]})
+    for group, row in rows:
+        header = (group.replace('R$^2$', 'R²')
+                  .replace('AUC$_{norm}$', 'AUC_norm'))
+        table[header] = [f'{row.get(column, np.nan):.1f}'
+                         for column, _ in wanted]
+    return write(table, output_dir, f'T3c_three_outcomes_{dataset}',
+                 f'Share of the variance (%) explained by each term, on '
+                 f'{C.dataset_label(dataset)}. Intervals are in '
+                 f'T3_variance_decomposition_{dataset}.')
+
+
 # ---------------------------------------------------------------------------
 # T3b -- the same decomposition on clean labels, every dataset
 # ---------------------------------------------------------------------------

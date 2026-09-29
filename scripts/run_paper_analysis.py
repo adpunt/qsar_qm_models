@@ -301,6 +301,28 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
         else pd.DataFrame()
     if len(anova):
         tables['anova_eta2'] = anova
+    # THE SAME DECOMPOSITION ON EACH ASSAY DATASET (the author, 2026-09-29),
+    # kept in its own table so F2, T3 on QM9 and D4 still read QM9 alone. On
+    # these datasets the split is one of five scaffold folds.
+    assay_anova_rows = []
+    for dataset in (sorted(assay_per['dataset'].dropna().unique())
+                    if len(assay_per) else []):
+        where = f'the ANOVA on {dataset}'
+        assay_anova_rows.append(
+            M.two_way_eta2_by_condition(
+                assay_per[assay_per['dataset'] == dataset], 'auc_norm',
+                where=where)
+            .assign(dataset=dataset, outcome='Robustness (AUC$_{norm}$)'))
+        at_level = M.accuracy_at_reporting_level(assay, dataset)
+        if len(at_level):
+            assay_anova_rows.append(
+                M.two_way_eta2_by_condition(at_level, 'r2', where=where)
+                .assign(dataset=dataset,
+                        outcome='Accuracy (R$^2$ at the reported level)'))
+    assay_anova_rows = [f for f in assay_anova_rows if len(f)]
+    if assay_anova_rows:
+        tables['anova_eta2_assay'] = pd.concat(assay_anova_rows,
+                                               ignore_index=True)
     # THE CLEAN-LABEL DECOMPOSITION, one per dataset and no condition axis. It
     # is the only decomposition that can hold the computed property and the
     # three measured endpoints on one chart, because the clean fit is what all
@@ -464,6 +486,8 @@ def draw_figures(args, tables, verdicts):
     anova_clean = tables.get('anova_eta2_clean')
     if anova_clean is not None and len(anova_clean):
         drawn.append(FIG.f2b_clean_decomposition(anova_clean, out))
+    if anova is not None and len(anova):
+        drawn.append(FIG.f2c_three_outcomes(anova, anova_clean, out))
     if qm9 is not None and len(qm9) and conditions:
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
     if qm9 is not None and len(qm9):
@@ -704,6 +728,20 @@ def build_tables(args, tables, verdicts):
     if (tables.get('anova_eta2_clean') is not None
             and len(tables['anova_eta2_clean'])):
         built.append(TAB.t3b_variance_clean(tables['anova_eta2_clean'], out))
+    anova_assay = tables.get('anova_eta2_assay')
+    if anova_assay is not None and len(anova_assay):
+        for dataset in sorted(anova_assay['dataset'].unique()):
+            built.append(TAB.t3_variance(
+                anova_assay[anova_assay['dataset'] == dataset], out,
+                dataset=dataset, clean=tables.get('anova_eta2_clean')))
+    for dataset, frame in (
+            [('qm9', tables.get('anova_eta2'))]
+            + [(d, anova_assay[anova_assay['dataset'] == d])
+               for d in (sorted(anova_assay['dataset'].unique())
+                         if anova_assay is not None and len(anova_assay)
+                         else [])]):
+        built.append(TAB.t3c_three_outcomes(
+            frame, tables.get('anova_eta2_clean'), out, dataset=dataset))
     if qm9 is not None and len(qm9) and rep:
         built.append(TAB.t4_robustness(qm9, out, rep))
     if qm9 is not None and len(qm9):

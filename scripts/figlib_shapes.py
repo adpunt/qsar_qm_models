@@ -474,13 +474,17 @@ def title(ax, letter, text):
 def grouped_bars(ax, frame, category, series, value, spread=None,
                  labeller=None, category_labeller=None, colours=None,
                  legend=True, legend_ncol=4, stacked=False, categories=None,
-                 clip=None):
+                 clip=None, interval=None):
     """One group of bars per category, one bar per series member.
 
     `spread` names a column holding a half-height whisker -- how much that share
     moved across the replicates. No version of the variance figure has ever
     carried one, because the metric behind it was computed on an averaged curve
     and had no spread to show.
+
+    `interval` is a (low, high) pair of columns and wins over `spread`. A
+    bootstrap interval is not symmetric about the share, and its width drawn on
+    both sides made every whisker twice as long as the interval (2026-09-29).
     """
     labeller = labeller or (lambda v: str(v))
     category_labeller = category_labeller or C.condition_label
@@ -509,7 +513,18 @@ def grouped_bars(ax, frame, category, series, value, spread=None,
             offset = (k - (len(members) - 1) / 2) * width
             ax.bar(index + offset, heights, width * 0.92, color=colour,
                    label=labeller(member), linewidth=0)
-            if spread and spread in frame.columns:
+            if interval is not None and set(interval) <= set(frame.columns):
+                lo = np.array([sub[interval[0]].get(c, np.nan)
+                               for c in categories], dtype=float)
+                hi = np.array([sub[interval[1]].get(c, np.nan)
+                               for c in categories], dtype=float)
+                if clip is not None:
+                    lo, hi = np.maximum(lo, clip[0]), np.minimum(hi, clip[1])
+                whisk = np.vstack([np.maximum(heights - lo, 0.0),
+                                   np.maximum(hi - heights, 0.0)])
+                ax.errorbar(index + offset, heights, yerr=whisk, fmt='none',
+                            ecolor='#333333', elinewidth=0.8, capsize=1.5)
+            elif spread and spread in frame.columns:
                 whisk = np.array([sub[spread].get(c, np.nan) for c in categories],
                                  dtype=float)
                 if clip is not None:

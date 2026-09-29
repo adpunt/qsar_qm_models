@@ -440,6 +440,46 @@ def test_f2_carries_the_residual_and_the_whiskers(out):
           header or 'T3 wrote nothing')
 
 
+def test_whiskers_are_the_interval_and_t3c_reads_one_dataset(out):
+    """A whisker runs from the interval's low end to its high end, not its
+    width either side of the bar; and T3c takes its numbers from the dataset
+    it is named for (2026-09-29)."""
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    frame = pd.DataFrame([{'group': 'g', 'term': 'Model family',
+                           'share': 36.5, 'lo': 31.4, 'hi': 43.4}])
+    S.grouped_bars(ax, frame, 'group', 'term', 'share', legend=False,
+                   category_labeller=str, clip=(0, 100),
+                   interval=('lo', 'hi'))
+    bar = [c for c in ax.collections if hasattr(c, 'get_segments')][0]
+    (x0, y0), (x1, y1) = bar.get_segments()[0]
+    plt.close(fig)
+    check('a whisker runs from the low end to the high end',
+          np.isclose(min(y0, y1), 31.4) and np.isclose(max(y0, y1), 43.4),
+          f'{y0}, {y1}')
+
+    import figlib_tables as T
+    def row(dataset, condition, outcome, share):
+        return {'dataset': dataset, 'condition': condition, 'outcome': outcome,
+                'eta2_model': share, 'eta2_rep': 1.0,
+                'eta2_interaction': 1.0, 'eta2_split': 1.0,
+                'eta2_residual': 1.0, 'eta2_model_in_family': 1.0,
+                'n_replicates': 5}
+    anova = pd.DataFrame([
+        row('logd', 'gaussian', 'Robustness (AUC$_{norm}$)', 60.0),
+        row('logd', 'gaussian', 'Accuracy (R$^2$ at the reported level)', 50.0),
+        row('caco2', 'gaussian', 'Robustness (AUC$_{norm}$)', 99.0)])
+    clean = pd.DataFrame([row('logd', None, None, 40.0),
+                          row('qm9', None, None, 99.0)])
+    T.t3c_three_outcomes(anova, clean, out, dataset='logd')
+    got = pd.read_csv(Path(out) / 'T3c_three_outcomes_logd.csv')
+    family = got[got['Term'] == 'Model family'].iloc[0].tolist()[1:]
+    check('T3c reads logD alone, in the order clean, R2, AUC_norm',
+          family == [40.0, 50.0, 60.0], str(family))
+    check('T3c names the reporting level', any(
+        'noise level 1.0' in c for c in got.columns), str(list(got.columns)))
+
+
 def test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate(out):
     """The clean decomposition is per DATASET, and the clean rows collapse first.
 
@@ -655,6 +695,7 @@ def main():
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
         test_f2_carries_the_residual_and_the_whiskers(out)
+        test_whiskers_are_the_interval_and_t3c_reads_one_dataset(out)
         test_f2b_has_no_condition_axis_and_one_clean_fit_per_replicate(out)
         test_f4a_draws_its_companion_panel(out)
         test_panels_that_share_an_axis_stay_the_same_width(out)
