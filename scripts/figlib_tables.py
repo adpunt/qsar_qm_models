@@ -102,17 +102,23 @@ def latex_safe(value):
     T1 was clean. None of it shows in the CSV, which is what every other reader
     of these tables uses, so it survived until someone pasted one.
     """
-    text = str(value)
+    # THE PAPER'S MACRO, NOT A SPELLING OF IT. paper.tex writes \aucnorm
+    # everywhere, and a pasted table that printed AUC\_norm was the one place
+    # the name was set differently (the author, 2026-09-30). The Additional
+    # files preamble defines the same macro.
+    text = (str(value).replace('AUC$_{norm}$', '\\aucnorm{}')
+            .replace('AUC_norm', '\\aucnorm{}'))
     out = []
     for piece in _MATH.split(text):
         if piece.startswith('$') and piece.endswith('$') and len(piece) > 1:
             out.append(piece)
             continue
+        piece = piece.replace('\\aucnorm{}', '\0')
         for character, replacement in _LATEX_ESCAPE.items():
             piece = piece.replace(character, replacement)
         for character, replacement in _LATEX_UNICODE.items():
             piece = piece.replace(character, replacement)
-        out.append(piece)
+        out.append(piece.replace('\0', '\\aucnorm{}'))
     # `R$^2$$_{norm}$` from two adjacent swaps is legal but ugly; join the pair.
     return ''.join(out).replace('$$', '')
 
@@ -228,7 +234,7 @@ def t2_conditions(output_dir):
 
 #: The shares of the family decomposition (figlib_metrics.family_eta2), in the
 #: order they are entered. `eta2_model` is the model FAMILY.
-ETA2_COLUMNS = (('eta2_split', 'Split'), ('eta2_model', 'Model family'),
+ETA2_COLUMNS = (('eta2_split', 'Replicate'), ('eta2_model', 'Model family'),
                 ('eta2_model_in_family', 'Model within family'),
                 ('eta2_rep', 'Representation'),
                 ('eta2_interaction', 'Interaction'),
@@ -236,14 +242,13 @@ ETA2_COLUMNS = (('eta2_split', 'Split'), ('eta2_model', 'Model family'),
 
 
 def _share_cell(r, column):
-    """A share with its 95% bootstrap interval, or alone if it has none."""
+    """A share, one number. ONE NUMBER PER CELL (the author, 2026-09-29: "Do
+    you have a kink for putting multiple numbers in the same cell. Thats what
+    MORE COLUMNS is for"); the intervals are in T3i, an Additional file."""
     value = r.get(column, np.nan)
     if not np.isfinite(value):
         return ''
-    lo, hi = r.get(f'{column}_lo', np.nan), r.get(f'{column}_hi', np.nan)
-    if not (np.isfinite(lo) and np.isfinite(hi)):
-        return f'{value:.1f}'
-    return f'{value:.1f} [{lo:.1f}, {hi:.1f}]'
+    return f'{value:.1f}'
 
 
 def t3_variance(anova, output_dir, dataset='qm9', clean=None):
@@ -266,27 +271,23 @@ def t3_variance(anova, output_dir, dataset='qm9', clean=None):
         for _, r in here.iterrows():
             frame = pd.concat([pd.DataFrame([dict(
                 r, condition='__clean__',
-                outcome='Accuracy (R$^2$ on clean labels)')]), frame],
+                outcome='Predictive performance (R$^2$ on clean labels)')]),
+                frame],
                 ignore_index=True)
     for _, r in frame.iterrows():
         row = {'Condition': ('None (clean labels)'
                              if r['condition'] == '__clean__'
                              else C.condition_label(r['condition'])),
-               'Outcome': r['outcome']}
+               'Outcome': _outcome_label(r, dataset)}
         for column, label in ETA2_COLUMNS:
             row[f'{label} η² (%)'] = _share_cell(r, column)
-        row['Models'] = int(r.get('n_models', 0))
-        row['Families'] = int(r.get('n_families', 0))
-        row['Representations'] = int(r.get('n_reps', 0))
-        row['Replicates'] = int(r.get('n_replicates', 0))
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, f'T3_variance_decomposition_{dataset}',
-                 'Share of variance explained by the split, model family, model '
-                 'within family, representation, their pairing and the '
-                 'residual, per noise condition, entered in that order. The '
-                 'bracket is the 95% bootstrap interval from resampling whole '
-                 'splits.')
+                 f'Share of variance explained by the replicate, model family, '
+                 f'model within family, representation, their pairing and the '
+                 f'residual, per noise condition, entered in that order. '
+                 f'{_counts_sentence(frame)} The 95% intervals are in T3i.')
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +603,7 @@ def t7_rank_transfer(transfer, output_dir, rep=None, condition='gaussian'):
 def t3c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
     """The author's layout (2026-09-29): one row per term, one column per
     outcome -- clean R2, R2 at the reporting level under Gaussian noise, and
-    AUC_norm under Gaussian noise. Point shares only; the intervals are in T3
+    AUC_norm under Gaussian noise. Point shares only; the intervals are in T3i
     and belong in an additional file, not in front of the reader."""
     from figlib_figures import THREE_OUTCOME_TERMS, three_outcome_rows
     rows = three_outcome_rows(anova, anova_clean, dataset)
@@ -617,8 +618,7 @@ def t3c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
                          for column, _ in wanted]
     return write(table, output_dir, f'T3c_three_outcomes_{dataset}',
                  f'Share of the variance (%) explained by each term, on '
-                 f'{C.dataset_label(dataset)}. Intervals are in '
-                 f'T3_variance_decomposition_{dataset}.')
+                 f'{C.dataset_label(dataset)}. Intervals are in T3i.')
 
 
 # ---------------------------------------------------------------------------
@@ -646,21 +646,220 @@ def t3b_variance_clean(anova_clean, output_dir):
         row = {'Dataset': C.dataset_label(r['dataset'])}
         for column, label in ETA2_COLUMNS:
             row[f'{label} η² (%)'] = _share_cell(r, column)
-        row['Models'] = int(r.get('n_models', 0))
-        row['Families'] = int(r.get('n_families', 0))
-        row['Representations'] = int(r.get('n_reps', 0))
-        row['Replicates'] = int(r.get('n_replicates', 0))
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, 'T3b_variance_decomposition_clean',
-                 'Share of the variance in predictive accuracy on CLEAN '
-                 'labels explained by the split, model family, model within '
-                 'family, representation, their pairing and the residual, one '
-                 'row per dataset. Accuracy is R2 on held-out molecules with '
-                 'no noise added to the training labels. The bracket is the '
-                 '95% bootstrap interval from resampling whole splits; on the '
-                 'assay datasets the split is one of five scaffold folds, so '
-                 'their interval rests on five.')
+                 'Share of the variance in predictive performance on clean '
+                 'labels explained by the replicate, model family, model '
+                 'within family, representation, their pairing and the '
+                 'residual, one row per dataset. Predictive performance is R2 '
+                 'on held-out molecules with no noise added to the training '
+                 'labels. On the assay datasets the replicate is one of five '
+                 'scaffold folds. The 95% intervals are in T3i.')
+
+
+# ---------------------------------------------------------------------------
+# T3i -- the intervals behind T3, T3b and T3c, for an Additional file
+# ---------------------------------------------------------------------------
+
+_WORDS = {1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six',
+          7: 'seven', 8: 'eight', 9: 'nine'}
+
+
+def _count(n):
+    """One to nine in words, 10 and above as numerals (the paper's style)."""
+    n = int(n)
+    return _WORDS.get(n, str(n))
+
+
+def _counts_sentence(frame):
+    """The counts every row of a decomposition shares, said once in the
+    caption instead of four constant columns (the author, 2026-09-30)."""
+    def top(column):
+        return int(frame[column].max()) if column in frame and len(frame) else 0
+    return (f'The models are {_count(top("n_models"))} base models in '
+            f'{_count(top("n_families"))} families by '
+            f'{_count(top("n_reps"))} representations, over '
+            f'{_count(top("n_replicates"))} replicates.')
+
+
+def _outcome_label(r, dataset):
+    """The outcome in the paper's words, from `response` rather than from the
+    stored label, so a harvest written before 2026-09-30 prints the same."""
+    response = str(r.get('response', ''))
+    if r.get('condition') == '__clean__' or response == 'r2_clean':
+        return 'Predictive performance (R$^2$ on clean labels)'
+    if response == 'auc_norm':
+        return 'Robustness (AUC$_{norm}$)'
+    if response == 'r2':
+        return C.accuracy_outcome_label(dataset)
+    return str(r.get('outcome', response))
+
+
+def t3i_variance_intervals(anova, anova_assay, anova_clean, output_dir):
+    """Every share the paper's decomposition tables print, with its 95%
+    bootstrap interval in two columns of its own. One row is one term of one
+    decomposition: a dataset, a noise condition and an outcome. The main-text
+    tables carry the share alone (the author, 2026-09-30: intervals belong in
+    an Additional file)."""
+    blocks = []
+    if anova_clean is not None and len(anova_clean):
+        blocks.append(anova_clean.assign(condition='__clean__'))
+    if anova is not None and len(anova):
+        frame = anova.copy()
+        if 'dataset' not in frame:
+            frame['dataset'] = 'qm9'
+        blocks.append(frame)
+    if anova_assay is not None and len(anova_assay):
+        blocks.append(anova_assay)
+    if not blocks:
+        return None
+    frame = pd.concat(blocks, ignore_index=True)
+    rank = {'__clean__': -1}
+    rank.update({c: i for i, c in enumerate(
+        C.sort_conditions([c for c in frame['condition'].unique()
+                           if c != '__clean__']))})
+    frame = frame.assign(
+        _d=frame['dataset'].map({d: i for i, d in enumerate(C.DATASET_ORDER)}),
+        _o=frame['response'].map({'r2_clean': 0, 'auc_norm': 1, 'r2': 2}),
+        _c=frame['condition'].map(rank))
+    frame = frame.sort_values(['_d', '_o', '_c'], kind='mergesort')
+    rows = []
+    for _, r in frame.iterrows():
+        dataset = r['dataset']
+        for column, label in ETA2_COLUMNS:
+            value = r.get(column, np.nan)
+            if not np.isfinite(value):
+                continue
+            rows.append({
+                'Dataset': C.dataset_label(dataset).split(' (')[0],
+                'Condition': ('None (clean labels)'
+                              if r['condition'] == '__clean__'
+                              else C.condition_label(r['condition'])),
+                'Outcome': _outcome_label(r, dataset),
+                'Term': label,
+                'Share (%)': f'{value:.1f}',
+                'Lower (%)': f'{r.get(f"{column}_lo", np.nan):.1f}',
+                'Upper (%)': f'{r.get(f"{column}_hi", np.nan):.1f}'})
+    table = pd.DataFrame(rows)
+    out = write(table, output_dir, 'T3i_variance_intervals',
+                'Every share of variance in the decomposition tables, with the '
+                'lower and upper ends of its 95% interval from 1,000 bootstrap '
+                'resamples of whole replicates. On the assay datasets a '
+                'replicate is one of five scaffold folds.')
+    _rows_only(output_dir, 'T3i_variance_intervals')
+    return out
+
+
+# ---------------------------------------------------------------------------
+# T14 -- the noise distributions run on a subset of models, assay datasets
+# ---------------------------------------------------------------------------
+
+#: The distributions run on a named subset of models, and grouped-wider beside
+#: them for comparison, in the order paper.tex prints them.
+T14_CONDITIONS = ('laplace', 'student_t_nu5', 'outlier_p10', 'grouped_wider')
+
+
+def _signed(value):
+    if not np.isfinite(value):
+        return MISSING_CELL
+    text = f'{value:+.3f}'
+    return '0.000' if text in ('+0.000', '-0.000') else text
+
+
+def t14_noise_distributions(summary, output_dir, rep='ecfp4'):
+    """One row per model on one assay dataset: AUC_norm under Gaussian noise,
+    then the change from it under each distribution and under grouped-wider.
+    The models are the ones the distributions ran on, read from the data.
+    Written by hand into paper.tex as tab:assay_shape until 2026-09-30."""
+    if summary is None or not len(summary):
+        return None
+    frame = summary[(summary['rep'] == rep)
+                    & (summary['dataset'].isin(C.DATASET_ORDER[1:]))]
+    ran = frame[frame['condition'].isin(T14_CONDITIONS[:3])]
+    if not len(ran):
+        return None
+    wide = frame.pivot_table(index=['dataset', 'model'], columns='condition',
+                             values='auc_norm', aggfunc='first')
+    rows = []
+    for dataset in [d for d in C.DATASET_ORDER if d in set(ran['dataset'])]:
+        models = C.sort_models(
+            ran[ran['dataset'] == dataset]['model'].unique())
+        for model in models:
+            got = wide.loc[(dataset, model)]
+            gaussian = got.get('gaussian', np.nan)
+            row = {'Dataset': C.dataset_label(dataset),
+                   'Model': C.model_label(model),
+                   'Gaussian': (f'{gaussian:.3f}' if np.isfinite(gaussian)
+                                else MISSING_CELL)}
+            for condition in T14_CONDITIONS:
+                row[C.condition_label(condition)] = _signed(
+                    got.get(condition, np.nan) - gaussian)
+            rows.append(row)
+    table = pd.DataFrame(rows)
+    return write(table, output_dir, f'T14_noise_distributions_assay_{rep}',
+                 f'Robustness under the noise distributions run on a named '
+                 f'subset of models, on the three assay datasets, '
+                 f'{C.rep_label(rep)}. One row is one model on one dataset. '
+                 f'The first column is AUC_norm under Gaussian noise; the '
+                 f'others are the change in AUC_norm from it under each '
+                 f'condition, negative a loss. Values are medians over five '
+                 f'scaffold folds.')
+
+
+# ---------------------------------------------------------------------------
+# T15 -- the two leading pairings of model and representation, every dataset
+# ---------------------------------------------------------------------------
+
+T15_ROWS = (('Clean labels', 'gaussian', 0.0),
+            ('Gaussian', 'gaussian', None),
+            ('Grouped, wider', 'grouped_wider', None),
+            ('Grouped, shifted', 'grouped_shifted', None))
+
+
+def t15_leading_pairings(ladders, output_dir, level=1.0):
+    """The two base-model-and-representation pairings with the highest median
+    R2 on each dataset, on clean labels and at one noise level under each
+    condition run on every model. `ladders` maps a dataset to its accuracy
+    ladder (figlib_decisions.accuracy_ladder). The range is the leading
+    pairing's highest minus lowest R2 over replicates. Written by hand into
+    paper.tex as tab:leaders until 2026-09-30, at a level of 1.0 on every
+    dataset, Caco-2 included."""
+    rows = []
+    for dataset in C.DATASET_ORDER:
+        ladder = ladders.get(dataset)
+        if ladder is None or not len(ladder):
+            continue
+        ladder = C.cross_model(ladder, 'T15')
+        for label, condition, at in T15_ROWS:
+            at = level if at is None else at
+            here = ladder[(ladder['condition'] == condition)
+                          & (np.isclose(ladder['sigma'], at))]
+            here = here.sort_values('r2', ascending=False, kind='mergesort')
+            if len(here) < 2:
+                continue
+            first, second = here.iloc[0], here.iloc[1]
+            rows.append({
+                'Dataset': C.dataset_label(dataset).split(' (')[0],
+                'Labels': label,
+                'Leading model': C.model_label(first['model']),
+                'Representation': C.rep_label(first['rep']),
+                'R²': f'{first["r2"]:.3f}',
+                'Range': f'{first["r2_spread"]:.3f}',
+                'Second model': C.model_label(second['model']),
+                'Second representation': C.rep_label(second['rep']),
+                'Second R²': f'{second["r2"]:.3f}'})
+    if not rows:
+        return None
+    return write(pd.DataFrame(rows), output_dir, 'T15_leading_pairings',
+                 f'The two pairings of base model and representation with the '
+                 f'highest predictive performance on each dataset, on clean '
+                 f'labels and at a noise level of {C.noise_level_text(level)} '
+                 f'under each noise condition run on every model. R² is on '
+                 f'held-out molecules, the median over 10 replicates on QM9 '
+                 f'and five scaffold folds on the assay datasets. The range is '
+                 f'the highest minus the lowest R² of the leading pairing over '
+                 f'those replicates or folds.')
 
 
 # ---------------------------------------------------------------------------

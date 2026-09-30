@@ -296,7 +296,7 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
         if len(at_level):
             anova_rows.append(
                 M.two_way_eta2_by_condition(at_level, 'r2')
-                .assign(outcome='Accuracy (R$^2$ at the reported level)'))
+                .assign(outcome=C.accuracy_outcome_label('qm9')))
     anova = pd.concat(anova_rows, ignore_index=True) if anova_rows \
         else pd.DataFrame()
     if len(anova):
@@ -318,7 +318,7 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
             assay_anova_rows.append(
                 M.two_way_eta2_by_condition(at_level, 'r2', where=where)
                 .assign(dataset=dataset,
-                        outcome='Accuracy (R$^2$ at the reported level)'))
+                        outcome=C.accuracy_outcome_label(dataset)))
     assay_anova_rows = [f for f in assay_anova_rows if len(f)]
     if assay_anova_rows:
         tables['anova_eta2_assay'] = pd.concat(assay_anova_rows,
@@ -742,6 +742,18 @@ def build_tables(args, tables, verdicts):
                          else [])]):
         built.append(TAB.t3c_three_outcomes(
             frame, tables.get('anova_eta2_clean'), out, dataset=dataset))
+    # The intervals of every decomposition table, for an Additional file; the
+    # main-text tables print the share alone (the author, 2026-09-30).
+    built.append(TAB.t3i_variance_intervals(
+        tables.get('anova_eta2'), anova_assay, tables.get('anova_eta2_clean'),
+        out))
+    # tab:assay_shape and tab:leaders, typed into paper.tex by hand until
+    # 2026-09-30. ECFP4 is where the distributions ran on all three datasets.
+    built.append(TAB.t14_noise_distributions(assay, out, rep='ecfp4'))
+    ladders = {'qm9': tables.get('r2_by_level')}
+    ladders.update({d: tables.get(f'r2_by_level_{d}')
+                    for d in C.DATASET_ORDER[1:]})
+    built.append(TAB.t15_leading_pairings(ladders, out))
     if qm9 is not None and len(qm9) and rep:
         built.append(TAB.t4_robustness(qm9, out, rep))
     if qm9 is not None and len(qm9):

@@ -382,6 +382,7 @@ ANOVA_FACTOR_COLORS = {
     'Model family': '#6BAED6',
     'Model within family': '#C6DBEF',
     'Split': '#8C8C8C',
+    'Replicate': '#8C8C8C',
     'Representation': '#FC8D59',
     'Interaction': '#B39DDB',
     'Residual': '#BDBDBD',
@@ -777,6 +778,20 @@ def condition_label(condition):
 
 def dataset_label(dataset):
     return DATASET_LABELS.get(str(dataset).lower(), str(dataset))
+
+
+def noise_level_text(level):
+    """A noise level as the paper writes it: 1.0, 0.75, 1.5."""
+    text = f'{float(level):g}'
+    return text if '.' in text else f'{text}.0'
+
+
+def accuracy_outcome_label(dataset):
+    """The ANOVA outcome name for R2 at this dataset's reporting level, in
+    the paper's words (the author, 2026-09-30: "predictive performance", never
+    "accuracy", and the level named rather than "the reported level")."""
+    return (f'Predictive performance (R$^2$ at a noise level of '
+            f'{noise_level_text(reporting_level(dataset))})')
 
 
 def model_color(model):

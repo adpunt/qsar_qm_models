@@ -377,7 +377,7 @@ FACTOR_COLUMNS = [('eta2_model', 'Model family'),
                   ('eta2_model_in_family', 'Model within family'),
                   ('eta2_rep', 'Representation'),
                   ('eta2_interaction', 'Interaction'),
-                  ('eta2_split', 'Split'),
+                  ('eta2_split', 'Replicate'),
                   ('eta2_residual', 'Residual')]
 
 
@@ -573,7 +573,9 @@ def three_outcome_rows(anova, anova_clean, dataset='qm9'):
         return got
     frame = frame[frame['condition'] == THREE_OUTCOMES_CONDITION]
     level = C.reporting_level(dataset)
-    accuracy = frame[frame['outcome'].str.startswith('Accuracy')]
+    # 'Accuracy' is the label harvests before 2026-09-30 wrote.
+    accuracy = frame[frame['outcome'].str.startswith(
+        ('Predictive performance', 'Accuracy'))]
     if len(accuracy):
         got.append((f'R$^2$ at noise level {float(level)}, Gaussian',
                     accuracy.iloc[0]))
@@ -602,7 +604,7 @@ def f2c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
     colours = {'Model family': C.ANOVA_FACTOR_COLORS['Model family'],
                'Representation': C.ANOVA_FACTOR_COLORS['Representation'],
                'Model × representation': C.ANOVA_FACTOR_COLORS['Interaction'],
-               'Replicate': C.ANOVA_FACTOR_COLORS['Split'],
+               'Replicate': C.ANOVA_FACTOR_COLORS['Replicate'],
                'Residual': C.ANOVA_FACTOR_COLORS['Residual'],
                'Model within family':
                    C.ANOVA_FACTOR_COLORS['Model within family']}

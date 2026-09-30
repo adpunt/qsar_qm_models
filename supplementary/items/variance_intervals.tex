@@ -1,0 +1,22 @@
+% Supplementary item: variance_intervals
+% Made 2026-09-30: the intervals the main-text decomposition tables leave out, so each of their cells holds one number.
+% The numbers come from scripts/run_paper_analysis.py (figlib_tables.t3i_variance_intervals).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{lllcccc}
+\caption{\textbf{\SuppFile{} Intervals for the shares of variance in the decomposition tables.}
+One row is one term of one decomposition: a dataset, a noise condition and an outcome. The share is the one printed in the main text; the lower and upper ends are its 95\% interval from 1,000 bootstrap resamples of whole replicates. QM9 has 10 replicates; on each assay dataset a replicate is one of five scaffold folds, so its interval rests on five. Predictive performance under noise is $R^2$ at each dataset's reporting noise level: 1.0 on QM9, logD and hERG $K_i$, and 0.75 on Caco-2.}
+\label{supp:variance_intervals}\\
+\toprule
+\textbf{Dataset} & \textbf{Condition} & \textbf{Outcome} & \textbf{Term} & \textbf{Share (\%)} & \textbf{Lower (\%)} & \textbf{Upper (\%)} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Dataset} & \textbf{Condition} & \textbf{Outcome} & \textbf{Term} & \textbf{Share (\%)} & \textbf{Lower (\%)} & \textbf{Upper (\%)} \\
+\midrule
+\endhead
+\input{results/decisions_arc/f/tables_relabelled_2026-09-30/T3i_variance_intervals_rows.tex}
+\bottomrule
+\end{longtable}}

@@ -304,12 +304,15 @@ def a_saturated_decomposition_is_refused():
             'a saturated decomposition returned shares with no error term')
 
     out = M.two_way_eta2_by_condition(frame, 'auc_norm')
-    assert out['spread_is'].iloc[0] == 'leave-one-replicate-out', out['spread_is']
+    # The band is a bootstrap over whole replicates since 027f3b9; this test
+    # still expected the leave-one-out jackknife it replaced.
+    assert out['spread_is'].iloc[0].startswith('95% bootstrap'), out['spread_is']
     residual = float(out['eta2_residual_spread'].iloc[0])
     assert residual > 0, (
         'the residual band came out exactly zero again, which is the sign the '
         'fits were saturated')
-    assert int(out['n_jackknife'].iloc[0]) == 10, out['n_jackknife']
+    assert int(out['n_replicates'].iloc[0]) == 10, out['n_replicates']
+    assert int(out['n_bootstrap'].iloc[0]) > 1, out['n_bootstrap']
     print(f'    leave-one-out over 10 replicates: residual band '
           f'{residual:.2f} points, not 0')
 
