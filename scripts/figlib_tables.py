@@ -863,6 +863,94 @@ def t15_leading_pairings(ladders, output_dir, level=1.0):
 
 
 # ---------------------------------------------------------------------------
+# T16 -- every replicate left out of the robustness analysis
+# ---------------------------------------------------------------------------
+
+def t16_excluded(excluded_qm9, excluded_assay, output_dir):
+    """One row per replicate (QM9) or scaffold fold (assay) that has no
+    AUC_norm, with the reason and, where there is one, its clean R2. For the
+    Additional file the Methods cites; the old one listed the earlier study's
+    R2 <= 0.6 gate."""
+    frames = [f for f in (excluded_qm9, excluded_assay)
+              if f is not None and len(f)]
+    if not frames:
+        return None
+    frame = pd.concat(frames, ignore_index=True)
+    frame = frame.assign(
+        _d=frame['dataset'].map({d: i for i, d in enumerate(C.DATASET_ORDER)}),
+        _m=frame['model'].map({m: i for i, m in enumerate(
+            C.sort_models(frame['model'].unique()))}),
+        _c=frame['condition'].map({c: i for i, c in enumerate(
+            C.sort_conditions(frame['condition'].unique()))}))
+    frame = frame.sort_values(['_d', '_m', 'rep', '_c', 'replicate'],
+                              kind='mergesort')
+    clean = frame['baseline_r2'] if 'baseline_r2' in frame else \
+        pd.Series(np.nan, index=frame.index)
+    table = pd.DataFrame({
+        'Dataset': [C.dataset_label(d).split(' (')[0] for d in frame['dataset']],
+        'Model': [C.model_label(m) for m in frame['model']],
+        'Representation': [C.rep_label(r) for r in frame['rep']],
+        'Condition': [C.condition_label(c) for c in frame['condition']],
+        'Replicate': [int(r) for r in frame['replicate']],
+        'Reason': list(frame['reason']),
+        'Clean R²': [f'{v:.3f}' if np.isfinite(v) else MISSING_CELL
+                     for v in clean]})
+    out = write(table, output_dir, 'T16_excluded',
+                f'Every replicate (QM9) or scaffold fold (assay datasets) left '
+                f'out of the robustness analysis, with the reason. The gate is '
+                f'a clean R2 below {C.BASELINE_THRESHOLD:g}.')
+    _rows_only(output_dir, 'T16_excluded')
+    return out
+
+
+# ---------------------------------------------------------------------------
+# T17 -- the variant models on the assay datasets, beside F8
+# ---------------------------------------------------------------------------
+
+#: The conditions F8 draws: the ones run on every model.
+T17_CONDITIONS = ('gaussian', 'grouped_wider', 'grouped_shifted')
+
+
+def t17_variant_models_assay(summary, output_dir, rep='ecfp4'):
+    """F8 shows the 13 base models; this is the same grid for the six variant
+    models, as numbers. One row is one variant model on one assay dataset:
+    clean R2, then AUC_norm under each condition run on every model, each the
+    median over scaffold folds. The Tanimoto process left the study and is
+    not listed."""
+    if summary is None or not len(summary):
+        return None
+    variants = [m for m in C.VARIANT_MODELS if m != 'gauche']
+    frame = summary[(summary['rep'] == rep)
+                    & summary['model'].isin(variants)
+                    & (summary['dataset'] != 'qm9')]
+    if not len(frame):
+        return None
+    rows = []
+    for dataset in [d for d in C.DATASET_ORDER if d in set(frame['dataset'])]:
+        here = frame[frame['dataset'] == dataset]
+        for model in C.sort_models(here['model'].unique()):
+            one = here[here['model'] == model].set_index('condition')
+            clean = (one.loc['gaussian', 'baseline_r2']
+                     if 'gaussian' in one.index else np.nan)
+            row = {'Dataset': C.dataset_label(dataset),
+                   'Model': C.model_label(model),
+                   'Clean R²': (f'{clean:.3f}' if np.isfinite(clean)
+                                else MISSING_CELL)}
+            for condition in T17_CONDITIONS:
+                value = (one.loc[condition, 'auc_norm']
+                         if condition in one.index else np.nan)
+                row[C.condition_label(condition)] = (
+                    f'{value:.3f}' if np.isfinite(value) else MISSING_CELL)
+            rows.append(row)
+    return write(pd.DataFrame(rows), output_dir,
+                 f'T17_variant_models_assay_{rep}',
+                 f'The six variant models on the three assay datasets, '
+                 f'{C.rep_label(rep)}: clean R2, then AUC_norm under each noise '
+                 f'condition run on every model. Medians over five scaffold '
+                 f'folds.')
+
+
+# ---------------------------------------------------------------------------
 # T9 -- mean predicted uncertainty against the noise level
 # ---------------------------------------------------------------------------
 
@@ -994,13 +1082,17 @@ T11_CONDITIONS = ('gaussian', 'grouped_wider', 'grouped_shifted')
 
 def t11_counterparts(changes, output_dir, dataset,
                      conditions=T11_CONDITIONS):
-    """One row per pair and condition, one column per representation.
+    """Two rows per pair and condition, one column per representation.
 
-    Each cell is the change in AUC_norm, then the change in clean R2 in
-    brackets, counterpart minus base, the median of the paired differences.
-    † marks a change in AUC_norm with the same sign in every replicate (QM9) or
-    scaffold fold (assay). The Settings column says whether the two members run
-    at one setting.
+    ONE NUMBER PER CELL (the author, 2026-09-29). The first row of each pair
+    is the change in AUC_norm, the second the change in clean R2, both
+    counterpart minus base, the median of the paired differences. The clean
+    change is repeated under every condition because it is not always the same
+    fit: on the assay datasets some pairs have their own clean run per
+    condition, and the change differs by up to 0.14 between them. † marks an
+    AUC_norm change with the same sign in every replicate (QM9) or scaffold
+    fold (assay). The Settings column says whether the two members run at one
+    setting.
     """
     if changes is None or not len(changes):
         return None
@@ -1011,30 +1103,35 @@ def t11_counterparts(changes, output_dir, dataset,
     rows = []
     for (base, variant, condition), group in frame.groupby(
             ['base', 'variant', 'condition'], sort=False):
-        row = {'Comparison': f'{C.model_label(base)} → {C.model_label(variant)}',
-               'Settings': 'shared' if group['matched'].any() else 'differ',
-               'Condition': C.condition_label(condition)}
+        head = {'Comparison': f'{C.model_label(base)} → {C.model_label(variant)}',
+                'Settings': 'shared' if group['matched'].any() else 'differ',
+                'Condition': C.condition_label(condition)}
+        robust = dict(head, Change='AUC_norm')
+        clean = dict(head, Change='Clean R²')
         for _, r in group.iterrows():
             n = r['n_pairs']
             same = n and (r['higher_in'] == n or r['lower_in'] == n)
-            row[C.rep_label(r['rep'])] = (
-                f'{r["auc_norm_change"]:+.3f}{"†" if same else ""} '
-                f'({r["clean_r2_change"]:+.3f})')
-        rows.append(row)
+            robust[C.rep_label(r['rep'])] = (
+                f'{r["auc_norm_change"]:+.3f}{"†" if same else ""}')
+            clean[C.rep_label(r['rep'])] = f'{r["clean_r2_change"]:+.3f}'
+        rows.extend([robust, clean])
     table = pd.DataFrame(rows)
     reps = [C.rep_label(r) for r in C.REP_LABELS
             if C.rep_label(r) in table.columns]
-    table = table[['Comparison', 'Settings', 'Condition'] + reps]
+    table = table[['Comparison', 'Settings', 'Condition', 'Change'] + reps]
     unit = ('ten replicates' if dataset == 'qm9'
             else 'five scaffold folds')
-    return write(table, output_dir, f'T11_counterparts_{dataset}',
-                 f'{C.dataset_label(dataset)}: what replacing a model with its '
-                 f'own probabilistic counterpart changes. Each cell is the '
-                 f'change in AUC_norm, then the change in clean R2 in '
-                 f'brackets, counterpart minus base, the median of the paired '
-                 f'differences over {unit}. † marks an AUC_norm change with the '
-                 f'same sign in every one. One column per representation and '
-                 f'no averaging across them.')
+    name = f'T11_counterparts_{dataset}'
+    out = write(table, output_dir, name,
+                f'{C.dataset_label(dataset)}: what replacing a model with its '
+                f'own probabilistic counterpart changes. Two rows per pair and '
+                f'condition: the change in AUC_norm, then the change in clean '
+                f'R2, counterpart minus base, the median of the paired '
+                f'differences over {unit}. † marks an AUC_norm change with the '
+                f'same sign in every one. One column per representation and '
+                f'no averaging across them.')
+    _rows_only(output_dir, name)
+    return out
 
 
 # ---------------------------------------------------------------------------

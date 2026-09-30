@@ -1,0 +1,22 @@
+% Supplementary item: counterparts_caco2
+% Made 2026-09-30: the caco2 version of the paper's counterparts table, one number per cell.
+% The numbers come from scripts/run_paper_analysis.py (figlib_tables.t11_counterparts).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{llllcccccc}
+\caption{\textbf{\SuppFile{} Caco-2: what replacing a model with its own probabilistic counterpart changes.}
+Two rows per pair and noise condition, one column per representation: the change in \aucnorm{}, then the change in clean $R^2$, both counterpart minus base, the median of the paired differences over five scaffold folds. $\dagger$ marks an \aucnorm{} change with the same sign in all five. ``Settings'' says whether the two models share one setting.}
+\label{supp:counterparts_caco2}\\
+\toprule
+\textbf{Comparison} & \textbf{Settings} & \textbf{Condition} & \textbf{Change} & \textbf{ECFP4} & \textbf{PDV} & \textbf{MHG-GNN} & \textbf{Avalon} & \textbf{ChemBERTa} & \textbf{Sort \& Slice} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Comparison} & \textbf{Settings} & \textbf{Condition} & \textbf{Change} & \textbf{ECFP4} & \textbf{PDV} & \textbf{MHG-GNN} & \textbf{Avalon} & \textbf{ChemBERTa} & \textbf{Sort \& Slice} \\
+\midrule
+\endhead
+\input{results/decisions_arc/f/tables_relabelled_2026-09-30/T11_counterparts_caco2_rows.tex}
+\bottomrule
+\end{longtable}}

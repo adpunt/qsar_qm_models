@@ -1,26 +1,22 @@
 % Supplementary item: excluded_configurations
-% Split out of additional_files.tex on 2026-09-27, where it was Additional file 5 (Excluded configurations (was Supp Table S2)).
-% Content unchanged apart from: the heading line removed (the build writes it), the old
-% 'Table S*/Figure S*' caption prefix replaced by \SuppFile{}, and the label renamed to supp:excluded_configurations.
+% Rewritten 2026-09-30 from the current study; the earlier version listed the old R2 <= 0.6 gate and the retired representations.
+% The numbers come from scripts/run_paper_analysis.py (figlib_tables.t16_excluded).
+% Edit the caption here; never edit the \input file.
 % Rules: supplementary/README.md.
 
-\begin{table}[H]
-\centering
-\caption{\textbf{\SuppFile{} Configurations excluded from robustness analysis due to baseline R$^2 \leq 0.6$ on the QM9 HOMO--LUMO gap, summarized by model and representation.}
-Each cell shows the number of noise strategies (out of 6) for which the configuration was excluded.}
-\label{supp:excluded_configurations}
-\small
-\begin{tabular}{lcccc}
+{\scriptsize
+\begin{longtable}{llllcll}
+\caption{\textbf{\SuppFile{} Scaffold folds excluded from the robustness analysis.}
+One row is one model on one representation under one noise condition, in one scaffold fold, that has no \aucnorm{}. Every exclusion is a clean $R^2$ below 0.3, the gate below which a ratio to the clean baseline is unstable; its clean $R^2$ is given. All excluded folds are on the three assay datasets: no QM9 replicate fell below the gate.}
+\label{supp:excluded_configurations}\\
 \toprule
-\textbf{Model} & \textbf{Mol2Vec} & \textbf{MHGGNN} & \textbf{SMILES} & \textbf{Rand.~SMILES} \\
+\textbf{Dataset} & \textbf{Model} & \textbf{Representation} & \textbf{Condition} & \textbf{Fold} & \textbf{Reason} & \textbf{Clean $R^2$} \\
 \midrule
-BNN-$\alpha$ & 6 & 6 & --- & --- \\
-BNN-$\beta$ & 6 & 6 & --- & --- \\
-VBLL-$\alpha$ & 6 & 6 & --- & --- \\
-VBLL-$\beta$ & 6 & 6 & --- & --- \\
-RF & --- & --- & --- & 4 \\
-QRF & --- & --- & --- & 4 \\
-NGBoost & --- & --- & 6 & 4 \\
+\endfirsthead
+\toprule
+\textbf{Dataset} & \textbf{Model} & \textbf{Representation} & \textbf{Condition} & \textbf{Fold} & \textbf{Reason} & \textbf{Clean $R^2$} \\
+\midrule
+\endhead
+\input{results/decisions_arc/f/tables_relabelled_2026-09-30/T16_excluded_rows.tex}
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}}

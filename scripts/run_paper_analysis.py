@@ -264,6 +264,14 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     if len(assay_summary):
         tables['auc_norm_assay'] = G.with_components(assay_summary,
                                                      'auc_norm_assay')
+    # A REPLICATE THAT WAS SCORED IS NOT EXCLUDED. On the 29 Sep harvest all
+    # 210 QM9 rows here (RF at 300 trees under the grouped conditions, the
+    # heteroscedastic VBLL-beta under the three distributions) were a second
+    # copy of a noisy ladder with no clean row, sitting beside the full
+    # ladder that was scored -- so the Additional file listed replicates the
+    # figures use. Dropped here, and counted, so the list says what is missing.
+    qm9_excluded = _drop_scored(qm9_excluded, qm9_per, 'QM9')
+    assay_excluded = _drop_scored(assay_excluded, assay_per, 'assay')
     for name, frame in (('excluded_qm9', qm9_excluded),
                         ('excluded_assay', assay_excluded)):
         if len(frame):
@@ -709,6 +717,28 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
     return drawn
 
 
+def _drop_scored(excluded, per_replicate, where):
+    """Exclusion records whose replicate also has an AUC_norm, removed."""
+    if excluded is None or not len(excluded) or per_replicate is None \
+            or not len(per_replicate):
+        return excluded
+    keys = ['dataset', 'model', 'rep', 'condition']
+
+    def key_frame(frame):
+        out = frame[keys].astype(str)
+        out['replicate'] = [str(int(float(r))) for r in frame['replicate']]
+        return out.apply(tuple, axis=1)
+
+    scored = set(key_frame(per_replicate))
+    keep = ~key_frame(excluded).isin(scored)
+    dropped = int((~keep).sum())
+    if dropped:
+        print(f'  {where}: {dropped} exclusion record(s) dropped -- the same '
+              f'replicate also has an AUC_norm, from a full ladder beside a '
+              f'duplicate one with no clean level.')
+    return excluded[keep.to_numpy()]
+
+
 def build_tables(args, tables, verdicts):
     """The paper's seven tables, as CSV and as LaTeX fragments."""
     out = Path(args.output_dir) / 'tables'
@@ -750,6 +780,10 @@ def build_tables(args, tables, verdicts):
     # tab:assay_shape and tab:leaders, typed into paper.tex by hand until
     # 2026-09-30. ECFP4 is where the distributions ran on all three datasets.
     built.append(TAB.t14_noise_distributions(assay, out, rep='ecfp4'))
+    # The Additional files the Methods and F8 cite (2026-09-30).
+    built.append(TAB.t16_excluded(tables.get('excluded_qm9'),
+                                  tables.get('excluded_assay'), out))
+    built.append(TAB.t17_variant_models_assay(assay, out, rep='ecfp4'))
     ladders = {'qm9': tables.get('r2_by_level')}
     ladders.update({d: tables.get(f'r2_by_level_{d}')
                     for d in C.DATASET_ORDER[1:]})
