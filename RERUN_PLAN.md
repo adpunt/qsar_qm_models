@@ -16083,6 +16083,137 @@ cd $QSAR && bash scripts/pull_safely.sh && sbatch slurm_scripts_analysis/run_pap
 
 ---
 
+#### 13.26 addendum, 2026-09-25 — paper text polish
+
+- The Results, Conclusion and Abstract were rewritten for tone in `PAPER_REVISION_GUIDE_FINAL.md`, section
+  "POLISHED TEXT, 2026-09-25". M6 Performance metrics was rewritten in place. Every Results number was
+  recomputed against `results/decisions_arc/`; corrections are listed under each block.
+- Open, needs the analysis re-run: T3 clean-label row, T3b, F2b, T9, T11, T12, R17b, R17c do not exist;
+  F4a (seven models drawn, eight after regen) and R19 (four rows drawn, seven after regen) predate fixes.
+- Open, author decisions: Gaussian replicate spread as the yardstick (none of 78 grouped-shifted losses
+  clears the larger of the two spreads); Additional files 2–4 are NDS redundancy tables the current ANOVA
+  does not use; Additional file 5's caption says R² ≤ 0.6, the gate is 0.3; T4's GP clean R² (0.8386)
+  disagrees with `auc_norm_qm9.csv` (0.8418).
+
+#### 13.26 addendum, 2026-09-27 — the analysis log filled with SMILES parse errors
+
+- The scaffold-share statistic (q7) handed the laboratory files' row numbers (`mol_idx`) to RDKit as SMILES.
+  Every parse failed with one error line each, from eight workers at once, and the statistic was NaN anyway.
+  Fixed in `scripts/uncertainty_stats.py`: row numbers are refused with a reason, RDKit logging is off, and
+  each distinct SMILES is parsed once.
+- Open: q7 is not computed on the three assay datasets. The laboratory writer records no SMILES, so the
+  scaffolds would have to be looked up from `mol_idx` in each dataset. QM9 files carry SMILES and are unaffected.
+
+#### 13.26 addendum, 2026-09-29 — paper TODOs against the 29 Sep harvest
+
+- Now exist: T3 clean row, T3b, F2b, T9, T11, T12, R17b, R17c. The paper's pasted T3 and T4 fragments
+  and the variance paragraph's numbers predate the family ANOVA and do not match the new tables.
+- FOUND 2026-09-29: the four networks moved to a shared setting on 21 Sep (85bc2dc) were re-run under the
+  grouped conditions too, but those files kept their OLD-setting clean row (level 0 is only copied, never
+  run, outside Gaussian). `copy_zero_rows.py` accepted it because it matched the old Gaussian block; the
+  loader drops old Gaussian rows but keeps a clean row with no newer copy. So grouped-condition AUC_norm for
+  dnn, mlp, dnn_bnn_full, mlp_bnn_full divides new-setting curves by an old-setting clean R² (NN-alpha
+  ECFP4: 0.842 old against 0.794 new). Fix: refresh a clean row whose spec_hash is not the newest; the test
+  (state 5 in test_copy_zero_rows.py) is written, the script edit is pending the author. GP and GP (het.)
+  differ by less (0.006, 0.032) and come from duplicate clean runs, a separate question.
+- ~~Open: F2b's whiskers and T3b's brackets disagree~~ FIXED 2026-09-29: `grouped_bars` drew the interval's
+  WIDTH on both sides of the bar. It now draws from `_lo` to `_hi` (F2, F2b, F2c); the brackets were right.
+  The F2/F2b captions said "jackknife"; they now say bootstrap.
+- ADDED 2026-09-29 (the author): the ANOVA per noise condition on logD, Caco-2 and hERG K_i
+  (`anova_eta2_assay.csv`, `T3_variance_decomposition_<dataset>`), kept apart from QM9 so F2, D4 and the QM9
+  T3 are unchanged. New T3c_three_outcomes_<dataset>: her layout, one row per term, columns clean R², R² at
+  the reporting level under Gaussian, AUC_norm under Gaussian, no intervals. New F2c: QM9, those three
+  groups of bars with bootstrap whiskers. Needs one analysis run on the cluster.
+- Still missing for the paper: RF (300 trees) under the grouped conditions on QM9 (no clean run);
+  the variance-head comparison, whose two sides still run at different settings.
+
+#### 13.26 addendum, 2026-09-30 — the fixed harvest landed
+
+- `results/decisions_arc/` (copied 2026-09-29 17:57) is the run after `copy_zero_rows.py` at 292bb88: the four
+  networks have one clean R² per replicate under every condition, and RF (300 trees) has its grouped rows.
+  paper.tex T3, T4 and T11 are re-pasted from it. What moved: grouped-shifted now lowers AUC_norm for every
+  base model on every representation; on QM9 BNN-beta no longer gains robustness over NN-beta and BNN-alpha
+  no longer loses clean R2 consistently; QRF is 0.01-0.02 less robust than RF (300 trees) under grouped-shifted.
+- The cluster also holds a later `results/decisions/` (DECISIONS.md 19:46, job 13166074); not compared.
+
+#### 13.26 addendum, 2026-09-30 (later) — one number per cell, and the tables the paper typed by hand
+
+- `results/decisions_arc/f/` (23:01) against `results/decisions_arc/` (17:57): every table and CSV the two share
+  is byte-identical. `f/` adds the assay ANOVA, T3 per assay dataset, T3c and F2c, and redraws F2 and F2b with
+  the fixed whiskers. Nothing paper.tex quotes moved.
+- adf980c: T3 and T3b print the share alone; T3i holds every interval (Additional file 12,
+  `supplementary/items/variance_intervals.tex`). Labels now "Replicate", "Predictive performance", the level
+  named, and `\aucnorm`. T14 writes tab:assay_shape, T15 writes tab:leaders; both reproduce paper.tex exactly.
+  Regenerated locally from the `f/` CSVs into `results/decisions_arc/f/tables_relabelled_2026-09-30/`.
+- Open, the author's: whether T3b and F2b move to an Additional file; whether T8 becomes one; Caco-2 is at
+  0.75 in its variance table and at 1.0 in tab:leaders; the Additional file numbering (12 is next-free, not
+  citation order; paper.tex cites excluded configurations as 5 where INDEX.md says 2).
+- af1e600 (same day): Additional files renumbered 1-9 by first citation; the earlier-study files are dropped
+  from the paper (rows kept). T16 excluded folds, T17 variant models on the assay datasets, T11 one number per
+  cell. The 210 QM9 "no clean level" exclusions were duplicates of scored replicates and are now dropped by
+  `_drop_scored`; where the duplicate noisy ladder comes from is not checked (needs the raw QM9 files).
+- Abstract and Conclusion corrected: representation and model family are comparable for predictive
+  performance on QM9 only; representation reaches 11.2% of AUC_norm (logD, grouped-shifted).
+
+#### 13.26 addendum, 2026-10-05 — the 4 October paper edits were REVERTED; four changes kept
+
+**Reverted in full on the author's instruction (2026-10-05).** Every paper.tex edit made on 4 October is gone:
+the caption audit (all 28 captions shortened), the assay grouped-shifted paragraph, the cross-dataset ranks
+paragraph, the RF-against-QRF paragraph, the Bayesian-transformation paragraph, the uncertainty-rise
+exceptions, the clipped-labels paragraph, and the deletion of the "different noise conditions" sentence.
+The author's words: those items "were meant to be a discussion", not edits. paper.tex was rebuilt from
+`paper.tex.before_todo_followup_2026-10-04` with only the four changes below re-applied. States on disk:
+`paper.tex.before_todo_followup_2026-10-04` (pre-4-Oct), `paper.tex.before_oct4_revert_2026-10-05`
+(everything, just before the revert).
+
+**Kept, all from 5 October and all authorised item by item.**
+1. *Censoring.* `tab:robustness` loses its Censoring, Student-t, Outlier and Laplace columns — 39 of the 52
+   cells in them were dashes. New `tab:censoring`, five pairs, with clean R2 and the Gaussian value beside
+   each. `scripts/figlib_figures.py` r19_deep_conditions now drops the censoring column (19 of 24 cells were
+   grey, and the whole column on ChemBERTa, which no censoring pair uses). **The figure on disk is still the
+   old one — it needs a re-run.** A TODO above the new table says what to check afterwards.
+2. *The interaction term*, four places: the decomposition paragraph (its "slightly more influential" and "on
+   par with the residual" sentences replaced — 19.9% against 8.1%, intervals 17.6-27.8 against 6.0-11.2,
+   non-overlapping), the model-by-model paragraph (NN-beta spans 0.069 of AUC_norm across representations
+   against a 0.041 replicate spread; NGBoost 0.015 against 0.023), the clean-labels paragraph (all four
+   datasets; hERG Ki is 13.0% against 0.8%), and one sentence in the Conclusion.
+3. *A Methods paragraph on measuring noise in your own data*: Z'-factor from assay controls (Zhang1999),
+   plate-effect detection (Caraus2015), confident learning from out-of-fold predictions (Northcutt2021), the
+   predictive limit (Kolmar2021, Crusius2024), and dataset provenance as the fallback. All five keys were
+   already in citations.bib and none was cited in the paper before.
+4. *Four paragraphs on where models drop off*, plus `fig:curves_all` = F8c_curves_every_dataset_ecfp4.png,
+   which existed in the harvest but was in no paper float. Staged to `overleaf_figures_upload/`; **still to be
+   uploaded to Overleaf.** Nothing separates below a noise level of 0.5. LightGBM falls first on Caco-2 and
+   hERG Ki, NGBoost is flattest, VBLL-alpha falls first on logD and is flattest on Caco-2 and hERG Ki.
+
+**Open, the author's.** Whether `tab:counterparts` (QM9) moves to Additional file 9; whether
+`tab:uncertainty_rise` stays at all (it exists only at level 1.5 and prints ranges); the Scientific
+contribution says model "rather than molecular representation", true of the main effects only.
+
+**Checked and still true, not written into the paper.** VBLL-alpha (het.) has Laplace, Student-t and outlier
+results on QM9 only, none on any assay dataset, though it is in `deep_run_pairs.json` — probably the
+2026-09-10 widening, where tasks that already skipped stay skipped; not verified on the cluster. hERG Ki has
+four censoring pairs, not five. Folds with clean R2 below 0.3 and so no AUC_norm: Caco-2 BNN-alpha with
+ChemBERTa and MHG-GNN and VBLL-alpha with MHG-GNN and ChemBERTa; hERG BNN-alpha and BNN-beta with ChemBERTa.
+Her sentence "the order has changed, most of all on Caco-2 and hERG Ki" is wrong — it changes most on hERG Ki,
+then QM9. Her closing sentence in that paragraph still points at the leaders table she removed. Model order
+on QM9 resembles logD, and Caco-2 resembles hERG Ki, with every representation but ChemBERTa; the two pairs
+do not resemble each other.
+
+#### 13.26 addendum, 2026-10-08 — figure and table layout pass (`a3f20e0`)
+
+**Done, pushed.** R19 has no censoring column. F8 writes one file, `F8_assay_datasets.png`, with the three
+assay datasets side by side, in place of three stacked files. Generated tables set any header over 12
+printed characters on two lines. T3 and T3b drop "η² (%)" from their headers.
+
+**Open, the author's to decide.** Whether the model-within-family term is shown. It is 0.3–1.0% in every
+QM9 decomposition (Table 2), and 2–15% on the assay datasets by subtraction from Tables 7–9 and Table 10.
+Whether the variance-head networks leave the counterpart comparison. They run at the shared default
+(`dnn_bnn_full_mve` and `mlp_bnn_full_mve` have no key in `results/master_tuned_hyperparameters.json`),
+while their Bayesian bases run tuned. Which floats move to Additional files, and what Table 11 is for.
+
+**Not verified on the cluster.** The VBLL-alpha (het.) assay depth-run gap, carried from the addendum above.
+
 ### 13.27 THE COMMAND SHEET — what failed, what gets deleted, what gets resubmitted
 
 **Opened 2026-09-07** on the author's instruction: *"All I care about is getting all the
