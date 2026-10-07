@@ -83,7 +83,7 @@ MAX_COLUMNS_ACROSS = 14
 
 
 def panel_layout(n_panels, n_rows, n_columns_each, name,
-                 longest_label=0):
+                 longest_label=0, label_angle=35):
     """Stacked, side by side, or one file each -- decided, not guessed.
 
     The old script stacks panels vertically every time, and says why in three
@@ -115,7 +115,10 @@ def panel_layout(n_panels, n_rows, n_columns_each, name,
     per_column = 170 / across if across else 170
     # An 8-point character is about 1.6 mm wide; rotated 35 degrees a label of
     # `longest_label` characters sweeps this far sideways.
-    needed = max(12.0, longest_label * 1.6 * 0.82)
+    # `label_angle` is the bottom labels' rotation in degrees: 0 needs the
+    # label's whole length, 90 needs none of it, only the 12 mm floor.
+    needed = max(12.0, longest_label * 1.6
+                 * abs(np.cos(np.radians(label_angle))))
     if across <= MAX_COLUMNS_ACROSS and per_column >= needed:
         print(f'    {name}: {n_panels} stacked panels of {n_rows} rows is '
               f'{stacked * 25.4:.0f} mm, past the '
@@ -1085,10 +1088,17 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
     # journal allows 225 mm, so past that it becomes one figure per dataset.
     # An unreadable single figure is worth less than three readable ones and the
     # journal caps neither.
-    longest = max([len('Clean R²')]
-                  + [len(C.condition_label(c)) for c in conditions])
+    # VERTICAL LABELS, SO THE THREE GRIDS SIT SIDE BY SIDE. Labels at 35
+    # degrees made "Grouped, shifted" too wide for side by side, so the
+    # datasets went into three files and the manuscript stacked them: one
+    # figure taller than the page (the author, 2026-10-08: "too long for the
+    # page"). A vertical label costs height, not width; two-line level labels
+    # were tried and ran into each other at 9 mm a column.
+    def column_name(c):
+        return 'Clean R²' if c == 'clean' else C.condition_label(c)
+    longest = max(len(column_name(c)) for c in ['clean'] + list(conditions))
     layout = panel_layout(len(datasets), len(models), len(conditions) + 1, 'F8',
-                          longest_label=longest)
+                          longest_label=longest, label_angle=90)
     written = []
     panels = [[d] for d in datasets] if layout == 'split' else [datasets]
     for group in panels:
@@ -1110,9 +1120,8 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
             image, _ = S.grid(ax, both, 'model', 'condition', value,
                               row_order=models, separate_first_column=True,
                               column_order=['clean'] + conditions,
-                              column_labeller=lambda c: (
-                                  'Clean R²' if c == 'clean'
-                                  else C.condition_label(c)),
+                              column_labeller=column_name,
+                              label_rotation=90,
                               vmin=lo, vmax=hi,
                               excluded=_excluded_keys(
                                   excluded, ('model', 'condition'),
@@ -1129,6 +1138,10 @@ def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
             # in the caption, not repeated on every panel.
             S.title(ax, 'abc'[datasets.index(dataset)],
                     C.dataset_label(dataset))
+            if layout == 'across' and index:
+                # Side by side the rows are the same models in the same order;
+                # their names are printed once, on the first grid.
+                ax.tick_params(labelleft=False)
         if image is not None:
             bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
             bar.set_label(G.metric_label(value), fontsize=8)
@@ -2397,8 +2410,14 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
     # everything that ran. This grid is the deep run's own roster, named in
     # deep_run_pairs.json, not a cross-model ranking (the author, 2026-09-23).
     frame = summary[summary['dataset'] == dataset]
+    # CENSORING IS NOT A COLUMN HERE (the author, 2026-10-05). It ran on five
+    # named pairs, so on a grid of eight models by three representations its
+    # column was grey in 19 of 24 cells -- and on ChemBERTa, which no censoring
+    # pair uses, the whole column was grey. It is a table of its own in the
+    # manuscript (tab:censoring) instead.
     show = ['gaussian'] + [c for c in C.sort_conditions(conditions)
-                           if c != 'gaussian']
+                           if c != 'gaussian'
+                           and not str(c).startswith('censoring')]
     frame = frame[frame['condition'].isin(show)]
     if not len(frame):
         return None
@@ -2453,11 +2472,9 @@ def r19_deep_conditions(summary, output_dir, conditions, dataset='qm9',
         column, as the reference the rest are read against. Every value is the
         median over replicates. These conditions are absent from the main
         robustness grid because their column there would be mostly empty by
-        design, not because anything is still running. Censoring is here rather
-        than on the curves because its level is a fraction of labels clipped
-        rather than a fraction of the label spread, so it shares no bottom axis
-        with the others; a grey square marked "not run" is a pair it was never
-        given.""")
+        design, not because anything is still running. Censoring is not a
+        column here: it ran on five named pairs, so its column was grey in
+        almost every cell. It is a table of its own.""")
     return S.save(fig, Path(output_dir) / f'R19_deep_conditions_{dataset}.png')
 
 

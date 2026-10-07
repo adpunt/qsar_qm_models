@@ -338,7 +338,7 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
          column_labeller=None, fmt='{:.2f}', vmin=None, vmax=None,
          cmap='viridis', separate_first_column=False, row_order=None,
          column_order=None, never_run='not run', annotate=True,
-         excluded=None, excluded_label='excluded'):
+         excluded=None, excluded_label='excluded', label_rotation=35):
     """A square per combination, the number printed on it.
 
     `vmin` and `vmax` are REQUIRED in practice: pass the fixed anchor for the
@@ -442,8 +442,12 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
                         color='#111111' if light else '#FFFFFF')
 
     ax.set_xticks(range(data.shape[1]))
+    # `label_rotation=90` sets each label upright under its own column, which
+    # is what lets three grids share one page width (F8).
     ax.set_xticklabels([column_labeller(c) for c in table.columns],
-                       rotation=35, ha='right', fontsize=8)
+                       rotation=label_rotation,
+                       ha='center' if label_rotation in (0, 90) else 'right',
+                       fontsize=8)
     ax.set_yticks(range(data.shape[0]))
     ax.set_yticklabels([row_labeller(r) for r in table.index], fontsize=8)
     ax.tick_params(length=0)

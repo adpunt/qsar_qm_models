@@ -125,7 +125,8 @@ def check_latex_safe():
         'hERG Kᵢ': 'hERG K$_i$',
         # Already math: returned character for character.
         'Student-$t$ ($\\nu$=5)': 'Student-$t$ ($\\nu$=5)',
-        'AUC$_{norm}$': 'AUC$_{norm}$',
+        # The paper's macro since 2026-09-30, not a spelling of it.
+        'AUC$_{norm}$': '\\aucnorm{}',
         '$\\eta^2$ model': '$\\eta^2$ model',
         'NN-α → BNN-α':
             'NN-$\\alpha$ $\\rightarrow$ BNN-$\\alpha$',
@@ -154,7 +155,7 @@ def check_write_round_trip():
     assert not problems, '\n'.join(problems)
     assert r'Sort \& Slice' in text, 'the ampersand was not escaped'
     assert r'Outlier (10\%)' in text, 'the percent was not escaped'
-    assert 'AUC$_{norm}$' in text, 'the deliberate math was mangled'
+    assert '\\aucnorm{}' in text, 'AUC_norm did not become the paper macro'
     print('  write: a frame with all four hazards produces a clean fragment')
 
 
@@ -205,11 +206,33 @@ def check_on_disk():
     print(f'  on disk: {len(fragments)} fragment(s), all compile-clean')
 
 
+def check_long_headers_wrap():
+    """A long header goes on two lines, never breaks inside math, and the
+    row still has as many fields as the tabular declares."""
+    T_ = T.two_line_header
+    assert T_('ECFP4') == 'ECFP4'
+    assert T_('Sort \\& Slice') == 'Sort \\& Slice', 'twelve characters wrapped'
+    got = T_('Replicate spread')
+    assert got.endswith('Replicate\\\\spread\\end{tabular}'), got
+    got = T_('Student-$t$ ($\\nu$=5)')
+    assert 'Student-$t$\\\\($\\nu$=5)' in got, got
+    assert T_('Representation') == 'Representation', 'no space, no break'
+    table = pd.DataFrame([{'Model within family': 'RF', 'Grouped, shifted': 0.9,
+                           'Replicate spread': '0.01'}])
+    with tempfile.TemporaryDirectory() as tmp:
+        T.write(table, tmp, 'TX_wrap', caption='long headers')
+        text = (Path(tmp) / 'TX_wrap.tex').read_text()
+    assert not audit(text, 'TX_wrap'), audit(text, 'TX_wrap')
+    assert text.count('\\begin{tabular}[b]') == 3, text
+    print('  long headers: two lines, broken outside math, rows still whole')
+
+
 def main():
     print(__doc__.split('\n')[0])
     check_latex_safe()
     check_write_round_trip()
     check_missing_cells_are_dashes()
+    check_long_headers_wrap()
     check_on_disk()
     print('OK')
     return 0

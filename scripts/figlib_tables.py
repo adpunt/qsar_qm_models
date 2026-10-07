@@ -123,10 +123,48 @@ def latex_safe(value):
     return ''.join(out).replace('$$', '')
 
 
+#: A header longer than this many printed characters is set on two lines.
+HEADER_WRAP_CHARS = 12
+
+
+def _printed_length(text):
+    """Roughly how many characters a LaTeX-safe header prints as: a math
+    segment counts as its letters, a backslash command as nothing."""
+    return len(re.sub(r'\\[A-Za-z]+|[{}$^_\\]', '', text))
+
+
+def two_line_header(text, first=False):
+    """A long column name on two lines, broken at the space nearest its middle.
+
+    Tables were running off the page on their headers alone: "Replicate
+    spread", "Grouped, shifted", "Model within family" each set on one line made
+    a column several times wider than the numbers under it (the author,
+    2026-10-08: "that should be two single-spaced lines"). A nested tabular
+    needs no package the journal class does not already load. Spaces inside
+    math are never break points.
+    """
+    if _printed_length(text) <= HEADER_WRAP_CHARS:
+        return text
+    spaces, depth = [], False
+    for i, character in enumerate(text):
+        if character == '$':
+            depth = not depth
+        elif character == ' ' and not depth:
+            spaces.append(i)
+    if not spaces:
+        return text
+    middle = _printed_length(text) / 2
+    cut = min(spaces, key=lambda i: abs(_printed_length(text[:i]) - middle))
+    align = 'l' if first else 'c'
+    return (f'\\begin{{tabular}}[b]{{@{{}}{align}@{{}}}}{text[:cut]}\\\\'
+            f'{text[cut + 1:]}\\end{{tabular}}')
+
+
 def latex_frame(table):
     """A copy of the frame with every cell and column name made LaTeX-safe."""
     out = table.copy()
-    out.columns = [latex_safe(c) for c in out.columns]
+    out.columns = [two_line_header(latex_safe(c), first=(i == 0))
+                   for i, c in enumerate(out.columns)]
     for column in out.columns:
         if out[column].dtype == object:
             out[column] = out[column].map(
@@ -278,9 +316,12 @@ def t3_variance(anova, output_dir, dataset='qm9', clean=None):
         row = {'Condition': ('None (clean labels)'
                              if r['condition'] == '__clean__'
                              else C.condition_label(r['condition'])),
-               'Outcome': _outcome_label(r, dataset)}
+               'Outcome': _short_outcome_label(r, dataset)}
         for column, label in ETA2_COLUMNS:
-            row[f'{label} η² (%)'] = _share_cell(r, column)
+            # The caption says the shares are percentages of the variance;
+            # repeating 'η² (%)' in six headers is what ran the table off
+            # the page (the author, 2026-10-08).
+            row[label] = _share_cell(r, column)
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, f'T3_variance_decomposition_{dataset}',
@@ -645,7 +686,10 @@ def t3b_variance_clean(anova_clean, output_dir):
     for _, r in anova_clean.iterrows():
         row = {'Dataset': C.dataset_label(r['dataset'])}
         for column, label in ETA2_COLUMNS:
-            row[f'{label} η² (%)'] = _share_cell(r, column)
+            # The caption says the shares are percentages of the variance;
+            # repeating 'η² (%)' in six headers is what ran the table off
+            # the page (the author, 2026-10-08).
+            row[label] = _share_cell(r, column)
         rows.append(row)
     table = pd.DataFrame(rows)
     return write(table, output_dir, 'T3b_variance_decomposition_clean',
@@ -693,6 +737,20 @@ def _outcome_label(r, dataset):
         return 'Robustness (AUC$_{norm}$)'
     if response == 'r2':
         return C.accuracy_outcome_label(dataset)
+    return str(r.get('outcome', response))
+
+
+def _short_outcome_label(r, dataset):
+    """The outcome as a column cell: what is measured, in four words or fewer.
+    The long form, with "Predictive performance" and "Robustness" spelled out,
+    set a second column wider than the six shares beside it."""
+    response = str(r.get('response', ''))
+    if r.get('condition') == '__clean__' or response == 'r2_clean':
+        return 'Clean R$^2$'
+    if response == 'auc_norm':
+        return 'AUC$_{norm}$'
+    if response == 'r2':
+        return f'R$^2$ at noise level {C.noise_level_text(C.reporting_level(dataset))}'
     return str(r.get('outcome', response))
 
 
