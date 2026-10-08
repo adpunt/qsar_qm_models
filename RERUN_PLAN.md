@@ -16214,6 +16214,22 @@ while their Bayesian bases run tuned. Which floats move to Additional files, and
 
 **Not verified on the cluster.** The VBLL-alpha (het.) assay depth-run gap, carried from the addendum above.
 
+#### 13.26 addendum, 2026-10-08 (later) — the author took every recommendation
+
+Figure 2 and Table 2 leave out model within family on QM9; it stays in the fit and on the assay
+datasets. F2d draws the three outcomes on all four datasets and replaces Tables 1 and 7–10 and
+Figure 12 in paper.tex. Table 3 moved to Additional file 7, Figure 14 and Table 11 to Additional
+file 9, Table 13 to a new Additional file 10. Table 12 gained two columns saying whether each model
+reports each component per molecule, as one value per fit, or not at all, read off `d8_support.csv`.
+The variance-head networks left R17b, R17c and T11. R17c draws only the four pairs that share one
+setting. Four floats carry a THESIS TRANSFER comment: Table 5, Figure 9, Table 6 and Figure 10.
+paper.tex backup: `paper.tex.before_figure_pass_2026-10-08`.
+
+**VBLL-alpha (het.) assay depth run: confirmed missing on the cluster, 2026-10-08.** No
+`vbll-full-hetero_*_3cond_stud_outl_lapl_*` directory exists, and every `vbll-full-hetero_*` results
+file has zero Laplace, Student-t and outlier rows. VBLL-beta (het.) has all nine directories.
+Resubmitted with the generator's `resubmit_selected.sh`, nine tasks.
+
 ### 13.27 THE COMMAND SHEET — what failed, what gets deleted, what gets resubmitted
 
 **Opened 2026-09-07** on the author's instruction: *"All I care about is getting all the

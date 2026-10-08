@@ -496,6 +496,8 @@ def draw_figures(args, tables, verdicts):
         drawn.append(FIG.f2b_clean_decomposition(anova_clean, out))
     if anova is not None and len(anova):
         drawn.append(FIG.f2c_three_outcomes(anova, anova_clean, out))
+        drawn.append(FIG.f2d_three_outcomes_every_dataset(
+            anova, tables.get('anova_eta2_assay'), anova_clean, out))
     if qm9 is not None and len(qm9) and conditions:
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
     if qm9 is not None and len(qm9):

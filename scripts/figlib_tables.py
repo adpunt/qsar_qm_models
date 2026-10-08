@@ -318,6 +318,11 @@ def t3_variance(anova, output_dir, dataset='qm9', clean=None):
                              else C.condition_label(r['condition'])),
                'Outcome': _short_outcome_label(r, dataset)}
         for column, label in ETA2_COLUMNS:
+            # Model within family is 0.3-1.0% in every QM9 decomposition and
+            # is not printed there; it stays in the fit (the author,
+            # 2026-10-08). On the assay datasets it reaches 15% and stays.
+            if dataset == 'qm9' and column == 'eta2_model_in_family':
+                continue
             # The caption says the shares are percentages of the variance;
             # repeating 'η² (%)' in six headers is what ran the table off
             # the page (the author, 2026-10-08).
@@ -359,12 +364,15 @@ def t4_robustness(summary, output_dir, rep, dataset='qm9'):
     table['Clean R²'] = baseline.reindex(wide.index).to_numpy()
     for condition in wide.columns:
         table[C.condition_label(condition)] = wide[condition].to_numpy()
-    return write(table, output_dir, f'T4_robustness_{dataset}_{rep}',
+    out = write(table, output_dir, f'T4_robustness_{dataset}_{rep}',
                  f'Robustness (AUC_norm) by model and noise condition on '
                  f'{C.dataset_label(dataset)}, {C.rep_label(rep)}. The first '
                  f'column is the clean accuracy each figure is a fraction of. '
                  f'There is deliberately no mean column: a mean across noise '
                  f'conditions describes none of them.')
+    # The QM9 ECFP4 table is an Additional file (the author, 2026-10-08).
+    _rows_only(output_dir, f'T4_robustness_{dataset}_{rep}')
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +540,7 @@ def t6_uncertainty(support, q4, q6, slopes, output_dir,
     if rep is not None:
         held.append(f'the {C.rep_label(C.canonical_rep(rep))} representation')
     where = f' on {" and ".join(held)}' if held else ''
-    return write(table, output_dir, name,
+    out = write(table, output_dir, name,
                  f'Uncertainty statistics per model and noise condition{where}. '
                  'The two support columns say whether each component varies per '
                  'molecule or is one number per fit; a component that does not '
@@ -543,6 +551,9 @@ def t6_uncertainty(support, q4, q6, slopes, output_dir,
                  'a median across conditions, because the two slopes reverse '
                  'sign under censoring and a median over the seven would '
                  'cancel that out.')
+    # An Additional file since 2026-10-08, as a longtable.
+    _rows_only(output_dir, name)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1156,6 +1167,10 @@ def t11_counterparts(changes, output_dir, dataset,
         return None
     frame = changes[(changes['dataset'] == dataset)
                     & changes['condition'].isin(conditions)]
+    # NO VARIANCE-HEAD PAIRS (the author, 2026-10-08). The variance-head
+    # networks run at the shared default and their Bayesian bases run tuned,
+    # so the change mixes the variance head with the setting.
+    frame = frame[~frame['variant'].astype(str).str.endswith('_mve')]
     if not len(frame):
         return None
     rows = []

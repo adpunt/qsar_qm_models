@@ -1,0 +1,25 @@
+% Supplementary item: uncertainty_statistics_qm9_pdv
+% Made 2026-10-08: tab:uncertainty, moved out of the main text. The caption is the paper's.
+% The numbers come from scripts/run_paper_analysis.py (figlib_tables.t6_uncertainty).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lcccccccccc}
+\caption{\textbf{\SuppFile{} Uncertainty statistics on the QM9 HOMO--LUMO gap with PDV, one row per model and noise condition run.}
+Support: per\_molecule, the component varies between molecules; constant, one value per fit; none, not reported. A slope is the change in mean predicted uncertainty, in label units, per unit of added noise; an em dash marks a constant component. $\rho$(uncertainty, error) is the rank correlation between a molecule's predicted uncertainty and its error. $\Delta$AUC is the change in how well the corrupted labels are ranked when the out-of-fold error is divided by the predicted uncertainty; it has no interval. Medians over the five inner scaffold folds, three for NGBoost.}
+\label{supp:uncertainty_statistics_qm9_pdv}\\
+\toprule
+\textbf{Model} & \textbf{Condition} & \textbf{Aleatoric} & \textbf{Epistemic} & $\boldsymbol{\rho}$ & \textbf{AUC,} & \textbf{AUC,} & $\boldsymbol{\Delta}$\textbf{AUC} & \textbf{Adds} & \textbf{Aleatoric} & \textbf{Epistemic} \\
+ & & \textbf{varies} & \textbf{varies} & \textbf{(unc., error)} & \textbf{error} & \textbf{error $\div$ unc.} & & \textbf{signal} & \textbf{slope} & \textbf{slope} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Model} & \textbf{Condition} & \textbf{Aleatoric} & \textbf{Epistemic} & $\boldsymbol{\rho}$ & \textbf{AUC,} & \textbf{AUC,} & $\boldsymbol{\Delta}$\textbf{AUC} & \textbf{Adds} & \textbf{Aleatoric} & \textbf{Epistemic} \\
+ & & \textbf{varies} & \textbf{varies} & \textbf{(unc., error)} & \textbf{error} & \textbf{error $\div$ unc.} & & \textbf{signal} & \textbf{slope} & \textbf{slope} \\
+\midrule
+\endhead
+\input{results/decisions_arc/f/tables/T6_uncertainty_rows.tex}
+\bottomrule
+\end{longtable}}

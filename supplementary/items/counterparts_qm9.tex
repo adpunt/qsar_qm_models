@@ -1,0 +1,22 @@
+% Supplementary item: counterparts_qm9
+% Made 2026-10-08: tab:counterparts, moved out of the main text beside the three assay versions.
+% The numbers come from scripts/run_paper_analysis.py (figlib_tables.t11_counterparts).
+% Edit the caption here; never edit the \input file.
+% Rules: supplementary/README.md.
+
+{\scriptsize
+\begin{longtable}{llllcccccc}
+\caption{\textbf{\SuppFile{} QM9 HOMO--LUMO gap: what replacing a model with its own probabilistic counterpart changes.}
+Two rows per pair and noise condition, one column per representation: the change in \aucnorm{}, then the change in clean $R^2$, both counterpart minus base, the median of the paired differences over 10 replicates. $\dagger$ marks an \aucnorm{} change with the same sign in all 10. ``Settings'' says whether the two models share one setting. The variance-head networks are not compared here: they run at default settings and their Bayesian bases at tuned ones.}
+\label{supp:counterparts_qm9}\\
+\toprule
+\textbf{Comparison} & \textbf{Settings} & \textbf{Condition} & \textbf{Change} & \textbf{ECFP4} & \textbf{PDV} & \textbf{MHG-GNN} & \textbf{Avalon} & \textbf{ChemBERTa} & \textbf{Sort \& Slice} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Comparison} & \textbf{Settings} & \textbf{Condition} & \textbf{Change} & \textbf{ECFP4} & \textbf{PDV} & \textbf{MHG-GNN} & \textbf{Avalon} & \textbf{ChemBERTa} & \textbf{Sort \& Slice} \\
+\midrule
+\endhead
+\input{results/decisions_arc/f/tables/T11_counterparts_qm9_rows.tex}
+\bottomrule
+\end{longtable}}

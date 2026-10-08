@@ -404,9 +404,15 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
     if not outcomes:
         return None
 
+    # MODEL WITHIN FAMILY IS NOT DRAWN ON QM9 (the author, 2026-10-08). It is
+    # 0.3-1.0% in every QM9 decomposition, a bar nobody can see. It stays in
+    # the fit, so every other share is unchanged, and it is drawn on the assay
+    # datasets, where it reaches 15%.
+    factors = [(c, l) for c, l in FACTOR_COLUMNS
+               if not (dataset == 'qm9' and c == 'eta2_model_in_family')]
     long = []
     for _, row in frame.iterrows():
-        for column, label in FACTOR_COLUMNS:
+        for column, label in factors:
             long.append({'condition': row['condition'], 'factor': label,
                          'outcome': row['outcome'],
                          'share': row.get(column, np.nan),
@@ -636,6 +642,71 @@ def f2c_three_outcomes(anova, anova_clean, output_dir, dataset='qm9'):
     name = ('F2c_three_outcomes.png' if dataset == 'qm9'
             else f'F2c_three_outcomes_{dataset}.png')
     return S.save(fig, Path(output_dir) / name)
+
+
+def f2d_three_outcomes_every_dataset(anova, anova_assay, anova_clean,
+                                     output_dir):
+    """F2c on all four datasets, one panel each: clean R2, R2 at the dataset's
+    reporting level under Gaussian noise, and AUC_norm under Gaussian noise.
+
+    Replaces seven floats that showed these shares one dataset or one outcome
+    at a time -- three tables, a QM9 table, F2c, F2b and T3b (the author,
+    2026-10-08). The numbers, with their intervals, are in T3i.
+    """
+    panels = []
+    for dataset in C.DATASET_ORDER:
+        source = anova if dataset == 'qm9' else anova_assay
+        if source is None or not len(source):
+            continue
+        if 'dataset' in source.columns and dataset != 'qm9':
+            source = source[source['dataset'] == dataset]
+        rows = three_outcome_rows(source, anova_clean, dataset)
+        if rows:
+            panels.append((dataset, rows))
+    if not panels:
+        return None
+    colours = {'Model family': C.ANOVA_FACTOR_COLORS['Model family'],
+               'Representation': C.ANOVA_FACTOR_COLORS['Representation'],
+               'Model × representation': C.ANOVA_FACTOR_COLORS['Interaction'],
+               'Replicate': C.ANOVA_FACTOR_COLORS['Replicate'],
+               'Residual': C.ANOVA_FACTOR_COLORS['Residual'],
+               'Model within family':
+                   C.ANOVA_FACTOR_COLORS['Model within family']}
+    ncols = 2
+    nrows = int(np.ceil(len(panels) / ncols))
+    fig, axes = _fig(height=2.7 * nrows + 0.4, nrows=nrows, ncols=ncols,
+                     sharey=True)
+    axes = np.atleast_1d(axes).ravel()
+    for index, (ax, (dataset, rows)) in enumerate(zip(axes, panels)):
+        long = pd.DataFrame([
+            {'outcome': group.replace(', Gaussian', ''), 'term': label,
+             'share': row.get(column, np.nan),
+             'lo': row.get(f'{column}_lo', np.nan),
+             'hi': row.get(f'{column}_hi', np.nan)}
+            for group, row in rows for column, label in THREE_OUTCOME_TERMS])
+        S.grouped_bars(ax, long, 'outcome', 'term', 'share', labeller=str,
+                       category_labeller=lambda g: g.replace(' at ', '\nat '),
+                       colours=colours, legend=False,
+                       categories=list(dict.fromkeys(long['outcome'])),
+                       clip=(0, 100), interval=('lo', 'hi'))
+        ax.set_ylim(0, 100)
+        if index % ncols == 0:
+            ax.set_ylabel('Share of variance (%)')
+        ax.set_xticklabels([t.get_text() for t in ax.get_xticklabels()],
+                           rotation=0, ha='center', fontsize=7)
+        S.title(ax, 'abcd'[index], C.dataset_label(dataset))
+    for ax in axes[len(panels):]:
+        ax.set_visible(False)
+    S.shared_legend(fig, axes[0], side=True)
+    caption('F2d', f"""
+        Share of the variance explained by each term of the analysis of
+        variance, on each dataset, for three outcomes: R$^2$ on clean labels,
+        R$^2$ at the dataset's reporting noise level under Gaussian noise, and
+        AUC$_{{norm}}$ under Gaussian noise. One bar is one term for one
+        outcome; the bars of one outcome sum to 100 per cent. The whiskers are
+        95% intervals from {C.ANOVA_BOOTSTRAP:,} bootstrap resamples of whole
+        replicates: 10 on QM9, five scaffold folds on each assay dataset.""")
+    return S.save(fig, Path(output_dir) / 'F2d_three_outcomes_every_dataset.png')
 
 
 # ---------------------------------------------------------------------------
@@ -2041,8 +2112,12 @@ def plt_rect(x, y, width, height):
 #: Gaussian process has no deterministic counterpart, so it has no panel -- a
 #: panel of one line is not a comparison.
 VARIANT_FAMILIES = [
-    ('NN-α family', ['dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve']),
-    ('NN-β family', ['mlp', 'mlp_bnn_full', 'mlp_bnn_full_mve']),
+    # NO VARIANCE-HEAD NETWORKS (the author, 2026-10-08). They run at the
+    # shared default while their Bayesian bases run tuned, so a line for one
+    # beside its base shows the variance head and the setting at once. They
+    # stay in the uncertainty figures, which is what they were added for.
+    ('NN-α family', ['dnn', 'dnn_bnn_full']),
+    ('NN-β family', ['mlp', 'mlp_bnn_full']),
     # rf300 is the plain forest at qrf's 300 trees; rf (100 trees) is drawn
     # only for a harvest that has no rf300 (see _family_members).
     ('Forests', ['rf300', 'rf', 'qrf']),
@@ -2213,10 +2288,14 @@ def r17b_variant_families_every_dataset(accuracies, output_dir, rep,
 
 
 #: The pairs R17c draws, top to bottom. A pair with no rows is skipped.
+#: ONLY THE PAIRS THAT SHARE ONE SETTING (the author, 2026-10-08), so a dot is
+#: the probabilistic machinery and nothing else. rf at 100 trees and the two
+#: variance-head networks differ in their settings as well; they are in the
+#: counterpart tables in the Additional files with a Settings column.
 R17C_PAIRS = [
-    ('rf300', 'qrf'), ('rf', 'qrf'),
-    ('dnn', 'dnn_bnn_full'), ('dnn_bnn_full', 'dnn_bnn_full_mve'),
-    ('mlp', 'mlp_bnn_full'), ('mlp_bnn_full', 'mlp_bnn_full_mve'),
+    ('rf300', 'qrf'),
+    ('dnn', 'dnn_bnn_full'),
+    ('mlp', 'mlp_bnn_full'),
     ('gauche_rbf', 'het_gp_rbf'),
 ]
 
