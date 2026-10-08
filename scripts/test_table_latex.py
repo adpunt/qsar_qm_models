@@ -214,7 +214,7 @@ def check_long_headers_wrap():
     row still has as many fields as the tabular declares."""
     T_ = T.two_line_header
     assert T_('ECFP4') == 'ECFP4'
-    assert T_('Sort \\& Slice') == 'Sort \\& Slice', 'twelve characters wrapped'
+    assert T_('Gaussian') == 'Gaussian', 'eight characters wrapped'
     got = T_('Replicate spread')
     assert got.endswith('Replicate\\\\spread\\end{tabular}'), got
     got = T_('Student-$t$ ($\\nu$=5)')

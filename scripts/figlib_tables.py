@@ -124,7 +124,7 @@ def latex_safe(value):
 
 
 #: A header longer than this many printed characters is set on two lines.
-HEADER_WRAP_CHARS = 12
+HEADER_WRAP_CHARS = 10
 
 
 def _printed_length(text):
@@ -313,7 +313,10 @@ def t3_variance(anova, output_dir, dataset='qm9', clean=None):
                 frame],
                 ignore_index=True)
     for _, r in frame.iterrows():
-        row = {'Condition': ('None (clean labels)'
+        # 'None', not 'None (clean labels)': the Outcome cell beside it
+        # already says Clean R2, and the longer cell ran the table off the
+        # page in the journal class (2026-10-08).
+        row = {'Condition': ('None'
                              if r['condition'] == '__clean__'
                              else C.condition_label(r['condition'])),
                'Outcome': _short_outcome_label(r, dataset)}
@@ -761,7 +764,7 @@ def _short_outcome_label(r, dataset):
     if response == 'auc_norm':
         return 'AUC$_{norm}$'
     if response == 'r2':
-        return f'R$^2$ at noise level {C.noise_level_text(C.reporting_level(dataset))}'
+        return f'R$^2$ at level {C.noise_level_text(C.reporting_level(dataset))}'
     return str(r.get('outcome', response))
 
 
@@ -1269,10 +1272,10 @@ def t12_condition_cost(summary, output_dir, dataset='qm9',
     # does not report, and it would also read as the number the comparison was
     # made against. The comparison in the last column is made cell by cell,
     # each change against the spread of THAT model on THAT representation.
-    table['Replicate spread'] = [
-        f'{wobble.loc[m].min():.3f}\u2013{wobble.loc[m].max():.3f}'
-        for m in change.index]
-    table['Beats it on'] = [f'{b} of {n}' for b, n in zip(beats, ran)]
+    # THE SPREAD ITSELF IS NOT PRINTED (the author, 2026-10-08: remove a
+    # column if the table does not fit). The count is what the text uses; each
+    # model's spread is `auc_norm_spread` in auc_norm_qm9.csv.
+    table['Exceeds spread'] = [f'{b} of {n}' for b, n in zip(beats, ran)]
     return write(table, output_dir, f'T12_condition_cost_{dataset}_{condition}',
                  f'Change in AUC_norm on moving from '
                  f'{C.condition_label(reference)} to '
