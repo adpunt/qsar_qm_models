@@ -16228,7 +16228,7 @@ paper.tex backup: `paper.tex.before_figure_pass_2026-10-08`.
 **VBLL-alpha (het.) assay depth run: confirmed missing on the cluster, 2026-10-08.** No
 `vbll-full-hetero_*_3cond_stud_outl_lapl_*` directory exists, and every `vbll-full-hetero_*` results
 file has zero Laplace, Student-t and outlier rows. VBLL-beta (het.) has all nine directories.
-Resubmitted with the generator's `resubmit_selected.sh`, nine tasks.
+Submitted as array 13427499 with the generator's `resubmit_selected.sh` (nine tasks), then cancelled the same day: the author is going without them. VBLL-alpha (het.) has Laplace, Student-t and outlier results on QM9 only, and the paper reports it that way.
 
 ### 13.27 THE COMMAND SHEET — what failed, what gets deleted, what gets resubmitted
 
