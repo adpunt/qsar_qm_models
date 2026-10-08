@@ -37,6 +37,9 @@ OUT = os.path.join(ROOT, 'additional_files')
 # `results/paper_figures/` is the superseded NDS output and is searched last so
 # that a figure present in both is taken from v2.
 FIG_SEARCH = [
+    # The 2026-10-08 harvest first, then the one the items read before it.
+    os.path.join(ROOT, 'results', 'decisions_arc_20261008', 'figures'),
+    os.path.join(ROOT, 'results', 'decisions_arc', 'f', 'figures'),
     os.path.join(ROOT, 'results', 'decisions_arc', 'figures'),
     os.path.join(ROOT, 'results', 'decisions_arc_20260916', 'figures'),
     os.path.join(ROOT, 'results', 'paper_figures_v2'),
@@ -70,7 +73,9 @@ def main():
             missing.append(name)
 
     # The folder has to compile without the repository around it.
-    staged = re.sub(r'\\graphicspath\{\{[^}]*\}\}',
+    # Every entry of the path list, not just the first: a list of two or more
+    # entries did not match, and the staged file kept paths into results/.
+    staged = re.sub(r'\\graphicspath\{(?:\{[^}]*\})+\}',
                     r'\\graphicspath{{figures/}}', body)
     if '\\graphicspath' not in staged:
         staged = staged.replace(r'\begin{document}',
