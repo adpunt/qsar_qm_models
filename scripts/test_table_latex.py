@@ -191,7 +191,10 @@ def check_on_disk():
         print(f'  on disk: {TABLES} is not here, so the generated fragments '
               f'are NOT checked. This runs after a harvest.')
         return
-    fragments = sorted(TABLES.glob('*.tex'))
+    # A *_rows.tex is the body of a longtable whose head lives in the
+    # supplementary item, so it has no tabular line to count fields against.
+    fragments = sorted(p for p in TABLES.glob('*.tex')
+                       if not p.name.endswith('_rows.tex'))
     if not fragments:
         print(f'  on disk: no .tex in {TABLES}')
         return
